@@ -1,0 +1,2 @@
+m4trace:/usr/share/autoconf/autoconf/trailer.m4:4: -1- _m4_warn([syntax], [AC_INIT was never used], [])
+m4trace:/usr/share/autoconf/autoconf/trailer.m4:4: -1- _m4_warn([syntax], [AC_OUTPUT was never used], [])
