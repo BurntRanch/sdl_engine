@@ -1,19 +1,26 @@
 #include "error.hpp"
 #include <SDL3/SDL_events.h>
+#include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_oldnames.h>
+#include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_vulkan.h>
+#include <boost/thread/pthread/thread_data.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <engine.hpp>
 #include <fmt/core.h>
 #include <fstream>
+#include <ratio>
 #include <set>
 #include <stdexcept>
 #include <algorithm>
+#include <thread>
 #include <vector>
 #include <vulkan/vulkan_core.h>
+#include <vulkan/vk_enum_string_helper.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
@@ -25,7 +32,7 @@
 
 
 bool checkDeviceExtensionSupport(VkPhysicalDevice device) {
-    uint32_t extensionCount;
+    Uint32 extensionCount;
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
 
     std::vector<VkExtensionProperties> availableExtensions(extensionCount);
@@ -109,6 +116,9 @@ Get ready for loss of braincells!
 Engine::~Engine() {
     fmt::println("Destroying Engine!");
 
+    for (RenderModel &renderModel : m_RenderModels)
+        delete renderModel.model;
+
     if (m_EngineDevice)
         vkDeviceWaitIdle(m_EngineDevice);
 
@@ -176,7 +186,7 @@ VkShaderModule Engine::CreateShaderModule(VkDevice device, const std::vector<cha
     VkShaderModuleCreateInfo shaderCreateInfo = {};
     shaderCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     shaderCreateInfo.codeSize = code.size();
-    shaderCreateInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+    shaderCreateInfo.pCode = reinterpret_cast<const Uint32*>(code.data());
 
     VkShaderModule out = nullptr;
     if (vkCreateShaderModule(device, &shaderCreateInfo, NULL, &out) != VK_SUCCESS)
@@ -190,7 +200,7 @@ SwapChainSupportDetails Engine::QuerySwapChainSupport(VkPhysicalDevice physicalD
 
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &details.capabilities); 
 
-    uint32_t formatCount;
+    Uint32 formatCount;
     vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, nullptr);
 
     if (formatCount != 0) {
@@ -198,7 +208,7 @@ SwapChainSupportDetails Engine::QuerySwapChainSupport(VkPhysicalDevice physicalD
         vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, details.formats.data());
     }
 
-    uint32_t presentModeCount;
+    Uint32 presentModeCount;
     vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr);
 
     if (presentModeCount != 0) {
@@ -209,7 +219,7 @@ SwapChainSupportDetails Engine::QuerySwapChainSupport(VkPhysicalDevice physicalD
     return details;
 }
 
-void Engine::AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &memory) {
+void Engine::AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &memory, bool addToBuffersLists) {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = size;
@@ -218,8 +228,9 @@ void Engine::AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
 
     if (vkCreateBuffer(m_EngineDevice, &bufferInfo, NULL, &buffer) != VK_SUCCESS)
         throw std::runtime_error(engineError::CANT_CREATE_VERTEX_BUFFER);
-
-    m_AllocatedBuffers.push_back(buffer);
+    
+    if (addToBuffersLists)
+        m_AllocatedBuffers.push_back(buffer);
 
     VkMemoryRequirements memoryRequirements;
     vkGetBufferMemoryRequirements(m_EngineDevice, buffer, &memoryRequirements);
@@ -232,7 +243,8 @@ void Engine::AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
     if (vkAllocateMemory(m_EngineDevice, &allocInfo, NULL, &memory) != VK_SUCCESS)
         throw std::runtime_error(engineError::CANT_ALLOCATE_MEMORY);
     
-    m_AllocatedMemory.push_back(memory);
+    if (addToBuffersLists)
+        m_AllocatedMemory.push_back(memory);
 
     vkBindBufferMemory(m_EngineDevice, buffer, memory, 0);
 }
@@ -329,7 +341,8 @@ BufferAndMemory Engine::CreateVertexBuffer(const std::vector<Vertex> &verts) {
     VkDeviceMemory stagingBufferMemory;
 
     VkDeviceSize stagingBufferSize = sizeof(Vertex) * verts.size();
-    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory, false);
 
     // copy the vertex data into the buffer
     void *data;
@@ -346,9 +359,6 @@ BufferAndMemory Engine::CreateVertexBuffer(const std::vector<Vertex> &verts) {
 
     vkDestroyBuffer(m_EngineDevice, stagingBuffer, NULL);
     vkFreeMemory(m_EngineDevice, stagingBufferMemory, NULL);
-
-    m_AllocatedBuffers.erase(std::find(m_AllocatedBuffers.begin(), m_AllocatedBuffers.end(), stagingBuffer));
-    m_AllocatedMemory.erase(std::find(m_AllocatedMemory.begin(), m_AllocatedMemory.end(), stagingBufferMemory));
 
     return {vertexBuffer, vertexBufferMemory};
 }
@@ -386,7 +396,7 @@ BufferAndMemory Engine::CreateIndexBuffer(const std::vector<Uint32> &inds) {
     return {indexBuffer, indexBufferMemory};
 }
 
-TextureBufferAndMemory Engine::LoadTextureFromFile(const string_view &name) {
+TextureBufferAndMemory Engine::LoadTextureFromFile(const std::string &name) {
     int texWidth, texHeight;
     
     stbi_uc *imageData = stbi_load(name.data(), &texWidth, &texHeight, nullptr, STBI_rgb_alpha);
@@ -409,13 +419,10 @@ TextureBufferAndMemory Engine::LoadTextureFromFile(const string_view &name) {
 
     stbi_image_free(imageData);
 
-    m_AllocatedBuffers.push_back(imageStagingBuffer);
-    m_AllocatedMemory.push_back(imageStagingMemory);
-
     return {{imageStagingBuffer, imageStagingMemory}, (Uint32)texWidth, (Uint32)texHeight, (Uint8)4};
 }
 
-TextureImageAndMemory Engine::CreateImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties) {
+TextureImageAndMemory Engine::CreateImage(Uint32 width, Uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties) {
     TextureImageAndMemory textureImageAndMemory;
 
     VkImageCreateInfo imageInfo{};
@@ -612,11 +619,19 @@ Model *Engine::LoadModel(const string &path) {
     return renderModel.model;
 }
 
+void Engine::RegisterUpdateFunction(const std::function<void()> &func) {
+    m_UpdateFunctions.push_back(func);
+}
+
+void Engine::RegisterFixedUpdateFunction(const std::function<void(std::array<bool, 322>)> &func) {
+    m_FixedUpdateFunctions.push_back(func);
+}
+
 void Engine::InitSwapchain() {
     SwapChainSupportDetails swapchainSupport = QuerySwapChainSupport(m_EnginePhysicalDevice, m_EngineSurface);
 
     // this will be used to tell the swapchain how many views we want
-    uint32_t imageCount = swapchainSupport.capabilities.minImageCount + 1;
+    Uint32 imageCount = swapchainSupport.capabilities.minImageCount + 1;
 
     // make sure its valid
     if (swapchainSupport.capabilities.maxImageCount > 0 && imageCount > swapchainSupport.capabilities.maxImageCount) {
@@ -629,7 +644,7 @@ void Engine::InitSwapchain() {
     swapchainCreateInfo.minImageCount = imageCount;
     swapchainCreateInfo.imageFormat = swapchainSupport.formats[0].format;
     swapchainCreateInfo.imageColorSpace = swapchainSupport.formats[0].colorSpace;
-    swapchainCreateInfo.imageExtent = swapchainSupport.capabilities.maxImageExtent;
+    swapchainCreateInfo.imageExtent = {static_cast<Uint32>(m_Settings.Width), static_cast<Uint32>(m_Settings.Height)}; // WHY???? WHY CAN'T VULKAN JUST TELL ME THIS??
     swapchainCreateInfo.imageArrayLayers = 1;
     swapchainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
@@ -652,18 +667,19 @@ void Engine::InitSwapchain() {
     // present mode.
     // this should be one line, but I added support for disabling VSync, or making sure it is on by double-checking that we didn't set it to IMMEDIATE when it shouldn't.
     swapchainCreateInfo.presentMode = swapchainSupport.presentModes[0];
-    if (settings && !settings->VSyncEnabled && std::find(swapchainSupport.presentModes.begin(), swapchainSupport.presentModes.end(), VK_PRESENT_MODE_IMMEDIATE_KHR) != swapchainSupport.presentModes.end())
+    if (!m_Settings.VSyncEnabled)
         swapchainCreateInfo.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
     // make sure we didn't accidentally set VSync off when it should be on.
-    else if (settings && settings->VSyncEnabled && swapchainSupport.presentModes[0] == VK_PRESENT_MODE_IMMEDIATE_KHR)
-        swapchainCreateInfo.presentMode = swapchainSupport.presentModes[1];
+    else if (m_Settings.VSyncEnabled)
+        swapchainCreateInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
 
     swapchainCreateInfo.clipped = VK_TRUE;
     swapchainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
 
     // finally create the swapchain
-    if (vkCreateSwapchainKHR(m_EngineDevice, &swapchainCreateInfo, nullptr, &m_Swapchain) != VK_SUCCESS)
-        throw std::runtime_error(engineError::SWAPCHAIN_INIT_FAILURE);
+    VkResult swapchainCreateResult = vkCreateSwapchainKHR(m_EngineDevice, &swapchainCreateInfo, nullptr, &m_Swapchain);
+    if (swapchainCreateResult != VK_SUCCESS)
+        throw std::runtime_error(fmt::format(engineError::SWAPCHAIN_INIT_FAILURE, string_VkResult(swapchainCreateResult)));
 
     // did we do it? actually???
     SDL_Log("Initialized with errors: %s", SDL_GetError());
@@ -676,7 +692,8 @@ void Engine::InitSwapchain() {
     vkGetSwapchainImagesKHR(m_EngineDevice, m_Swapchain, &m_SwapchainImagesCount, m_SwapchainImages.data());
 
     m_SwapchainImageFormat = swapchainSupport.formats[0].format;
-    m_SwapchainExtent = swapchainSupport.capabilities.currentExtent;
+    // m_SwapchainExtent = swapchainSupport.capabilities.currentExtent;
+    m_SwapchainExtent = {static_cast<Uint32>(m_Settings.Width), static_cast<Uint32>(m_Settings.Height)}; // again.
 
     // we also want to have a VIEW of these images
     // this is like strings vs string_views
@@ -765,7 +782,7 @@ void Engine::InitInstance() {
     appInfo.applicationVersion = VK_MAKE_VERSION(0, 0, 1);
     appInfo.pEngineName = ENGINE_NAME;
     appInfo.engineVersion = ENGINE_VERSION;
-    appInfo.apiVersion = VK_API_VERSION_1_0;
+    appInfo.apiVersion = VK_API_VERSION_1_3;
 
     VkInstanceCreateInfo instanceCreateInfo = {};
     instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -938,7 +955,7 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
 
     VkPipelineDynamicStateCreateInfo dynamicState{};
     dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.dynamicStateCount = static_cast<Uint32>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
 
     auto bindingDescription = getVertexBindingDescription();
@@ -1174,10 +1191,14 @@ void Engine::Init() {
     if (SDL_INIT_STATUS != 0)
         throw std::runtime_error(fmt::format(engineError::FAILED_SDL_INIT, SDL_INIT_STATUS));
 
-    m_EngineWindow = SDL_CreateWindow("Test!", 400, 400, SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_VULKAN);
+    m_EngineWindow = SDL_CreateWindow("Test!", m_Settings.Width, m_Settings.Height, SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_VULKAN);
 
     if (!m_EngineWindow)
-        throw std::runtime_error(engineError::FAILED_WINDOW_INIT);
+        throw std::runtime_error(fmt::format(engineError::FAILED_WINDOW_INIT, SDL_GetError()));
+
+    SDL_SetRelativeMouseMode(true);
+
+    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER, "1");
 
     // lets prepare
     if (SDL_Vulkan_LoadLibrary(NULL) != 0)
@@ -1192,7 +1213,8 @@ void Engine::Init() {
     if (physicalDeviceCount == 0)
         throw std::runtime_error(engineError::NO_VULKAN_DEVICES);
     
-    SDL_Vulkan_CreateSurface(m_EngineWindow, m_EngineVulkanInstance, NULL, &m_EngineSurface);
+    if (SDL_Vulkan_CreateSurface(m_EngineWindow, m_EngineVulkanInstance, NULL, &m_EngineSurface) != SDL_TRUE)
+        throw std::runtime_error(engineError::SURFACE_CREATION_FAILURE);
 
     // now we can get a list of physical devices
     std::vector<VkPhysicalDevice> physicalDevices(physicalDeviceCount);
@@ -1444,6 +1466,19 @@ void Engine::Init() {
             vkCreateSemaphore(m_EngineDevice, &semaphoreCreateInfo, NULL, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS ||
                 vkCreateFence(m_EngineDevice, &fenceCreateInfo,     NULL,               &m_InFlightFences[i]) != VK_SUCCESS)
             throw std::runtime_error(engineError::SYNC_OBJECTS_CREATION_FAILURE);
+
+    std::fill(m_KeyMap.begin(), m_KeyMap.end(), false);
+}
+
+void Engine::CallFixedUpdateFunctions(bool *shouldQuitFlag) {
+    using namespace std::chrono;
+    using namespace std::this_thread;
+
+    while (!(*shouldQuitFlag)) {
+        sleep_for(milliseconds(16));
+        for (auto &fixedUpdateFunction : m_FixedUpdateFunctions)
+            fixedUpdateFunction(m_KeyMap);
+    }
 }
 
 void Engine::Start() {
@@ -1455,29 +1490,51 @@ void Engine::Start() {
     bool shouldQuit = false;
     Uint32 currentFrameIndex = 0;
 
+    // start the fixed update loop
+    boost::thread fixedUpdateThread = boost::thread(&Engine::CallFixedUpdateFunctions, this, &shouldQuit);
+
     using namespace std::chrono;
 
     high_resolution_clock::time_point lastFrameTime, frameTime;
+    high_resolution_clock::time_point afterFenceTime, afterAcquireImageResultTime, afterRenderInitTime, afterRenderTime, postRenderTime;
 
     lastFrameTime = high_resolution_clock::now();
 
     while (!shouldQuit) {
         SDL_Event event;
 
-        while (SDL_PollEvent(&event))
+        while (SDL_PollEvent(&event)) {
             if (QuitEventCheck(event))
                 shouldQuit = true;
+            
+            switch (event.type) {
+                case SDL_EVENT_KEY_DOWN:
+                    m_KeyMap[event.key.keysym.scancode] = true;
+                    break;
+                case SDL_EVENT_KEY_UP:
+                    m_KeyMap[event.key.keysym.scancode] = false;
+                    break;
+            }
+        }
 
-        frameTime = high_resolution_clock::now();
+        if (m_Settings.ReportFPS) {
+            frameTime = high_resolution_clock::now();
 
-        double deltaTime = (duration_cast<duration<double>>(frameTime - lastFrameTime).count());
+            double deltaTime = (duration_cast<duration<double>>(frameTime - lastFrameTime).count());
 
-        SDL_SetWindowTitle(m_EngineWindow, fmt::format("Test! | {:.0f} FPS", 1.0/deltaTime).c_str());
+            fmt::println("{:.0f} FPS, Render Time: {:.5f}s", 1.0/deltaTime, deltaTime);
 
-        lastFrameTime = frameTime;
+            lastFrameTime = frameTime;
+        }
 
         // we got (MAX_FRAMES_IN_FLIGHT) "slots" to use, we can write frames as long as the current frame slot we're using isn't occupied.
         vkWaitForFences(m_EngineDevice, 1, &m_InFlightFences[currentFrameIndex], true, UINT64_MAX);
+
+#ifdef LOG_FRAME
+        afterFenceTime = high_resolution_clock::now();
+
+        fmt::println("Time spent waiting for fences: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterFenceTime - frameTime).count()));
+#endif
 
         Uint32 imageIndex = 0;
         VkResult acquireNextImageResult = vkAcquireNextImageKHR(m_EngineDevice, m_Swapchain, UINT64_MAX, m_ImageAvailableSemaphores[currentFrameIndex], VK_NULL_HANDLE, &imageIndex);
@@ -1492,6 +1549,12 @@ void Engine::Start() {
             continue;
         } else if (acquireNextImageResult != VK_SUCCESS)
             throw std::runtime_error(engineError::CANT_ACQUIRE_NEXT_IMAGE);
+
+#ifdef LOG_FRAME
+        afterAcquireImageResultTime = high_resolution_clock::now();
+
+        fmt::println("Time spent acquiring image result: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterAcquireImageResultTime - afterFenceTime).count()));
+#endif
 
         // "ight im available, if i wasn't already"
         vkResetFences(m_EngineDevice, 1, &m_InFlightFences[currentFrameIndex]);
@@ -1529,10 +1592,21 @@ void Engine::Start() {
 
         vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_Scissor);
 
+        for (auto &updateFunction : m_UpdateFunctions)
+            updateFunction();
+
+#ifdef LOG_FRAME
+        afterRenderInitTime = high_resolution_clock::now();
+
+        fmt::println("Time spent initializing render and calling update functions: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderInitTime - afterAcquireImageResultTime).count()));
+#endif
+
+        glm::mat4 viewMatrix = m_PrimaryCamera->GetViewMatrix();
+
         for (RenderModel &renderModel : m_RenderModels) {
-            renderModel.matricesUBO.modelMatrix = glm::translate(glm::mat4(1.0f), renderModel.model->Position);
-            //renderModel.matricesUBO.modelMatrix = glm::rotate(renderModel.matricesUBO.modelMatrix, glm::radians(0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-            renderModel.matricesUBO.viewMatrix = glm::lookAt(glm::vec3(1.0f, 1.0f, 1.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+            renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
+
+            renderModel.matricesUBO.viewMatrix = viewMatrix;
             renderModel.matricesUBO.projectionMatrix = glm::perspective(glm::radians(90.0f), m_SwapchainExtent.width / (float) m_SwapchainExtent.height, 0.1f, 10.0f);
 
             // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
@@ -1549,6 +1623,12 @@ void Engine::Start() {
             vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, renderPass.graphicsPipeline.layout, 0, 1, &renderModel.descriptorSet, 0, nullptr);
             vkCmdDrawIndexed(m_CommandBuffers[currentFrameIndex], renderModel.indices.size(), 1, 0, 0, 0);
         }
+
+#ifdef LOG_FRAME
+        afterRenderTime = high_resolution_clock::now();
+
+        fmt::println("Time spent rendering: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderTime - afterRenderInitTime).count()));
+#endif
 
         // // SECOND SUBPASS
         // vkCmdNextSubpass(m_CommandBuffers[current_frame], VK_SUBPASS_CONTENTS_INLINE);
@@ -1589,7 +1669,7 @@ void Engine::Start() {
         if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFences[currentFrameIndex]) != VK_SUCCESS)
             throw std::runtime_error(engineError::QUEUE_SUBMIT_FAILURE);
 
-        // we did allat, now we should present the frame.
+        // we finished, now we should present the frame.
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
@@ -1606,5 +1686,13 @@ void Engine::Start() {
         vkQueuePresentKHR(m_GraphicsQueue, &presentInfo);
 
         currentFrameIndex = (currentFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+
+#ifdef LOG_FRAME
+        postRenderTime = high_resolution_clock::now();
+
+        fmt::println("Time spent post render: {:.5f}ms", (duration_cast<duration<double, std::milli>>(postRenderTime - afterRenderTime).count()));
+#endif
     }
+
+    fixedUpdateThread.join();
 }

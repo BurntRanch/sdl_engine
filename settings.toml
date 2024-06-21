@@ -1,2 +1,12 @@
 [video]
-VSyncEnabled = false
+VSyncEnabled = true
+Width = 200
+Height = 200
+
+[profile]
+ReportFPS = true
+
+[input]
+MouseSensitivity = 0.1
+InvertVertical = false
+InvertHorizontal = false

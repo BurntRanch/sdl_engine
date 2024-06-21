@@ -9,4 +9,12 @@ Settings::Settings(const string_view &fileName) {
     }
 
     VSyncEnabled = GetValue("video.VSyncEnabled", false);
+    Width = GetValue("video.Width", 400);
+    Height = GetValue("video.Height", 400);
+
+    ReportFPS = GetValue("profile.ReportFPS", true);
+
+    MouseSensitivity = GetValue("input.MouseSensitivity", 0.1f);
+    InvertVertical = GetValue("input.InvertVertical", false);
+    InvertHorizontal = GetValue("input.InvertHorizontal", false);
 }

@@ -8,7 +8,17 @@ using std::string_view;
 
 class Settings {
 public:
+// Video
     bool VSyncEnabled;
+    int Width, Height;
+
+// Profiling information
+    bool ReportFPS;
+
+// Input
+    float MouseSensitivity;
+    bool InvertVertical;
+    bool InvertHorizontal;
 
     Settings(const string_view &fileName);
 

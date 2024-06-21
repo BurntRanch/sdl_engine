@@ -84,14 +84,23 @@ class Model
 public:
     vector<Mesh> meshes;
 
-    glm::vec3 Position;
-    glm::vec3 Rotation;
-
     Model(const string &path, glm::vec3 position = glm::vec3(0, 0, 0), glm::vec3 rotation = glm::vec3(0, 0, 0));
+
+    void SetPosition(glm::vec3 pos);
+    glm::vec3 GetPosition();
+    void SetRotation(glm::vec3 rot);
+    glm::vec3 GetRotation();
+
+    glm::mat4 GetModelMatrix();
 private:
     // model data
     //vector<Texture> textures_loaded;
-    string directory;
+    string m_Directory;
+
+    glm::vec3 m_Position;
+    glm::vec3 m_Rotation;
+    glm::mat4 m_ModelMatrix;
+    bool m_NeedsUpdate = false;   // flag, set to true when Position and Rotation are updated, set to false when GetModelMatrix is called.
 
     void loadModel(string path);
 

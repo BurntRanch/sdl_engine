@@ -5,14 +5,14 @@ using std::string;
 
 namespace engineError {
     inline string FAILED_SDL_INIT = "Failed to initialize SDL! (code: {})";
-    inline string FAILED_WINDOW_INIT = "Failed to create window!";
+    inline string FAILED_WINDOW_INIT = "Failed to create window! (error: {})";
     inline string FAILED_VULKAN_LOAD = "Failed to load vulkan!";
     inline string FAILED_VULKAN_EXTS = "Failed to get extensions for vulkan!";
     inline string NO_VULKAN_DEVICES = "Failed to get vulkan capable devices!";
     inline string NO_QUEUE_FAMILIES = "Failed to get queue families!";
     inline string CANT_CREATE_DEVICE = "Failed to create logical device!";
     inline string NO_CAPABLE_CARD = "Failed to find a capable card!";
-    inline string SWAPCHAIN_INIT_FAILURE = "Failed to create a swapchain!";
+    inline string SWAPCHAIN_INIT_FAILURE = "Failed to create a swapchain! (Error: {})";
     inline string IMAGE_VIEW_CREATION_FAILURE = "Failed to create an image view!";
     inline string RENDERPASS_CREATION_FAILURE = "Failed to create a render pass!";
     inline string PIPELINE_CREATION_FAILURE = "Failed to create a graphics pipeline!";
@@ -40,6 +40,7 @@ namespace engineError {
     inline string UNSUPPORTED_FORMAT = "Attempted to convert unsupported VkFormat to channel count!";
     inline string CANT_FIND_ANY_FORMAT = "Tried to find best format, but none can be used!";
     inline string RENDERPASS_PIPELINE_EXISTS = "Tried to create a graphics pipeline for a renderpass that already has a graphics pipeline!";
+    inline string SURFACE_CREATION_FAILURE = "Failed to create a surface!";
 };
 
 #endif

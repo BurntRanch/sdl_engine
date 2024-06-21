@@ -5,8 +5,9 @@
 Model::Model(const string &path, glm::vec3 position, glm::vec3 rotation)
 {
     loadModel(path);
-    Position = position;
-    Rotation = rotation;
+    
+    SetPosition(position);
+    SetRotation(rotation);
 }
 
 void Model::loadModel(string path)
@@ -17,7 +18,7 @@ void Model::loadModel(string path)
     if(!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) 
         throw std::runtime_error(fmt::format("Couldn't load models from assimp: {}", import.GetErrorString()));
     
-    directory = path.substr(0, path.find_last_of('/'));
+    m_Directory = path.substr(0, path.find_last_of('/'));
 
     processNode(scene->mRootNode, scene);
 }
@@ -134,6 +135,41 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
     }
 
     return Mesh(vertices, indices, texturePaths/*, shininess, roughness, metallic*/);
+}
+
+void Model::SetPosition(glm::vec3 pos) {
+    m_Position = pos;
+
+    m_NeedsUpdate = true;
+}
+
+glm::vec3 Model::GetPosition() {
+    return m_Position;
+}
+
+void Model::SetRotation(glm::vec3 rot) {
+    m_Rotation = rot;
+
+    m_NeedsUpdate = true;
+}
+
+glm::vec3 Model::GetRotation() {
+    return m_Rotation;
+}
+
+glm::mat4 Model::GetModelMatrix() {
+    if (!m_NeedsUpdate)
+        return m_ModelMatrix;
+
+    // Update the model matrix with the position/rotation.
+    m_ModelMatrix = glm::translate(glm::mat4(1.0f), m_Position);
+    m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(m_Rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
+    m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(m_Rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
+    m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(m_Rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
+
+    m_NeedsUpdate = false;
+
+    return m_ModelMatrix;
 }
 
 //Texture Model::loadDefaultTexture(string typeName) {

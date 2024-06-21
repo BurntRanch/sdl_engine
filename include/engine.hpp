@@ -1,9 +1,13 @@
 #ifndef ENGINE_HPP
 #define ENGINE_HPP
 
+#include "camera.hpp"
 #ifndef VK_EXT_DEBUG_REPORT_EXTENSION_NAME
 #define VK_EXT_DEBUG_REPORT_EXTENSION_NAME "VK_EXT_debug_report"
 #endif
+
+#include <functional>
+#include <boost/thread.hpp>
 
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_init.h>
@@ -43,7 +47,7 @@ const std::vector<const char *> requiredInstanceExtensions = {
 };
 
 const std::vector<const char *> requiredLayerExtensions {
-    "VK_LAYER_KHRONOS_validation",
+//    "VK_LAYER_KHRONOS_validation",
 };
 
 struct SwapChainSupportDetails {
@@ -111,15 +115,21 @@ struct RenderPass {
 
 class Engine {
 public:
-    Settings *settings = nullptr;
-
+    Engine(Settings &settings, Camera *primaryCam) : m_PrimaryCamera(primaryCam), m_Settings(settings) {};
     ~Engine();
 
     Model *LoadModel(const string &path);   // this is the first function created to be used by main.cpp
+    void RegisterUpdateFunction(const std::function<void()> &func);
+    // Fixed Updates are called 60 times a second.
+    void RegisterFixedUpdateFunction(const std::function<void(std::array<bool, 322>)> &func);
+
+    void SetPrimaryCamera(Camera &cam);
 
     void  Init();
     void  Start();
 private:
+    void CallFixedUpdateFunctions(bool *shouldQuitFlag);
+
     void InitInstance();
     void InitSwapchain();
     void InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageView);
@@ -133,7 +143,7 @@ private:
     VkShaderModule CreateShaderModule(VkDevice device, const std::vector<char> &code);
     Uint32 FindMemoryType(Uint32 typeFilter, VkMemoryPropertyFlags properties);
 
-    void AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &memory);
+    void AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &memory, bool addToBuffersLists = true);
     void CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size);
 
     std::vector<TextureImageAndMemory> LoadTexturesFromMesh(Mesh &mesh);
@@ -147,8 +157,8 @@ private:
     void CopyBufferToImage(TextureBufferAndMemory textureBuffer, VkImage image);
     void ChangeImageLayout(VkImage image, VkFormat format, VkImageLayout oldImageLayout, VkImageLayout newImageLayout);
 
-    TextureBufferAndMemory LoadTextureFromFile(const string_view &name);
-    TextureImageAndMemory CreateImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
+    TextureBufferAndMemory LoadTextureFromFile(const std::string &name);
+    TextureImageAndMemory CreateImage(Uint32 width, Uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
     VkImageView CreateImageView(TextureImageAndMemory &imageAndMemory, VkFormat format, VkImageAspectFlags aspectMask);
     VkSampler CreateSampler(float maxAnisotropy);
 
@@ -161,6 +171,10 @@ private:
         );};
 
     inline bool HasStencilAttachment(VkFormat format) {return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;};
+
+    /* Cameras, high-level stuff. */
+    Camera *m_PrimaryCamera;
+    Settings m_Settings;
 
     SDL_Window *m_EngineWindow = nullptr;
 
@@ -201,12 +215,20 @@ private:
     VkViewport m_Viewport;
     VkRect2D m_Scissor;
 
+    // update events
+    std::vector<std::function<void()>> m_UpdateFunctions;
+    std::vector<std::function<void(std::array<bool, 322>)>> m_FixedUpdateFunctions;
+
+    // keymap, array of 322 booleans, should be indexed by the keycode (e.g. SDLK_UP, SDLK_A), returns whether the key had been pressed.
+    std::array<bool, 322> m_KeyMap;
+
     // memory cleanup related, will not include any buffer that is already above (e.g. m_VertexBuffer)
     std::vector<VkImage> m_AllocatedImages;
     std::vector<VkBuffer> m_AllocatedBuffers;
     std::vector<VkDeviceMemory> m_AllocatedMemory;
     std::vector<VkImageView> m_CreatedImageViews;
     std::vector<VkSampler> m_CreatedSamplers;
+
 };
 
 #endif
