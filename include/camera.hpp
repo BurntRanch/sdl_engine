@@ -1,5 +1,9 @@
 #ifndef CAMERA_HPP
 #define CAMERA_HPP
+
+#define CAMERA_NEAR 0.1f
+#define CAMERA_FAR 100.0f
+
 // From learnopengl.com
 
 #include <glm/glm.hpp>
@@ -20,7 +24,7 @@ const float YAW         =  0.0f;
 const float PITCH       =  0.0f;
 const float SPEED       =  5.0f;
 const float SENSITIVITY =  1.0f;
-const float ZOOM        =  45.0f;
+const float FIELDOFVIEW =  90.0f;
 
 
 // An abstract camera class that processes input and calculates the corresponding Euler Angles, Vectors and Matrices for use in OpenGL
@@ -39,7 +43,7 @@ public:
     // camera options
     float MovementSpeed;
     float MouseSensitivity;
-    float Zoom;
+    float FOV;
 
     // constructor with vectors
     Camera(glm::vec3 position = glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3 up = glm::vec3(0.0f, 0.0f, 1.0f), float yaw = YAW, float pitch = PITCH);

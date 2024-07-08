@@ -3,6 +3,8 @@
 #include <string_view>
 #include <toml++/toml.hpp>
 #include <fmt/core.h>
+#include <SDL3/SDL_stdinc.h>
+#include "camera.hpp"
 
 using std::string_view;
 
@@ -10,7 +12,10 @@ class Settings {
 public:
 // Video
     bool VSyncEnabled;
-    int Width, Height;
+    Uint32 RenderWidth, RenderHeight;
+    Uint32 DisplayWidth, DisplayHeight;
+    bool Fullscreen, IgnoreRenderResolution;
+    float FieldOfView;
 
 // Profiling information
     bool ReportFPS;

@@ -57,6 +57,22 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
         vector.y = mesh->mVertices[i].y;
         vector.z = mesh->mVertices[i].z;
         vertex.Position = vector;
+
+        if (vector.x > m_BoundingBox[0].x)
+            m_BoundingBox[0].x = vector.x;
+        if (vector.x < m_BoundingBox[1].x)
+            m_BoundingBox[1].x = vector.x;
+
+        if (vector.y > m_BoundingBox[0].y)
+            m_BoundingBox[0].y = vector.y;
+        if (vector.y < m_BoundingBox[1].y)
+            m_BoundingBox[1].y = vector.y;
+
+        if (vector.z > m_BoundingBox[0].z)
+            m_BoundingBox[0].z = vector.z;
+        if (vector.z < m_BoundingBox[1].z)
+            m_BoundingBox[1].z = vector.z;
+
         // normals
         // if (mesh->HasNormals())
         // {
@@ -155,6 +171,10 @@ void Model::SetRotation(glm::vec3 rot) {
 
 glm::vec3 Model::GetRotation() {
     return m_Rotation;
+}
+
+std::array<glm::vec3, 2> Model::GetBoundingBox() {
+    return m_BoundingBox;
 }
 
 glm::mat4 Model::GetModelMatrix() {

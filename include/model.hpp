@@ -91,6 +91,9 @@ public:
     void SetRotation(glm::vec3 rot);
     glm::vec3 GetRotation();
 
+    std::array<glm::vec3, 2> GetBoundingBox();
+
+
     glm::mat4 GetModelMatrix();
 private:
     // model data
@@ -99,6 +102,11 @@ private:
 
     glm::vec3 m_Position;
     glm::vec3 m_Rotation;
+
+    // [0] = higher
+    // [1] = lower
+    std::array<glm::vec3, 2> m_BoundingBox;
+
     glm::mat4 m_ModelMatrix;
     bool m_NeedsUpdate = false;   // flag, set to true when Position and Rotation are updated, set to false when GetModelMatrix is called.
 

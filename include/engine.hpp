@@ -39,6 +39,14 @@
 
 #include <vector>
 
+#define ENGINE_VERSION VK_MAKE_VERSION(0, 0, 1)
+#define ENGINE_NAME "BurntEngine Vulkan"
+
+#define ENGINE_FIXED_UPDATERATE 60.0f
+#define ENGINE_FIXED_UPDATE_DELTATIME 1.0f/ENGINE_FIXED_UPDATERATE
+
+#define MAX_FRAMES_IN_FLIGHT 2
+
 const std::vector<const char *> requiredDeviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 };
@@ -47,7 +55,7 @@ const std::vector<const char *> requiredInstanceExtensions = {
 };
 
 const std::vector<const char *> requiredLayerExtensions {
-//    "VK_LAYER_KHRONOS_validation",
+    "VK_LAYER_KHRONOS_validation",
 };
 
 struct SwapChainSupportDetails {
@@ -134,9 +142,9 @@ private:
     void InitSwapchain();
     void InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageView);
     VkImageView CreateDepthImage();
-    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, RenderPass &renderPass, Uint32 subpassIndex, VkFrontFace frontFace, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {});
-    VkRenderPass CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount);
-    VkFramebuffer CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkImageView depthImageView);
+    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, RenderPass &renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkExtent2D resolution, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {});
+    VkRenderPass CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, bool shouldContainDepthImage = true);
+    VkFramebuffer CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkExtent2D resolution, VkImageView depthImageView = nullptr);
     bool QuitEventCheck(SDL_Event &event);
 
     SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface);
@@ -192,14 +200,26 @@ private:
 
     std::vector<VkCommandBuffer> m_CommandBuffers;
 
-    VkDescriptorSetLayout m_DescriptorSetLayout = nullptr;
-    VkDescriptorPool m_DescriptorPool = nullptr;
+    VkDescriptorSetLayout m_RenderDescriptorSetLayout = nullptr;
+    VkDescriptorPool m_RenderDescriptorPool = nullptr;
+
+    VkDescriptorSetLayout m_UpscaleDescriptorSetLayout = nullptr;
+    VkDescriptorPool m_UpscaleDescriptorPool = nullptr;
+    VkDescriptorSet m_UpscaleDescriptorSet = nullptr;
+    VkSampler m_UpscaleRenderSampler = nullptr;
+
+    BufferAndMemory m_FullscreenQuadVertexBuffer;
 
     std::vector<RenderModel> m_RenderModels;    // to be used in the loop.
 
     VkSwapchainKHR m_Swapchain = nullptr;
     std::vector<RenderPass> m_RenderPasses;
     std::vector<PipelineAndLayout> m_PipelineAndLayouts;
+
+    RenderPass m_MainRenderPass;
+    VkFramebuffer m_RenderFramebuffer;
+
+    RenderPass m_UpscaleRenderPass;   // This uses the swapchain framebuffers
 
     std::vector<VkImage> m_SwapchainImages;
     std::vector<VkImageView> m_SwapchainImageViews;
@@ -219,7 +239,7 @@ private:
     std::vector<std::function<void()>> m_UpdateFunctions;
     std::vector<std::function<void(std::array<bool, 322>)>> m_FixedUpdateFunctions;
 
-    // keymap, array of 322 booleans, should be indexed by the keycode (e.g. SDLK_UP, SDLK_A), returns whether the key had been pressed.
+    // keymap, array of 322 booleans, should be indexed by the scancode (e.g. SDL_SCANCODE_UP, SDL_SCANCODE_A), returns whether the key had been pressed.
     std::array<bool, 322> m_KeyMap;
 
     // memory cleanup related, will not include any buffer that is already above (e.g. m_VertexBuffer)

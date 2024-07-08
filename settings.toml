@@ -1,10 +1,15 @@
 [video]
 VSyncEnabled = true
-Width = 200
-Height = 200
+RenderWidth = 800
+RenderHeight = 600
+DisplayWidth = 800
+DisplayHeight = 600
+Fullscreen = false
+IgnoreRenderResolution = false     # If IgnoreRenderResolution is true, it will ignore your RenderWidth and RenderHeight preferences, if false, it will enforce your RenderWidth and RenderHeight preferences (which may cause stretching).
+FieldOfView = 90
 
 [profile]
-ReportFPS = true
+ReportFPS = false
 
 [input]
 MouseSensitivity = 0.1

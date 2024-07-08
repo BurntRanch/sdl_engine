@@ -25,11 +25,6 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
 
-#define ENGINE_VERSION VK_MAKE_VERSION(0, 0, 1)
-#define ENGINE_NAME "BurntEngine Vulkan"
-
-#define MAX_FRAMES_IN_FLIGHT 2
-
 
 bool checkDeviceExtensionSupport(VkPhysicalDevice device) {
     Uint32 extensionCount;
@@ -160,11 +155,11 @@ Engine::~Engine() {
     for (size_t i = 0; i < m_SwapchainImageViews.size(); i++)
         vkDestroyImageView(m_EngineDevice, m_SwapchainImageViews[i], NULL);
 
-    if (m_DescriptorPool)
-        vkDestroyDescriptorPool(m_EngineDevice, m_DescriptorPool, NULL);
+    if (m_RenderDescriptorPool)
+        vkDestroyDescriptorPool(m_EngineDevice, m_RenderDescriptorPool, NULL);
 
-    if (m_DescriptorSetLayout)
-        vkDestroyDescriptorSetLayout(m_EngineDevice, m_DescriptorSetLayout, NULL);
+    if (m_RenderDescriptorSetLayout)
+        vkDestroyDescriptorSetLayout(m_EngineDevice, m_RenderDescriptorSetLayout, NULL);
 
     if (m_CommandPool)
         vkDestroyCommandPool(m_EngineDevice, m_CommandPool, NULL);
@@ -250,12 +245,6 @@ void Engine::AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
 }
 
 void Engine::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size) {
-    VkCommandBufferAllocateInfo allocateInfo{};
-    allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocateInfo.commandPool = m_CommandPool;
-    allocateInfo.commandBufferCount = 1;
-
     VkCommandBuffer commandBuffer = BeginSingleTimeCommands();
 
     VkBufferCopy bufferCopy{};
@@ -572,10 +561,10 @@ Model *Engine::LoadModel(const string &path) {
 
     vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOMappedMemory);
 
-    std::vector<VkDescriptorSetLayout> layouts(1, m_DescriptorSetLayout);
+    std::vector<VkDescriptorSetLayout> layouts(1, m_RenderDescriptorSetLayout);
     VkDescriptorSetAllocateInfo allocInfo = {};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_DescriptorPool;
+    allocInfo.descriptorPool = m_RenderDescriptorPool;
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = layouts.data();
 
@@ -644,7 +633,14 @@ void Engine::InitSwapchain() {
     swapchainCreateInfo.minImageCount = imageCount;
     swapchainCreateInfo.imageFormat = swapchainSupport.formats[0].format;
     swapchainCreateInfo.imageColorSpace = swapchainSupport.formats[0].colorSpace;
-    swapchainCreateInfo.imageExtent = {static_cast<Uint32>(m_Settings.Width), static_cast<Uint32>(m_Settings.Height)}; // WHY???? WHY CAN'T VULKAN JUST TELL ME THIS??
+
+    m_Settings.DisplayWidth = std::max(swapchainSupport.capabilities.minImageExtent.width, m_Settings.DisplayWidth);
+    m_Settings.DisplayHeight = std::max(swapchainSupport.capabilities.minImageExtent.height, m_Settings.DisplayHeight);
+    m_Settings.DisplayWidth = std::min(swapchainSupport.capabilities.maxImageExtent.width, m_Settings.DisplayWidth);
+    m_Settings.DisplayHeight = std::min(swapchainSupport.capabilities.maxImageExtent.height, m_Settings.DisplayHeight);
+
+    swapchainCreateInfo.imageExtent = {static_cast<Uint32>(m_Settings.DisplayWidth), static_cast<Uint32>(m_Settings.DisplayHeight)}; // WHY???? WHY CAN'T VULKAN JUST TELL ME THIS??
+
     swapchainCreateInfo.imageArrayLayers = 1;
     swapchainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
@@ -693,7 +689,7 @@ void Engine::InitSwapchain() {
 
     m_SwapchainImageFormat = swapchainSupport.formats[0].format;
     // m_SwapchainExtent = swapchainSupport.capabilities.currentExtent;
-    m_SwapchainExtent = {static_cast<Uint32>(m_Settings.Width), static_cast<Uint32>(m_Settings.Height)}; // again.
+    m_SwapchainExtent = {static_cast<Uint32>(m_Settings.DisplayWidth), static_cast<Uint32>(m_Settings.DisplayHeight)}; // again.
 
     // we also want to have a VIEW of these images
     // this is like strings vs string_views
@@ -729,13 +725,13 @@ void Engine::InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageVie
     m_SwapchainFramebuffers.resize(m_SwapchainImageViews.size());
 
     for (size_t i = 0; i < m_SwapchainFramebuffers.size(); i++)
-        m_SwapchainFramebuffers[i] = CreateFramebuffer(renderPass, m_SwapchainImageViews[i], depthImageView);
+        m_SwapchainFramebuffers[i] = CreateFramebuffer(renderPass, m_SwapchainImageViews[i], {m_Settings.RenderWidth, m_Settings.RenderHeight}, depthImageView);
 }
 
 VkImageView Engine::CreateDepthImage() {
     VkFormat depthFormat = FindDepthFormat();
 
-    TextureImageAndMemory depthImageAndMemory = CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 
+    TextureImageAndMemory depthImageAndMemory = CreateImage(m_Settings.RenderWidth, m_Settings.RenderHeight, 
                         depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkImageView depthImageView = CreateImageView(depthImageAndMemory, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -910,7 +906,7 @@ void Engine::ChangeImageLayout(VkImage image, VkFormat format, VkImageLayout old
 /* Creates a Vulkan graphics pipeline, shaderName will be used as a part of the path.
  * Sanitization is the job of the caller.
  */
-PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, RenderPass &renderPass, Uint32 subpassIndex, VkFrontFace frontFace, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts) {
+PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, RenderPass &renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkExtent2D resolution, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts) {
     if (renderPass.graphicsPipeline.pipeline)
         throw std::runtime_error(engineError::RENDERPASS_PIPELINE_EXISTS);
 
@@ -975,13 +971,13 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
 
     m_Viewport.x = 0.0f;
     m_Viewport.y = 0.0f;
-    m_Viewport.width = (float) m_SwapchainExtent.width;
-    m_Viewport.height = (float) m_SwapchainExtent.height;
+    m_Viewport.width = (float) resolution.width;
+    m_Viewport.height = (float) resolution.height;
     m_Viewport.minDepth = 0.0f;
     m_Viewport.maxDepth = 1.0f;
 
     m_Scissor.offset = {0, 0};
-    m_Scissor.extent = m_SwapchainExtent;
+    m_Scissor.extent = resolution;
 
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -1081,9 +1077,9 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
     return pipelineAndLayout;
 }
 
-VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount) {
+VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, bool shouldContainDepthImage) {
     VkAttachmentDescription colorAttachment{};
-    colorAttachment.format = m_SwapchainImageFormat;
+    colorAttachment.format = imageFormat;
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     colorAttachment.loadOp = loadOp;
     colorAttachment.storeOp = storeOp;
@@ -1115,7 +1111,8 @@ VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentSto
     for (size_t i = 0; i < subpassCount; i++) {
         VkSubpassDescription subpass{};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.pDepthStencilAttachment = &depthAttachmentRef;
+        if (shouldContainDepthImage)
+            subpass.pDepthStencilAttachment = &depthAttachmentRef;
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &colorAttachmentRef;
 
@@ -1141,7 +1138,7 @@ VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentSto
 
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = attachments.size();
+    renderPassInfo.attachmentCount = 1 + shouldContainDepthImage;
     renderPassInfo.pAttachments = attachments.data();
     renderPassInfo.subpassCount = subpassCount;
     renderPassInfo.pSubpasses = subpasses.data();
@@ -1160,16 +1157,16 @@ VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentSto
     return renderPass;
 }
 
-VkFramebuffer Engine::CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkImageView depthImageView) {
+VkFramebuffer Engine::CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkExtent2D resolution, VkImageView depthImageView) {
     std::array<VkImageView, 2> attachments = {imageView, depthImageView};
 
     VkFramebufferCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     createInfo.renderPass = renderPass;
-    createInfo.attachmentCount = attachments.size();
+    createInfo.attachmentCount = 1 + (depthImageView != nullptr);   // Bools get converted to ints, This will be 1 if depthImageView == nullptr, 2 if it isn't.
     createInfo.pAttachments = attachments.data();
-    createInfo.width = m_SwapchainExtent.width;
-    createInfo.height = m_SwapchainExtent.height;
+    createInfo.width = resolution.width;
+    createInfo.height = resolution.height;
     createInfo.layers = 1;
 
     VkFramebuffer framebuffer;
@@ -1191,10 +1188,22 @@ void Engine::Init() {
     if (SDL_INIT_STATUS != 0)
         throw std::runtime_error(fmt::format(engineError::FAILED_SDL_INIT, SDL_INIT_STATUS));
 
-    m_EngineWindow = SDL_CreateWindow("Test!", m_Settings.Width, m_Settings.Height, SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_VULKAN);
+    m_EngineWindow = SDL_CreateWindow("Test!", m_Settings.DisplayWidth, m_Settings.DisplayHeight, SDL_WINDOW_VULKAN | (m_Settings.Fullscreen & SDL_WINDOW_FULLSCREEN));
 
     if (!m_EngineWindow)
         throw std::runtime_error(fmt::format(engineError::FAILED_WINDOW_INIT, SDL_GetError()));
+
+    if (m_Settings.Fullscreen && m_Settings.IgnoreRenderResolution) {
+        SDL_DisplayMode DM = *SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(m_EngineWindow));
+        m_Settings.DisplayWidth = DM.w;
+        m_Settings.DisplayHeight = DM.h;
+
+        m_Settings.RenderWidth = DM.w;
+        m_Settings.RenderHeight = DM.h;
+    } else if (m_Settings.IgnoreRenderResolution) {
+        m_Settings.RenderWidth = m_Settings.DisplayWidth;
+        m_Settings.RenderHeight = m_Settings.DisplayHeight;
+    }
 
     SDL_SetRelativeMouseMode(true);
 
@@ -1305,15 +1314,17 @@ void Engine::Init() {
 
     InitSwapchain();
 
-    RenderPass mainRenderPass;
+    VkFormat renderFormat = getBestFormatFromChannels(4);
 
-    mainRenderPass.vulkanRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1);
+    m_MainRenderPass.vulkanRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1, renderFormat);
+    m_UpscaleRenderPass.vulkanRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1, m_SwapchainImageFormat, false);
 
     VkFormat depthFormat = FindDepthFormat();
 
     VkImageView depthImageView = CreateDepthImage();
 
-    InitFramebuffers(mainRenderPass.vulkanRenderPass, depthImageView);
+    TextureImageAndMemory renderImage = CreateImage(m_Settings.RenderWidth, m_Settings.RenderHeight, renderFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkImageView renderImageView = CreateImageView(renderImage, renderFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 
     // command pools are basically lists of commands, they are recorded and sent to the GPU i think
     VkCommandPoolCreateInfo commandPoolCreateInfo{};
@@ -1323,6 +1334,19 @@ void Engine::Init() {
 
     if (vkCreateCommandPool(m_EngineDevice, &commandPoolCreateInfo, NULL, &m_CommandPool) != VK_SUCCESS)
         throw std::runtime_error(engineError::COMMAND_POOL_CREATION_FAILURE);
+
+    ChangeImageLayout(renderImage.imageAndMemory.image, 
+                renderFormat, 
+                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+            );
+
+    ChangeImageLayout(renderImage.imageAndMemory.image, 
+                renderFormat, 
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_
+            );
+
+    m_RenderFramebuffer = CreateFramebuffer(m_MainRenderPass.vulkanRenderPass, renderImageView, {m_Settings.RenderWidth, m_Settings.RenderHeight}, depthImageView);
+    InitFramebuffers(m_UpscaleRenderPass.vulkanRenderPass, nullptr);
 
     // VkPhysicalDeviceProperties properties{};
     // vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
@@ -1338,49 +1362,127 @@ void Engine::Init() {
     // matricesUBO.viewMatrix = glm::mat4(1.0f);
     // matricesUBO.modelMatrix = glm::mat4(1.0f);
     // matricesUBO.projectionMatrix = glm::mat4(1.0f);
+    {
+        VkDescriptorSetLayoutBinding samplerDescriptorSetLayoutBinding{};
+        samplerDescriptorSetLayoutBinding.binding = 1;
+        samplerDescriptorSetLayoutBinding.descriptorCount = 1;
+        samplerDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        samplerDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        samplerDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
 
-    VkDescriptorSetLayoutBinding samplerDescriptorSetLayoutBinding{};
-    samplerDescriptorSetLayoutBinding.binding = 1;
-    samplerDescriptorSetLayoutBinding.descriptorCount = 1;
-    samplerDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    samplerDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+        VkDescriptorSetLayoutBinding uboDescriptorSetLayoutBinding{};
+        uboDescriptorSetLayoutBinding.binding = 0;
+        uboDescriptorSetLayoutBinding.descriptorCount = 1;
+        uboDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        uboDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
 
-    VkDescriptorSetLayoutBinding uboDescriptorSetLayoutBinding{};
-    uboDescriptorSetLayoutBinding.binding = 0;
-    uboDescriptorSetLayoutBinding.descriptorCount = 1;
-    uboDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uboDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    uboDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboDescriptorSetLayoutBinding, samplerDescriptorSetLayoutBinding};
 
-    std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboDescriptorSetLayoutBinding, samplerDescriptorSetLayoutBinding};
+        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
+        descriptorSetLayoutCreateInfo.pBindings = bindings.data();
 
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
-    descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_RenderDescriptorSetLayout) != VK_SUCCESS)
+            throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
+    }
 
-    if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_DescriptorSetLayout) != VK_SUCCESS)
-        throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
+    {
+        VkDescriptorSetLayoutBinding samplerDescriptorSetLayoutBinding{};
+        samplerDescriptorSetLayoutBinding.binding = 0;
+        samplerDescriptorSetLayoutBinding.descriptorCount = 1;
+        samplerDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        samplerDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        samplerDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
 
-    PipelineAndLayout mainGraphicsPipeline = CreateGraphicsPipeline("lighting", mainRenderPass, 0, VK_FRONT_FACE_COUNTER_CLOCKWISE, {m_DescriptorSetLayout});
-    //PipelineAndLayout testGraphicsPipeline = CreateGraphicsPipeline("test", mainRenderPass, 1, VK_FRONT_FACE_CLOCKWISE);
+        std::array<VkDescriptorSetLayoutBinding, 1> bindings = {samplerDescriptorSetLayoutBinding};
+
+        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
+        descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+
+        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_UpscaleDescriptorSetLayout) != VK_SUCCESS)
+            throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
+    }
+
+    PipelineAndLayout mainGraphicsPipeline = CreateGraphicsPipeline("lighting", m_MainRenderPass, 0, VK_FRONT_FACE_COUNTER_CLOCKWISE, {m_Settings.RenderWidth, m_Settings.RenderHeight}, {m_RenderDescriptorSetLayout});
+    PipelineAndLayout upscaleGraphicsPipeline = CreateGraphicsPipeline("upscale", m_UpscaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, {m_Settings.DisplayWidth, m_Settings.DisplayHeight}, {m_UpscaleDescriptorSetLayout});
 
     // we can now push back the render pass because we created the graphics pipelines.
-    m_RenderPasses.push_back(mainRenderPass);
-    
-    std::array<VkDescriptorPoolSize, 2> poolSizes = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT,
-                                                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT};
+    m_RenderPasses.push_back(m_MainRenderPass);
+    m_RenderPasses.push_back(m_UpscaleRenderPass);
 
-    VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
-    descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptorPoolCreateInfo.poolSizeCount = poolSizes.size();
-    descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
-    descriptorPoolCreateInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
+    /* RENDER DESCRIPTOR POOL INITIALIZATION */
+    {
+        std::array<VkDescriptorPoolSize, 2> poolSizes = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT,
+                                                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT};
 
-    if (vkCreateDescriptorPool(m_EngineDevice, &descriptorPoolCreateInfo, NULL, &m_DescriptorPool) != VK_SUCCESS)
-        throw std::runtime_error("Failed to create descriptor pool!");
+        VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
+        descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        descriptorPoolCreateInfo.poolSizeCount = poolSizes.size();
+        descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
+        descriptorPoolCreateInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
+
+        if (vkCreateDescriptorPool(m_EngineDevice, &descriptorPoolCreateInfo, NULL, &m_RenderDescriptorPool) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create descriptor pool!");
+    }
     
+    /* UPSCALE DESCRIPTOR POOL INITIALIZATION */
+    {
+        std::array<VkDescriptorPoolSize, 1> poolSizes = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT};
+
+        VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
+        descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        descriptorPoolCreateInfo.poolSizeCount = poolSizes.size();
+        descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
+        descriptorPoolCreateInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
+
+        if (vkCreateDescriptorPool(m_EngineDevice, &descriptorPoolCreateInfo, NULL, &m_UpscaleDescriptorPool) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create descriptor pool!");
+    }
+
+    // Image view, for sampling the render texture for upscaling.
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
+
+    m_UpscaleRenderSampler = CreateSampler(properties.limits.maxSamplerAnisotropy);
+
+    std::vector<VkDescriptorSetLayout> layouts(1, m_UpscaleDescriptorSetLayout);
+    VkDescriptorSetAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = m_UpscaleDescriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = layouts.data();
+
+    if (vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, &m_UpscaleDescriptorSet) != VK_SUCCESS)
+        throw std::runtime_error("Failed to allocate descriptor set for upscale render pass!");
+
+    // update descriptor set with image
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfo.imageView = renderImageView;
+    imageInfo.sampler = m_UpscaleRenderSampler;
+
+    std::array<VkWriteDescriptorSet, 1> descriptorWrites;
+    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrites[0].pNext = nullptr;
+    descriptorWrites[0].dstSet = m_UpscaleDescriptorSet;
+    descriptorWrites[0].dstBinding = 0;
+    descriptorWrites[0].dstArrayElement = 0;
+    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptorWrites[0].descriptorCount = 1;
+    descriptorWrites[0].pImageInfo = &imageInfo;
+
+    vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+
+    // Fullscreen Quad initialization
+    m_FullscreenQuadVertexBuffer = CreateVertexBuffer({ { glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec2(-1.0f, -1.0f) },
+                                                                    { glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(-1.0f, 1.0f) },
+                                                                    { glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, -1.0f) },
+                                                                    { glm::vec3(1.0f, -1.0f, 0.0f), glm::vec2(1.0f, 1.0f) } });
+
     // std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_DescriptorSetLayout);
     // VkDescriptorSetAllocateInfo allocInfo = {};
     // allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1475,7 +1577,7 @@ void Engine::CallFixedUpdateFunctions(bool *shouldQuitFlag) {
     using namespace std::this_thread;
 
     while (!(*shouldQuitFlag)) {
-        sleep_for(milliseconds(16));
+        sleep_for(milliseconds((int)(ENGINE_FIXED_UPDATE_DELTATIME*1000)));
         for (auto &fixedUpdateFunction : m_FixedUpdateFunctions)
             fixedUpdateFunction(m_KeyMap);
     }
@@ -1483,20 +1585,18 @@ void Engine::CallFixedUpdateFunctions(bool *shouldQuitFlag) {
 
 void Engine::Start() {
     // NOW, we are getting to the while loop.
-
-    // TODO: Use the other render passes?
-    RenderPass renderPass = m_RenderPasses[0];
-
     bool shouldQuit = false;
     Uint32 currentFrameIndex = 0;
 
     // start the fixed update loop
-    boost::thread fixedUpdateThread = boost::thread(&Engine::CallFixedUpdateFunctions, this, &shouldQuit);
+    // boost::thread fixedUpdateThread = boost::thread(&Engine::CallFixedUpdateFunctions, this, &shouldQuit);
 
     using namespace std::chrono;
 
     high_resolution_clock::time_point lastFrameTime, frameTime;
     high_resolution_clock::time_point afterFenceTime, afterAcquireImageResultTime, afterRenderInitTime, afterRenderTime, postRenderTime;
+
+    double accumulative;
 
     lastFrameTime = high_resolution_clock::now();
 
@@ -1517,15 +1617,30 @@ void Engine::Start() {
             }
         }
 
+        frameTime = high_resolution_clock::now();
+
+        double deltaTime = (duration_cast<duration<double>>(frameTime - lastFrameTime).count());
+
         if (m_Settings.ReportFPS) {
-            frameTime = high_resolution_clock::now();
-
-            double deltaTime = (duration_cast<duration<double>>(frameTime - lastFrameTime).count());
-
             fmt::println("{:.0f} FPS, Render Time: {:.5f}s", 1.0/deltaTime, deltaTime);
-
-            lastFrameTime = frameTime;
         }
+
+        lastFrameTime = frameTime;
+
+        // Fixed updates
+        accumulative += deltaTime;
+
+        // while loop, we are compensating for each fixed update frame potentially missed.
+        while (accumulative >= ENGINE_FIXED_UPDATE_DELTATIME) {
+            for (auto &fixedUpdateFunction : m_FixedUpdateFunctions) {
+                fixedUpdateFunction(m_KeyMap);
+            }
+
+            accumulative -= ENGINE_FIXED_UPDATE_DELTATIME;
+        }
+
+        for (auto &updateFunction : m_UpdateFunctions)
+            updateFunction();
 
         // we got (MAX_FRAMES_IN_FLIGHT) "slots" to use, we can write frames as long as the current frame slot we're using isn't occupied.
         vkWaitForFences(m_EngineDevice, 1, &m_InFlightFences[currentFrameIndex], true, UINT64_MAX);
@@ -1544,7 +1659,7 @@ void Engine::Start() {
         if (acquireNextImageResult == VK_ERROR_OUT_OF_DATE_KHR || acquireNextImageResult == VK_SUBOPTIMAL_KHR) {
             InitSwapchain();
 
-            InitFramebuffers(renderPass.vulkanRenderPass, CreateDepthImage());
+            InitFramebuffers(m_MainRenderPass.vulkanRenderPass, CreateDepthImage());
 
             continue;
         } else if (acquireNextImageResult != VK_SUCCESS)
@@ -1569,59 +1684,100 @@ void Engine::Start() {
         if (vkBeginCommandBuffer(m_CommandBuffers[currentFrameIndex], &commandBufferBeginInfo) != VK_SUCCESS)
             throw std::runtime_error(engineError::COMMAND_BUFFER_BEGIN_FAILURE);
 
-        // begin a render pass, this could be for example HDR pass, SSAO pass, lighting pass.
-        VkRenderPassBeginInfo renderPassBeginInfo{};
-        renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassBeginInfo.renderPass = renderPass.vulkanRenderPass;
-        renderPassBeginInfo.framebuffer = m_SwapchainFramebuffers[imageIndex];
-        renderPassBeginInfo.renderArea.offset = {0, 0};
-        renderPassBeginInfo.renderArea.extent = m_SwapchainExtent;
+        {
+            // begin a render pass, this could be for example HDR pass, SSAO pass, lighting pass.
+            VkRenderPassBeginInfo renderPassBeginInfo{};
+            renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            renderPassBeginInfo.renderPass = m_MainRenderPass.vulkanRenderPass;
+            renderPassBeginInfo.framebuffer = m_RenderFramebuffer;
+            renderPassBeginInfo.renderArea.offset = {0, 0};
+            renderPassBeginInfo.renderArea.extent = {m_Settings.RenderWidth, m_Settings.RenderHeight};
 
-        std::array<VkClearValue, 2> clearColors{};
-        clearColors[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-        clearColors[1].depthStencil = {1.0f, 0};
+            std::array<VkClearValue, 2> clearColors{};
+            clearColors[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+            clearColors[1].depthStencil = {1.0f, 0};
 
-        renderPassBeginInfo.clearValueCount = clearColors.size();
-        renderPassBeginInfo.pClearValues = clearColors.data();
+            renderPassBeginInfo.clearValueCount = clearColors.size();
+            renderPassBeginInfo.pClearValues = clearColors.data();
 
-        vkCmdBeginRenderPass(m_CommandBuffers[currentFrameIndex], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBeginRenderPass(m_CommandBuffers[currentFrameIndex], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, renderPass.graphicsPipeline.pipeline);
+            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainRenderPass.graphicsPipeline.pipeline);
 
-        vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_Viewport);
+            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_Viewport);
 
-        vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_Scissor);
+            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_Scissor);
 
-        for (auto &updateFunction : m_UpdateFunctions)
-            updateFunction();
+        #ifdef LOG_FRAME
+            afterRenderInitTime = high_resolution_clock::now();
 
-#ifdef LOG_FRAME
-        afterRenderInitTime = high_resolution_clock::now();
+            fmt::println("Time spent initializing render and calling update functions: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderInitTime - afterAcquireImageResultTime).count()));
+        #endif
 
-        fmt::println("Time spent initializing render and calling update functions: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderInitTime - afterAcquireImageResultTime).count()));
-#endif
+            glm::mat4 viewMatrix = m_PrimaryCamera->GetViewMatrix();
 
-        glm::mat4 viewMatrix = m_PrimaryCamera->GetViewMatrix();
+            for (RenderModel &renderModel : m_RenderModels) {
+                renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
 
-        for (RenderModel &renderModel : m_RenderModels) {
-            renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
+                renderModel.matricesUBO.viewMatrix = viewMatrix;
+                renderModel.matricesUBO.projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), m_Settings.RenderWidth / (float) m_Settings.RenderHeight, CAMERA_NEAR, CAMERA_FAR);
 
-            renderModel.matricesUBO.viewMatrix = viewMatrix;
-            renderModel.matricesUBO.projectionMatrix = glm::perspective(glm::radians(90.0f), m_SwapchainExtent.width / (float) m_SwapchainExtent.height, 0.1f, 10.0f);
+                // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
+                renderModel.matricesUBO.projectionMatrix[1][1] *= -1;
 
-            // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
-            renderModel.matricesUBO.projectionMatrix[1][1] *= -1;
+                SDL_memcpy(renderModel.matricesUBOMappedMemory, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
 
-            SDL_memcpy(renderModel.matricesUBOMappedMemory, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
+                // vertex buffer binding!!
+                VkDeviceSize mainOffsets[] = {0};
+                vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, renderModel.vertexBuffers.data(), mainOffsets);
+
+                vkCmdBindIndexBuffer(m_CommandBuffers[currentFrameIndex], renderModel.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+                vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainRenderPass.graphicsPipeline.layout, 0, 1, &renderModel.descriptorSet, 0, nullptr);
+                vkCmdDrawIndexed(m_CommandBuffers[currentFrameIndex], renderModel.indices.size(), 1, 0, 0, 0);
+            }
+
+            vkCmdEndRenderPass(m_CommandBuffers[currentFrameIndex]);
+        }
+
+        {
+            // begin a render pass, this could be for example HDR pass, SSAO pass, lighting pass.
+            VkRenderPassBeginInfo renderPassBeginInfo{};
+            renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            renderPassBeginInfo.renderPass = m_UpscaleRenderPass.vulkanRenderPass;
+            renderPassBeginInfo.framebuffer = m_SwapchainFramebuffers[imageIndex];
+            renderPassBeginInfo.renderArea.offset = {0, 0};
+            renderPassBeginInfo.renderArea.extent = {m_Settings.DisplayWidth, m_Settings.DisplayHeight};
+
+            std::array<VkClearValue, 2> clearColors{};
+            clearColors[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+            clearColors[1].depthStencil = {1.0f, 0};
+
+            renderPassBeginInfo.clearValueCount = clearColors.size();
+            renderPassBeginInfo.pClearValues = clearColors.data();
+
+            vkCmdBeginRenderPass(m_CommandBuffers[currentFrameIndex], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UpscaleRenderPass.graphicsPipeline.pipeline);
+
+            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_Viewport);
+
+            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_Scissor);
+
+    #ifdef LOG_FRAME
+            afterRenderInitTime = high_resolution_clock::now();
+
+            fmt::println("Time spent initializing render and calling update functions: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderInitTime - afterAcquireImageResultTime).count()));
+    #endif
 
             // vertex buffer binding!!
             VkDeviceSize mainOffsets[] = {0};
-            vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, renderModel.vertexBuffers.data(), mainOffsets);
+            vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), mainOffsets);
 
-            vkCmdBindIndexBuffer(m_CommandBuffers[currentFrameIndex], renderModel.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UpscaleRenderPass.graphicsPipeline.layout, 0, 1, &m_UpscaleDescriptorSet, 0, nullptr);
+            vkCmdDraw(m_CommandBuffers[currentFrameIndex], 1, 1, 0, 0);
 
-            vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, renderPass.graphicsPipeline.layout, 0, 1, &renderModel.descriptorSet, 0, nullptr);
-            vkCmdDrawIndexed(m_CommandBuffers[currentFrameIndex], renderModel.indices.size(), 1, 0, 0, 0);
+            vkCmdEndRenderPass(m_CommandBuffers[currentFrameIndex]);
         }
 
 #ifdef LOG_FRAME
@@ -1647,8 +1803,6 @@ void Engine::Start() {
         // vkCmdBindIndexBuffer(m_CommandBuffers[current_frame], mainIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
         // vkCmdDrawIndexed(m_CommandBuffers[current_frame], indices.size(), 1, 0, 0, 0);
-
-        vkCmdEndRenderPass(m_CommandBuffers[currentFrameIndex]);
 
         if (vkEndCommandBuffer(m_CommandBuffers[currentFrameIndex]) != VK_SUCCESS)
             throw std::runtime_error(engineError::COMMAND_BUFFER_END_FAILURE);
@@ -1694,5 +1848,5 @@ void Engine::Start() {
 #endif
     }
 
-    fixedUpdateThread.join();
+    //fixedUpdateThread.join();
 }
