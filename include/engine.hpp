@@ -55,7 +55,7 @@ const std::vector<const char *> requiredInstanceExtensions = {
 };
 
 const std::vector<const char *> requiredLayerExtensions {
-    "VK_LAYER_KHRONOS_validation",
+//    "VK_LAYER_KHRONOS_validation",
 };
 
 struct SwapChainSupportDetails {
@@ -142,8 +142,8 @@ private:
     void InitSwapchain();
     void InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageView);
     VkImageView CreateDepthImage();
-    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, RenderPass &renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkExtent2D resolution, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {});
-    VkRenderPass CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, bool shouldContainDepthImage = true);
+    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, RenderPass &renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {});
+    VkRenderPass CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, bool shouldContainDepthImage = true);
     VkFramebuffer CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkExtent2D resolution, VkImageView depthImageView = nullptr);
     bool QuitEventCheck(SDL_Event &event);
 
@@ -218,6 +218,8 @@ private:
 
     RenderPass m_MainRenderPass;
     VkFramebuffer m_RenderFramebuffer;
+    ImageAndMemory m_RenderImageAndMemory;
+    VkFormat m_RenderImageFormat;
 
     RenderPass m_UpscaleRenderPass;   // This uses the swapchain framebuffers
 
@@ -232,8 +234,10 @@ private:
     std::vector<VkSemaphore> m_RenderFinishedSemaphores;
     std::vector<VkFence> m_InFlightFences;
 
-    VkViewport m_Viewport;
-    VkRect2D m_Scissor;
+    VkViewport m_RenderViewport;
+    VkViewport m_DisplayViewport;
+    VkRect2D m_RenderScissor;
+    VkRect2D m_DisplayScissor;
 
     // update events
     std::vector<std::function<void()>> m_UpdateFunctions;

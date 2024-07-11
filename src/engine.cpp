@@ -126,6 +126,10 @@ Engine::~Engine() {
     for (VkFramebuffer framebuffer : m_SwapchainFramebuffers)
         if (framebuffer)
             vkDestroyFramebuffer(m_EngineDevice, framebuffer, NULL);
+    
+    if (m_RenderFramebuffer)
+        vkDestroyFramebuffer(m_EngineDevice, m_RenderFramebuffer, NULL);
+
     for (VkImage image : m_AllocatedImages)
         vkDestroyImage(m_EngineDevice, image, NULL);
     for (VkBuffer buffer : m_AllocatedBuffers)
@@ -160,6 +164,12 @@ Engine::~Engine() {
 
     if (m_RenderDescriptorSetLayout)
         vkDestroyDescriptorSetLayout(m_EngineDevice, m_RenderDescriptorSetLayout, NULL);
+
+    if (m_UpscaleDescriptorPool)
+        vkDestroyDescriptorPool(m_EngineDevice, m_UpscaleDescriptorPool, NULL);
+
+    if (m_UpscaleDescriptorSetLayout)
+        vkDestroyDescriptorSetLayout(m_EngineDevice, m_UpscaleDescriptorSetLayout, NULL);
 
     if (m_CommandPool)
         vkDestroyCommandPool(m_EngineDevice, m_CommandPool, NULL);
@@ -725,7 +735,7 @@ void Engine::InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageVie
     m_SwapchainFramebuffers.resize(m_SwapchainImageViews.size());
 
     for (size_t i = 0; i < m_SwapchainFramebuffers.size(); i++)
-        m_SwapchainFramebuffers[i] = CreateFramebuffer(renderPass, m_SwapchainImageViews[i], {m_Settings.RenderWidth, m_Settings.RenderHeight}, depthImageView);
+        m_SwapchainFramebuffers[i] = CreateFramebuffer(renderPass, m_SwapchainImageViews[i], {m_Settings.DisplayWidth, m_Settings.DisplayHeight}, depthImageView);
 }
 
 VkImageView Engine::CreateDepthImage() {
@@ -888,6 +898,24 @@ void Engine::ChangeImageLayout(VkImage image, VkFormat format, VkImageLayout old
 
         sourceStageFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
         destStageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else if (oldImageLayout == VK_IMAGE_LAYOUT_UNDEFINED && newImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        memoryBarrier.srcAccessMask = 0;
+        memoryBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+        sourceStageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destStageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    }  else if (oldImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && newImageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        memoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        sourceStageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        destStageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }  else if (oldImageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL && newImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        memoryBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+        sourceStageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        destStageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     } else {
         throw std::invalid_argument(engineError::UNSUPPORTED_LAYOUT_TRANSITION);
     }
@@ -906,7 +934,7 @@ void Engine::ChangeImageLayout(VkImage image, VkFormat format, VkImageLayout old
 /* Creates a Vulkan graphics pipeline, shaderName will be used as a part of the path.
  * Sanitization is the job of the caller.
  */
-PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, RenderPass &renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkExtent2D resolution, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts) {
+PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, RenderPass &renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts) {
     if (renderPass.graphicsPipeline.pipeline)
         throw std::runtime_error(engineError::RENDERPASS_PIPELINE_EXISTS);
 
@@ -969,22 +997,12 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-    m_Viewport.x = 0.0f;
-    m_Viewport.y = 0.0f;
-    m_Viewport.width = (float) resolution.width;
-    m_Viewport.height = (float) resolution.height;
-    m_Viewport.minDepth = 0.0f;
-    m_Viewport.maxDepth = 1.0f;
-
-    m_Scissor.offset = {0, 0};
-    m_Scissor.extent = resolution;
-
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     viewportState.viewportCount = 1;
-    viewportState.pViewports = &m_Viewport;
+    viewportState.pViewports = &viewport;
     viewportState.scissorCount = 1;
-    viewportState.pScissors = &m_Scissor;
+    viewportState.pScissors = &scissor;
 
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -1077,7 +1095,7 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
     return pipelineAndLayout;
 }
 
-VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, bool shouldContainDepthImage) {
+VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, bool shouldContainDepthImage) {
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = imageFormat;
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -1085,8 +1103,8 @@ VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentSto
     colorAttachment.storeOp = storeOp;
     colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    colorAttachment.initialLayout = initialColorLayout;
+    colorAttachment.finalLayout = finalColorLayout;
 
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = FindDepthFormat();
@@ -1314,17 +1332,17 @@ void Engine::Init() {
 
     InitSwapchain();
 
-    VkFormat renderFormat = getBestFormatFromChannels(4);
+    m_RenderImageFormat = getBestFormatFromChannels(4);
 
-    m_MainRenderPass.vulkanRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1, renderFormat);
-    m_UpscaleRenderPass.vulkanRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1, m_SwapchainImageFormat, false);
+    m_MainRenderPass.vulkanRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1, m_RenderImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    m_UpscaleRenderPass.vulkanRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
 
     VkFormat depthFormat = FindDepthFormat();
 
     VkImageView depthImageView = CreateDepthImage();
 
-    TextureImageAndMemory renderImage = CreateImage(m_Settings.RenderWidth, m_Settings.RenderHeight, renderFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    VkImageView renderImageView = CreateImageView(renderImage, renderFormat, VK_IMAGE_ASPECT_COLOR_BIT);
+    TextureImageAndMemory renderImage = CreateImage(m_Settings.RenderWidth, m_Settings.RenderHeight, m_RenderImageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkImageView renderImageView = CreateImageView(renderImage, m_RenderImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 
     // command pools are basically lists of commands, they are recorded and sent to the GPU i think
     VkCommandPoolCreateInfo commandPoolCreateInfo{};
@@ -1335,15 +1353,12 @@ void Engine::Init() {
     if (vkCreateCommandPool(m_EngineDevice, &commandPoolCreateInfo, NULL, &m_CommandPool) != VK_SUCCESS)
         throw std::runtime_error(engineError::COMMAND_POOL_CREATION_FAILURE);
 
-    ChangeImageLayout(renderImage.imageAndMemory.image, 
-                renderFormat, 
-                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-            );
-
-    ChangeImageLayout(renderImage.imageAndMemory.image, 
-                renderFormat, 
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_
-            );
+    // ChangeImageLayout(renderImage.imageAndMemory.image, 
+    //             m_RenderImageFormat, 
+    //             VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+    //         );
+    
+    m_RenderImageAndMemory = renderImage.imageAndMemory;
 
     m_RenderFramebuffer = CreateFramebuffer(m_MainRenderPass.vulkanRenderPass, renderImageView, {m_Settings.RenderWidth, m_Settings.RenderHeight}, depthImageView);
     InitFramebuffers(m_UpscaleRenderPass.vulkanRenderPass, nullptr);
@@ -1407,8 +1422,31 @@ void Engine::Init() {
             throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
     }
 
-    PipelineAndLayout mainGraphicsPipeline = CreateGraphicsPipeline("lighting", m_MainRenderPass, 0, VK_FRONT_FACE_COUNTER_CLOCKWISE, {m_Settings.RenderWidth, m_Settings.RenderHeight}, {m_RenderDescriptorSetLayout});
-    PipelineAndLayout upscaleGraphicsPipeline = CreateGraphicsPipeline("upscale", m_UpscaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, {m_Settings.DisplayWidth, m_Settings.DisplayHeight}, {m_UpscaleDescriptorSetLayout});
+    // Render
+    m_RenderViewport.x = 0.0f;
+    m_RenderViewport.y = 0.0f;
+    m_RenderViewport.width = (float) m_Settings.RenderWidth;
+    m_RenderViewport.height = (float) m_Settings.RenderHeight;
+    m_RenderViewport.minDepth = 0.0f;
+    m_RenderViewport.maxDepth = 1.0f;
+
+    m_RenderScissor.offset = {0, 0};
+    m_RenderScissor.extent = {m_Settings.RenderWidth, m_Settings.RenderHeight};
+
+
+    // Upscale
+    m_DisplayViewport.x = 0.0f;
+    m_DisplayViewport.y = 0.0f;
+    m_DisplayViewport.width = (float) m_Settings.DisplayWidth;
+    m_DisplayViewport.height = (float) m_Settings.DisplayHeight;
+    m_DisplayViewport.minDepth = 0.0f;
+    m_DisplayViewport.maxDepth = 1.0f;
+
+    m_DisplayScissor.offset = {0, 0};
+    m_DisplayScissor.extent = {m_Settings.DisplayWidth, m_Settings.DisplayHeight};
+
+    PipelineAndLayout mainGraphicsPipeline = CreateGraphicsPipeline("lighting", m_MainRenderPass, 0, VK_FRONT_FACE_COUNTER_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_RenderDescriptorSetLayout});
+    PipelineAndLayout upscaleGraphicsPipeline = CreateGraphicsPipeline("upscale", m_UpscaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UpscaleDescriptorSetLayout});
 
     // we can now push back the render pass because we created the graphics pipelines.
     m_RenderPasses.push_back(m_MainRenderPass);
@@ -1478,10 +1516,14 @@ void Engine::Init() {
     vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 
     // Fullscreen Quad initialization
-    m_FullscreenQuadVertexBuffer = CreateVertexBuffer({ { glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec2(-1.0f, -1.0f) },
-                                                                    { glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(-1.0f, 1.0f) },
-                                                                    { glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, -1.0f) },
-                                                                    { glm::vec3(1.0f, -1.0f, 0.0f), glm::vec2(1.0f, 1.0f) } });
+    m_FullscreenQuadVertexBuffer = CreateVertexBuffer({
+                                                        {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
+                                                        {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, 1.0f)},
+                                                        {glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec2(0.0f, 1.0f)},
+                                                        {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
+                                                        {glm::vec3(1.0f, -1.0f, 0.0f), glm::vec2(1.0f, 0.0f)},
+                                                        {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, 1.0f)}
+                                                    });
 
     // std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_DescriptorSetLayout);
     // VkDescriptorSetAllocateInfo allocInfo = {};
@@ -1704,9 +1746,9 @@ void Engine::Start() {
 
             vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainRenderPass.graphicsPipeline.pipeline);
 
-            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_Viewport);
+            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderViewport);
 
-            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_Scissor);
+            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderScissor);
 
         #ifdef LOG_FRAME
             afterRenderInitTime = high_resolution_clock::now();
@@ -1740,6 +1782,8 @@ void Engine::Start() {
             vkCmdEndRenderPass(m_CommandBuffers[currentFrameIndex]);
         }
 
+        //ChangeImageLayout(m_RenderImageAndMemory.image, m_RenderImageFormat, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
         {
             // begin a render pass, this could be for example HDR pass, SSAO pass, lighting pass.
             VkRenderPassBeginInfo renderPassBeginInfo{};
@@ -1760,9 +1804,9 @@ void Engine::Start() {
 
             vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UpscaleRenderPass.graphicsPipeline.pipeline);
 
-            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_Viewport);
+            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayViewport);
 
-            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_Scissor);
+            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayScissor);
 
     #ifdef LOG_FRAME
             afterRenderInitTime = high_resolution_clock::now();
@@ -1775,10 +1819,12 @@ void Engine::Start() {
             vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), mainOffsets);
 
             vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UpscaleRenderPass.graphicsPipeline.layout, 0, 1, &m_UpscaleDescriptorSet, 0, nullptr);
-            vkCmdDraw(m_CommandBuffers[currentFrameIndex], 1, 1, 0, 0);
+            vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
 
             vkCmdEndRenderPass(m_CommandBuffers[currentFrameIndex]);
         }
+
+        //ChangeImageLayout(m_RenderImageAndMemory.image, m_RenderImageFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
 #ifdef LOG_FRAME
         afterRenderTime = high_resolution_clock::now();
@@ -1791,9 +1837,9 @@ void Engine::Start() {
 
         // vkCmdBindPipeline(m_CommandBuffers[current_frame], VK_PIPELINE_BIND_POINT_GRAPHICS, testGraphicsPipeline.pipeline);
 
-        // vkCmdSetViewport(m_CommandBuffers[current_frame], 0, 1, &m_Viewport);
+        // vkCmdSetViewport(m_CommandBuffers[current_frame], 0, 1, &m_RenderViewport);
 
-        // vkCmdSetScissor(m_CommandBuffers[current_frame], 0, 1, &m_Scissor);
+        // vkCmdSetScissor(m_CommandBuffers[current_frame], 0, 1, &m_RenderScissor);
 
         // // vertex buffer binding!!
         // VkBuffer testBuffers[] = {mainVertexBuffer.buffer};
