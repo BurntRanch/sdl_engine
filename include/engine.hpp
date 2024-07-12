@@ -55,7 +55,7 @@ const std::vector<const char *> requiredInstanceExtensions = {
 };
 
 const std::vector<const char *> requiredLayerExtensions {
-//    "VK_LAYER_KHRONOS_validation",
+    "VK_LAYER_KHRONOS_validation",
 };
 
 struct SwapChainSupportDetails {
@@ -103,6 +103,7 @@ struct RenderModel {
     Model *model;
 
     std::vector<VkBuffer> vertexBuffers;
+    std::vector<VkDeviceMemory> vertexBuffersMemory;
     std::vector<Uint32> indices;
     BufferAndMemory indexBuffer;
     TextureImageAndMemory diffTexture;
@@ -127,6 +128,7 @@ public:
     ~Engine();
 
     Model *LoadModel(const string &path);   // this is the first function created to be used by main.cpp
+    void UnloadModel(const Model *model);
     void RegisterUpdateFunction(const std::function<void()> &func);
     // Fixed Updates are called 60 times a second.
     void RegisterFixedUpdateFunction(const std::function<void(std::array<bool, 322>)> &func);
@@ -151,13 +153,13 @@ private:
     VkShaderModule CreateShaderModule(VkDevice device, const std::vector<char> &code);
     Uint32 FindMemoryType(Uint32 typeFilter, VkMemoryPropertyFlags properties);
 
-    void AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &memory, bool addToBuffersLists = true);
+    void AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &memory, bool recordAllocation = true);
     void CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size);
 
-    std::vector<TextureImageAndMemory> LoadTexturesFromMesh(Mesh &mesh);
+    std::vector<TextureImageAndMemory> LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations = true);
 
-    BufferAndMemory CreateVertexBuffer(const std::vector<Vertex> &verts);
-    BufferAndMemory CreateIndexBuffer(const std::vector<Uint32> &inds);
+    BufferAndMemory CreateVertexBuffer(const std::vector<Vertex> &verts, bool recordAllocation = true);
+    BufferAndMemory CreateIndexBuffer(const std::vector<Uint32> &inds, bool recordAllocation = true);
 
     VkCommandBuffer BeginSingleTimeCommands();
     void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
@@ -166,9 +168,9 @@ private:
     void ChangeImageLayout(VkImage image, VkFormat format, VkImageLayout oldImageLayout, VkImageLayout newImageLayout);
 
     TextureBufferAndMemory LoadTextureFromFile(const std::string &name);
-    TextureImageAndMemory CreateImage(Uint32 width, Uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
-    VkImageView CreateImageView(TextureImageAndMemory &imageAndMemory, VkFormat format, VkImageAspectFlags aspectMask);
-    VkSampler CreateSampler(float maxAnisotropy);
+    TextureImageAndMemory CreateImage(Uint32 width, Uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, bool recordAllocation = true);
+    VkImageView CreateImageView(TextureImageAndMemory &imageAndMemory, VkFormat format, VkImageAspectFlags aspectMask, bool recordCreation = true);
+    VkSampler CreateSampler(float maxAnisotropy, bool recordCreation = true);
 
     VkFormat FindBestFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
 

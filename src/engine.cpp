@@ -112,7 +112,7 @@ Engine::~Engine() {
     fmt::println("Destroying Engine!");
 
     for (RenderModel &renderModel : m_RenderModels)
-        delete renderModel.model;
+        this->UnloadModel(renderModel.model);
 
     if (m_EngineDevice)
         vkDeviceWaitIdle(m_EngineDevice);
@@ -224,7 +224,7 @@ SwapChainSupportDetails Engine::QuerySwapChainSupport(VkPhysicalDevice physicalD
     return details;
 }
 
-void Engine::AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &memory, bool addToBuffersLists) {
+void Engine::AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &memory, bool recordAllocation) {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = size;
@@ -234,7 +234,7 @@ void Engine::AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
     if (vkCreateBuffer(m_EngineDevice, &bufferInfo, NULL, &buffer) != VK_SUCCESS)
         throw std::runtime_error(engineError::CANT_CREATE_VERTEX_BUFFER);
     
-    if (addToBuffersLists)
+    if (recordAllocation)
         m_AllocatedBuffers.push_back(buffer);
 
     VkMemoryRequirements memoryRequirements;
@@ -248,7 +248,7 @@ void Engine::AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
     if (vkAllocateMemory(m_EngineDevice, &allocInfo, NULL, &memory) != VK_SUCCESS)
         throw std::runtime_error(engineError::CANT_ALLOCATE_MEMORY);
     
-    if (addToBuffersLists)
+    if (recordAllocation)
         m_AllocatedMemory.push_back(memory);
 
     vkBindBufferMemory(m_EngineDevice, buffer, memory, 0);
@@ -267,7 +267,7 @@ void Engine::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBu
     EndSingleTimeCommands(commandBuffer);
 }
 
-std::vector<TextureImageAndMemory> Engine::LoadTexturesFromMesh(Mesh &mesh) {
+std::vector<TextureImageAndMemory> Engine::LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations) {
     std::vector<TextureImageAndMemory> textures;
     
     for (string path : mesh.texturePaths) {
@@ -278,7 +278,7 @@ std::vector<TextureImageAndMemory> Engine::LoadTexturesFromMesh(Mesh &mesh) {
         textureBufferAndMemory.width, textureBufferAndMemory.height,
         textureFormat, VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, recordAllocations
             );
         ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
                     textureFormat, 
@@ -307,7 +307,7 @@ std::vector<TextureImageAndMemory> Engine::LoadTexturesFromMesh(Mesh &mesh) {
         textureBufferAndMemory.width, textureBufferAndMemory.height,
         textureFormat, VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, recordAllocations
             );
         ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
                     textureFormat, 
@@ -331,7 +331,7 @@ std::vector<TextureImageAndMemory> Engine::LoadTexturesFromMesh(Mesh &mesh) {
     return textures;
 }
 
-BufferAndMemory Engine::CreateVertexBuffer(const std::vector<Vertex> &verts) {
+BufferAndMemory Engine::CreateVertexBuffer(const std::vector<Vertex> &verts, bool recordAllocation) {
     //if (m_VertexBuffer || m_VertexBufferMemory)
     //    throw std::runtime_error(engineError::VERTEX_BUFFER_ALREADY_EXISTS);
 
@@ -352,7 +352,7 @@ BufferAndMemory Engine::CreateVertexBuffer(const std::vector<Vertex> &verts) {
     // allocate the gpu-exclusive vertex buffer
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
-    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
+    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory, recordAllocation);
 
     CopyHostBufferToDeviceBuffer(stagingBuffer, vertexBuffer, stagingBufferSize);
 
@@ -362,7 +362,7 @@ BufferAndMemory Engine::CreateVertexBuffer(const std::vector<Vertex> &verts) {
     return {vertexBuffer, vertexBufferMemory};
 }
 
-BufferAndMemory Engine::CreateIndexBuffer(const std::vector<Uint32> &inds) {
+BufferAndMemory Engine::CreateIndexBuffer(const std::vector<Uint32> &inds, bool recordAllocation) {
     //if (m_IndexBuffer || m_IndexBufferMemory)
     //    throw std::runtime_error(engineError::INDEX_BUFFER_ALREADY_EXISTS);
 
@@ -371,7 +371,7 @@ BufferAndMemory Engine::CreateIndexBuffer(const std::vector<Uint32> &inds) {
     VkDeviceMemory stagingBufferMemory;
 
     VkDeviceSize stagingBufferSize = sizeof(Uint32) * inds.size();
-    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory, false);
 
     // copy the index data into the buffer
     void *data;
@@ -382,15 +382,12 @@ BufferAndMemory Engine::CreateIndexBuffer(const std::vector<Uint32> &inds) {
     // allocate the gpu-exclusive index buffer
     VkBuffer indexBuffer;
     VkDeviceMemory indexBufferMemory;
-    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory);
+    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory, recordAllocation);
 
     CopyHostBufferToDeviceBuffer(stagingBuffer, indexBuffer, stagingBufferSize);
 
     vkDestroyBuffer(m_EngineDevice, stagingBuffer, NULL);
     vkFreeMemory(m_EngineDevice, stagingBufferMemory, NULL);
-
-    m_AllocatedBuffers.erase(std::find(m_AllocatedBuffers.begin(), m_AllocatedBuffers.end(), stagingBuffer));
-    m_AllocatedMemory.erase(std::find(m_AllocatedMemory.begin(), m_AllocatedMemory.end(), stagingBufferMemory));
 
     return {indexBuffer, indexBufferMemory};
 }
@@ -421,7 +418,7 @@ TextureBufferAndMemory Engine::LoadTextureFromFile(const std::string &name) {
     return {{imageStagingBuffer, imageStagingMemory}, (Uint32)texWidth, (Uint32)texHeight, (Uint8)4};
 }
 
-TextureImageAndMemory Engine::CreateImage(Uint32 width, Uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties) {
+TextureImageAndMemory Engine::CreateImage(Uint32 width, Uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, bool recordAllocation) {
     TextureImageAndMemory textureImageAndMemory;
 
     VkImageCreateInfo imageInfo{};
@@ -461,13 +458,15 @@ TextureImageAndMemory Engine::CreateImage(Uint32 width, Uint32 height, VkFormat 
 
     vkBindImageMemory(m_EngineDevice, textureImageAndMemory.imageAndMemory.image, textureImageAndMemory.imageAndMemory.memory, 0);
 
-    m_AllocatedImages.push_back(textureImageAndMemory.imageAndMemory.image);
-    m_AllocatedMemory.push_back(textureImageAndMemory.imageAndMemory.memory);
+    if (recordAllocation) {
+        m_AllocatedImages.push_back(textureImageAndMemory.imageAndMemory.image);
+        m_AllocatedMemory.push_back(textureImageAndMemory.imageAndMemory.memory);
+    }
 
     return textureImageAndMemory;
 }
 
-VkImageView Engine::CreateImageView(TextureImageAndMemory &imageAndMemory, VkFormat format, VkImageAspectFlags aspectMask) {
+VkImageView Engine::CreateImageView(TextureImageAndMemory &imageAndMemory, VkFormat format, VkImageAspectFlags aspectMask, bool recordCreation) {
     VkImageViewCreateInfo imageViewCreateInfo{};
     imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     imageViewCreateInfo.image = imageAndMemory.imageAndMemory.image;
@@ -483,12 +482,14 @@ VkImageView Engine::CreateImageView(TextureImageAndMemory &imageAndMemory, VkFor
     if (vkCreateImageView(m_EngineDevice, &imageViewCreateInfo, NULL, &imageView) != VK_SUCCESS)
         throw std::runtime_error(engineError::IMAGE_VIEW_CREATION_FAILURE);
 
-    m_CreatedImageViews.push_back(imageView);
+    if (recordCreation) {
+        m_CreatedImageViews.push_back(imageView);
+    }
 
     return imageView;
 }
 
-VkSampler Engine::CreateSampler(float maxAnisotropy) {
+VkSampler Engine::CreateSampler(float maxAnisotropy, bool recordCreation) {
     VkSamplerCreateInfo samplerCreateInfo{};
     samplerCreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
@@ -511,7 +512,9 @@ VkSampler Engine::CreateSampler(float maxAnisotropy) {
     if (vkCreateSampler(m_EngineDevice, &samplerCreateInfo, NULL, &sampler) != VK_SUCCESS)
         throw std::runtime_error(engineError::SAMPLER_CREATION_FAILURE);
 
-    m_CreatedSamplers.push_back(sampler);
+    if (recordCreation) {
+        m_CreatedSamplers.push_back(sampler);
+    }
 
     return sampler;
 }
@@ -542,32 +545,34 @@ Model *Engine::LoadModel(const string &path) {
     std::vector<TextureImageAndMemory> textures;
 
     for (Mesh mesh : renderModel.model->meshes) {
-        renderModel.vertexBuffers.push_back(CreateVertexBuffer(mesh.vertices).buffer);
+        BufferAndMemory vertexBuffer = CreateVertexBuffer(mesh.vertices, false);
+        renderModel.vertexBuffers.push_back(vertexBuffer.buffer);
+        renderModel.vertexBuffersMemory.push_back(vertexBuffer.memory);
         renderModel.indices.insert(renderModel.indices.end(), mesh.indices.begin(), mesh.indices.end());
-        std::vector<TextureImageAndMemory> meshTextures = LoadTexturesFromMesh(mesh);
+        std::vector<TextureImageAndMemory> meshTextures = LoadTexturesFromMesh(mesh, false);
         textures.insert(textures.end(), meshTextures.begin(), meshTextures.end());
     }
 
-    renderModel.indexBuffer = CreateIndexBuffer(renderModel.indices);
+    renderModel.indexBuffer = CreateIndexBuffer(renderModel.indices, false);
 
     renderModel.diffTexture = textures[0];
     
     VkFormat textureFormat = getBestFormatFromChannels(renderModel.diffTexture.channels);
 
     // Image view, for sampling.
-    renderModel.diffTextureImageView = CreateImageView(renderModel.diffTexture, textureFormat, VK_IMAGE_ASPECT_COLOR_BIT);
+    renderModel.diffTextureImageView = CreateImageView(renderModel.diffTexture, textureFormat, VK_IMAGE_ASPECT_COLOR_BIT, false);
 
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
 
-    renderModel.diffTextureSampler = CreateSampler(properties.limits.maxSamplerAnisotropy);
+    renderModel.diffTextureSampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
 
     // UBO
     VkDeviceSize uniformBufferSize = sizeof(UniformBufferObject);
 
     renderModel.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
 
-    AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer.buffer, renderModel.matricesUBOBuffer.memory);
+    AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer.buffer, renderModel.matricesUBOBuffer.memory, false);
 
     vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOMappedMemory);
 
@@ -616,6 +621,41 @@ Model *Engine::LoadModel(const string &path) {
     m_RenderModels.push_back(renderModel);
 
     return renderModel.model;
+}
+
+void Engine::UnloadModel(const Model *model) {
+    for (size_t i = 0; i < m_RenderModels.size(); i++) {
+        if (m_RenderModels[i].model != model)
+            continue;
+
+        RenderModel renderModel = m_RenderModels[i];
+
+        m_RenderModels.erase(m_RenderModels.begin() + i);
+
+        // Before we start, wait for the InFlightFences to stop.
+        vkWaitForFences(m_EngineDevice, m_InFlightFences.size(), m_InFlightFences.data(), true, UINT64_MAX);
+
+        vkDestroyImageView(m_EngineDevice, renderModel.diffTextureImageView, NULL);
+        vkDestroyImage(m_EngineDevice, renderModel.diffTexture.imageAndMemory.image, NULL);
+        vkFreeMemory(m_EngineDevice, renderModel.diffTexture.imageAndMemory.memory, NULL);
+        vkDestroySampler(m_EngineDevice, renderModel.diffTextureSampler, NULL);
+        
+        vkDestroyBuffer(m_EngineDevice, renderModel.indexBuffer.buffer, NULL);
+        vkFreeMemory(m_EngineDevice, renderModel.indexBuffer.memory, NULL);
+
+        for (VkBuffer &vertexBuffer : renderModel.vertexBuffers) {
+            vkDestroyBuffer(m_EngineDevice, vertexBuffer, NULL);
+        }
+
+        for (VkDeviceMemory &vertexMemory : renderModel.vertexBuffersMemory) {
+            vkFreeMemory(m_EngineDevice, vertexMemory, NULL);
+        }
+
+        vkDestroyBuffer(m_EngineDevice, renderModel.matricesUBOBuffer.buffer, NULL);
+        vkFreeMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, NULL);
+
+        delete model; // delete the pointer to the Model object
+    }
 }
 
 void Engine::RegisterUpdateFunction(const std::function<void()> &func) {
@@ -1223,8 +1263,6 @@ void Engine::Init() {
         m_Settings.RenderHeight = m_Settings.DisplayHeight;
     }
 
-    SDL_SetRelativeMouseMode(true);
-
     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER, "1");
 
     // lets prepare
@@ -1669,21 +1707,6 @@ void Engine::Start() {
 
         lastFrameTime = frameTime;
 
-        // Fixed updates
-        accumulative += deltaTime;
-
-        // while loop, we are compensating for each fixed update frame potentially missed.
-        while (accumulative >= ENGINE_FIXED_UPDATE_DELTATIME) {
-            for (auto &fixedUpdateFunction : m_FixedUpdateFunctions) {
-                fixedUpdateFunction(m_KeyMap);
-            }
-
-            accumulative -= ENGINE_FIXED_UPDATE_DELTATIME;
-        }
-
-        for (auto &updateFunction : m_UpdateFunctions)
-            updateFunction();
-
         // we got (MAX_FRAMES_IN_FLIGHT) "slots" to use, we can write frames as long as the current frame slot we're using isn't occupied.
         vkWaitForFences(m_EngineDevice, 1, &m_InFlightFences[currentFrameIndex], true, UINT64_MAX);
 
@@ -1712,6 +1735,21 @@ void Engine::Start() {
 
         fmt::println("Time spent acquiring image result: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterAcquireImageResultTime - afterFenceTime).count()));
 #endif
+
+        // Fixed updates
+        accumulative += deltaTime;
+
+        // while loop, we are compensating for each fixed update frame potentially missed.
+        while (accumulative >= ENGINE_FIXED_UPDATE_DELTATIME) {
+            for (auto &fixedUpdateFunction : m_FixedUpdateFunctions) {
+                fixedUpdateFunction(m_KeyMap);
+            }
+
+            accumulative -= ENGINE_FIXED_UPDATE_DELTATIME;
+        }
+
+        for (auto &updateFunction : m_UpdateFunctions)
+            updateFunction();
 
         // "ight im available, if i wasn't already"
         vkResetFences(m_EngineDevice, 1, &m_InFlightFences[currentFrameIndex]);
