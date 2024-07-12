@@ -7,7 +7,6 @@
 #endif
 
 #include <functional>
-#include <boost/thread.hpp>
 
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_init.h>
@@ -103,7 +102,7 @@ struct RenderModel {
     Model *model;
 
     BufferAndMemory vertexBuffer;
-    
+
     std::vector<Uint32> indices;
     BufferAndMemory indexBuffer;
     TextureImageAndMemory diffTexture;

@@ -1661,9 +1661,6 @@ void Engine::Start() {
     bool shouldQuit = false;
     Uint32 currentFrameIndex = 0;
 
-    // start the fixed update loop
-    // boost::thread fixedUpdateThread = boost::thread(&Engine::CallFixedUpdateFunctions, this, &shouldQuit);
-
     using namespace std::chrono;
 
     high_resolution_clock::time_point lastFrameTime, frameTime;
