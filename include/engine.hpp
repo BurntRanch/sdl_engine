@@ -102,8 +102,8 @@ struct UniformBufferObject {
 struct RenderModel {
     Model *model;
 
-    std::vector<VkBuffer> vertexBuffers;
-    std::vector<VkDeviceMemory> vertexBuffersMemory;
+    BufferAndMemory vertexBuffer;
+    
     std::vector<Uint32> indices;
     BufferAndMemory indexBuffer;
     TextureImageAndMemory diffTexture;

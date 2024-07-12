@@ -22,7 +22,7 @@ NAME		 = BurntEngine
 TARGET		 = main
 SRC 	   	 = $(sort $(wildcard src/*.cpp))
 OBJ 	   	 = $(SRC:.cpp=.o)
-LDFLAGS   	+= -lassimp -lfmt -lSDL3 -lvulkan -lboost_system -lboost_thread
+LDFLAGS   	+= -lassimp -lfmt -lSDL3 -lvulkan
 CXXFLAGS  	?= -mtune=generic -march=native
 CXXFLAGS        += -Wno-ignored-attributes -funroll-all-loops -Iinclude -std=c++17 $(VARS)
 

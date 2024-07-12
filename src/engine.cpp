@@ -6,7 +6,6 @@
 #include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_vulkan.h>
-#include <boost/thread/pthread/thread_data.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -535,92 +534,91 @@ VkFormat Engine::FindBestFormat(const std::vector<VkFormat>& candidates, VkImage
 }
 
 Model *Engine::LoadModel(const string &path) {
-    // out
-    RenderModel renderModel{};
-
     // model
-    renderModel.model = new Model(path);
+    Model *model = new Model(path);
 
     // create vertexBuffer
     std::vector<TextureImageAndMemory> textures;
 
-    for (Mesh mesh : renderModel.model->meshes) {
+    for (Mesh mesh : model->meshes) {
+        RenderModel renderModel{};
+
+        renderModel.model = model;
+
         BufferAndMemory vertexBuffer = CreateVertexBuffer(mesh.vertices, false);
-        renderModel.vertexBuffers.push_back(vertexBuffer.buffer);
-        renderModel.vertexBuffersMemory.push_back(vertexBuffer.memory);
-        renderModel.indices.insert(renderModel.indices.end(), mesh.indices.begin(), mesh.indices.end());
+        renderModel.vertexBuffer = vertexBuffer;
+
+        renderModel.indices = mesh.indices;
+        renderModel.indexBuffer = CreateIndexBuffer(mesh.indices, false);
+
         std::vector<TextureImageAndMemory> meshTextures = LoadTexturesFromMesh(mesh, false);
-        textures.insert(textures.end(), meshTextures.begin(), meshTextures.end());
+        renderModel.diffTexture = meshTextures[0];
+
+        VkFormat textureFormat = getBestFormatFromChannels(renderModel.diffTexture.channels);
+
+        // Image view, for sampling.
+        renderModel.diffTextureImageView = CreateImageView(renderModel.diffTexture, textureFormat, VK_IMAGE_ASPECT_COLOR_BIT, false);
+
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
+
+        renderModel.diffTextureSampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
+
+        // UBO
+        VkDeviceSize uniformBufferSize = sizeof(UniformBufferObject);
+
+        renderModel.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
+
+        AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer.buffer, renderModel.matricesUBOBuffer.memory, false);
+
+        vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOMappedMemory);
+
+        std::vector<VkDescriptorSetLayout> layouts(1, m_RenderDescriptorSetLayout);
+        VkDescriptorSetAllocateInfo allocInfo = {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = m_RenderDescriptorPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts = layouts.data();
+
+        if (vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, &renderModel.descriptorSet) != VK_SUCCESS)
+            throw std::runtime_error("Failed to allocate descriptor set!");
+
+        // update descriptor set with buffer
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = renderModel.matricesUBOBuffer.buffer;
+        bufferInfo.offset = 0;
+        bufferInfo.range = uniformBufferSize;
+
+        // update descriptor set with image
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfo.imageView = renderModel.diffTextureImageView;
+        imageInfo.sampler = renderModel.diffTextureSampler;
+
+        std::array<VkWriteDescriptorSet, 2> descriptorWrites;
+        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[0].pNext = nullptr;
+        descriptorWrites[0].dstSet = renderModel.descriptorSet;
+        descriptorWrites[0].dstBinding = 0;
+        descriptorWrites[0].dstArrayElement = 0;
+        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrites[0].descriptorCount = 1;
+        descriptorWrites[0].pBufferInfo = &bufferInfo;
+        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[1].pNext = nullptr;
+        descriptorWrites[1].dstSet = renderModel.descriptorSet;
+        descriptorWrites[1].dstBinding = 1;
+        descriptorWrites[1].dstArrayElement = 0;
+        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[1].descriptorCount = 1;
+        descriptorWrites[1].pImageInfo = &imageInfo;
+
+        vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+
+        m_RenderModels.push_back(renderModel);
     }
 
-    renderModel.indexBuffer = CreateIndexBuffer(renderModel.indices, false);
-
-    renderModel.diffTexture = textures[0];
-    
-    VkFormat textureFormat = getBestFormatFromChannels(renderModel.diffTexture.channels);
-
-    // Image view, for sampling.
-    renderModel.diffTextureImageView = CreateImageView(renderModel.diffTexture, textureFormat, VK_IMAGE_ASPECT_COLOR_BIT, false);
-
-    VkPhysicalDeviceProperties properties{};
-    vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
-
-    renderModel.diffTextureSampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
-
-    // UBO
-    VkDeviceSize uniformBufferSize = sizeof(UniformBufferObject);
-
-    renderModel.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
-
-    AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer.buffer, renderModel.matricesUBOBuffer.memory, false);
-
-    vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOMappedMemory);
-
-    std::vector<VkDescriptorSetLayout> layouts(1, m_RenderDescriptorSetLayout);
-    VkDescriptorSetAllocateInfo allocInfo = {};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_RenderDescriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = layouts.data();
-
-    if (vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, &renderModel.descriptorSet) != VK_SUCCESS)
-        throw std::runtime_error("Failed to allocate descriptor set!");
-
-    // update descriptor set with buffer
-    VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = renderModel.matricesUBOBuffer.buffer;
-    bufferInfo.offset = 0;
-    bufferInfo.range = uniformBufferSize;
-
-    // update descriptor set with image
-    VkDescriptorImageInfo imageInfo{};
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    imageInfo.imageView = renderModel.diffTextureImageView;
-    imageInfo.sampler = renderModel.diffTextureSampler;
-
-    std::array<VkWriteDescriptorSet, 2> descriptorWrites;
-    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptorWrites[0].pNext = nullptr;
-    descriptorWrites[0].dstSet = renderModel.descriptorSet;
-    descriptorWrites[0].dstBinding = 0;
-    descriptorWrites[0].dstArrayElement = 0;
-    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    descriptorWrites[0].descriptorCount = 1;
-    descriptorWrites[0].pBufferInfo = &bufferInfo;
-    descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptorWrites[1].pNext = nullptr;
-    descriptorWrites[1].dstSet = renderModel.descriptorSet;
-    descriptorWrites[1].dstBinding = 1;
-    descriptorWrites[1].dstArrayElement = 0;
-    descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    descriptorWrites[1].descriptorCount = 1;
-    descriptorWrites[1].pImageInfo = &imageInfo;
-
-    vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
-
-    m_RenderModels.push_back(renderModel);
-
-    return renderModel.model;
+    return model;
 }
 
 void Engine::UnloadModel(const Model *model) {
@@ -643,13 +641,8 @@ void Engine::UnloadModel(const Model *model) {
         vkDestroyBuffer(m_EngineDevice, renderModel.indexBuffer.buffer, NULL);
         vkFreeMemory(m_EngineDevice, renderModel.indexBuffer.memory, NULL);
 
-        for (VkBuffer &vertexBuffer : renderModel.vertexBuffers) {
-            vkDestroyBuffer(m_EngineDevice, vertexBuffer, NULL);
-        }
-
-        for (VkDeviceMemory &vertexMemory : renderModel.vertexBuffersMemory) {
-            vkFreeMemory(m_EngineDevice, vertexMemory, NULL);
-        }
+        vkDestroyBuffer(m_EngineDevice, renderModel.vertexBuffer.buffer, NULL);
+        vkFreeMemory(m_EngineDevice, renderModel.vertexBuffer.memory, NULL);
 
         vkDestroyBuffer(m_EngineDevice, renderModel.matricesUBOBuffer.buffer, NULL);
         vkFreeMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, NULL);
@@ -1809,7 +1802,7 @@ void Engine::Start() {
 
                 // vertex buffer binding!!
                 VkDeviceSize mainOffsets[] = {0};
-                vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, renderModel.vertexBuffers.data(), mainOffsets);
+                vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &renderModel.vertexBuffer.buffer, mainOffsets);
 
                 vkCmdBindIndexBuffer(m_CommandBuffers[currentFrameIndex], renderModel.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
