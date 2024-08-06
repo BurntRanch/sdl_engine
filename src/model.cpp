@@ -1,5 +1,6 @@
 #include "error.hpp"
 #include <assimp/material.h>
+#include <assimp/postprocess.h>
 #include <model.hpp>
 #include <stdexcept>
 
@@ -15,7 +16,7 @@ Model::Model(const string &path, glm::vec3 position, glm::vec3 rotation)
 void Model::loadModel(string path)
 {
     Assimp::Importer import;
-    const aiScene *scene = import.ReadFile(path, aiProcess_Triangulate | /*aiProcess_ForceGenNormals | aiProcess_GenSmoothNormals |*/ aiProcess_FlipUVs/* | aiProcess_CalcTangentSpace*/);	
+    const aiScene *scene = import.ReadFile(path, aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_ForceGenNormals | /*aiProcess_GenSmoothNormals |*/ aiProcess_FlipUVs/* | aiProcess_CalcTangentSpace*/);	
     
     if(!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) 
         throw std::runtime_error(fmt::format("Couldn't load models from assimp: {}", import.GetErrorString()));

@@ -12,6 +12,7 @@
 #include <engine.hpp>
 #include <fmt/core.h>
 #include <fstream>
+#include <future>
 #include <ratio>
 #include <set>
 #include <stdexcept>
@@ -546,45 +547,57 @@ VkFormat Engine::FindBestFormat(const std::vector<VkFormat>& candidates, VkImage
     throw std::runtime_error(engineError::CANT_FIND_ANY_FORMAT);
 }
 
+void Engine::LoadMesh(Mesh &mesh, Model *model) {
+    RenderModel renderModel{};
+
+    renderModel.model = model;
+
+    BufferAndMemory vertexBuffer = CreateVertexBuffer(mesh.vertices, false);
+    renderModel.vertexBuffer = vertexBuffer;
+
+    renderModel.indices = mesh.indices;
+    renderModel.indexBuffer = CreateIndexBuffer(mesh.indices, false);
+
+    std::array<TextureImageAndMemory, 1> meshTextures = LoadTexturesFromMesh(mesh, false);
+    renderModel.diffTexture = meshTextures[0];
+
+    VkFormat textureFormat = getBestFormatFromChannels(renderModel.diffTexture.channels);
+
+    // Image view, for sampling.
+    renderModel.diffTextureImageView = CreateImageView(renderModel.diffTexture, textureFormat, VK_IMAGE_ASPECT_COLOR_BIT, false);
+
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
+
+    renderModel.diffTextureSampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
+
+    // UBO
+    VkDeviceSize uniformBufferSize = sizeof(MatricesUBO);
+
+    renderModel.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
+
+    AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer.buffer, renderModel.matricesUBOBuffer.memory, false);
+
+    vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOMappedMemory);
+
+    m_RenderModels.push_back(renderModel);
+}
+
 void Engine::LoadModel(Model *model) {
     // create vertexBuffer
     std::vector<TextureImageAndMemory> textures;
 
+    std::vector<std::future<void>> tasks;
+
     for (Mesh &mesh : model->meshes) {
-        RenderModel renderModel{};
-
-        renderModel.model = model;
-
-        BufferAndMemory vertexBuffer = CreateVertexBuffer(mesh.vertices, false);
-        renderModel.vertexBuffer = vertexBuffer;
-
-        renderModel.indices = mesh.indices;
-        renderModel.indexBuffer = CreateIndexBuffer(mesh.indices, false);
-
-        std::array<TextureImageAndMemory, 1> meshTextures = LoadTexturesFromMesh(mesh, false);
-        renderModel.diffTexture = meshTextures[0];
-
-        VkFormat textureFormat = getBestFormatFromChannels(renderModel.diffTexture.channels);
-
-        // Image view, for sampling.
-        renderModel.diffTextureImageView = CreateImageView(renderModel.diffTexture, textureFormat, VK_IMAGE_ASPECT_COLOR_BIT, false);
-
-        VkPhysicalDeviceProperties properties{};
-        vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
-
-        renderModel.diffTextureSampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
-
-        // UBO
-        VkDeviceSize uniformBufferSize = sizeof(MatricesUBO);
-
-        renderModel.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
-
-        AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer.buffer, renderModel.matricesUBOBuffer.memory, false);
-
-        vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOMappedMemory);
-
-        m_RenderModels.push_back(renderModel);
+        tasks.push_back(std::async(std::launch::async, &Engine::LoadMesh, this, std::ref(mesh), model));
     }
+
+    for (std::future<void> &task : tasks) {
+        task.wait();
+    }
+
+    return;
 }
 
 void Engine::UnloadModel(Model *model) {

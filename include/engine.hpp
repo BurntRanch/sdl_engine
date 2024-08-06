@@ -186,6 +186,7 @@ private:
     void AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &memory, bool recordAllocation = true);
     void CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size);
 
+    void LoadMesh(Mesh &mesh, Model *model);
     std::array<TextureImageAndMemory, 1> LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations = true);
 
     BufferAndMemory CreateVertexBuffer(const std::vector<Vertex> &verts, bool recordAllocation = true);
