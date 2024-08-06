@@ -1,5 +1,7 @@
+#include "error.hpp"
 #include <assimp/material.h>
 #include <model.hpp>
+#include <stdexcept>
 
 
 Model::Model(const string &path, glm::vec3 position, glm::vec3 rotation)
@@ -42,7 +44,9 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
 {
     vector<Vertex> vertices;
     vector<unsigned int> indices;
-    vector<string> texturePaths;
+    string diffuseMap;
+
+    glm::vec3 diffuse;
     //float shininess = 0.0;
     //float roughness = 0.1;
     //float metallic = 0.0;
@@ -58,29 +62,30 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
         vector.z = mesh->mVertices[i].z;
         vertex.Position = vector;
 
-        if (vector.x > m_BoundingBox[0].x)
-            m_BoundingBox[0].x = vector.x;
-        if (vector.x < m_BoundingBox[1].x)
-            m_BoundingBox[1].x = vector.x;
+        if (vector.x > boundingBox[0].x)
+            boundingBox[0].x = vector.x;
+        if (vector.x < boundingBox[1].x)
+            boundingBox[1].x = vector.x;
 
-        if (vector.y > m_BoundingBox[0].y)
-            m_BoundingBox[0].y = vector.y;
-        if (vector.y < m_BoundingBox[1].y)
-            m_BoundingBox[1].y = vector.y;
+        if (vector.y > boundingBox[0].y)
+            boundingBox[0].y = vector.y;
+        if (vector.y < boundingBox[1].y)
+            boundingBox[1].y = vector.y;
 
-        if (vector.z > m_BoundingBox[0].z)
-            m_BoundingBox[0].z = vector.z;
-        if (vector.z < m_BoundingBox[1].z)
-            m_BoundingBox[1].z = vector.z;
+        if (vector.z > boundingBox[0].z)
+            boundingBox[0].z = vector.z;
+        if (vector.z < boundingBox[1].z)
+            boundingBox[1].z = vector.z;
 
         // normals
-        // if (mesh->HasNormals())
-        // {
-        //     vector.x = mesh->mNormals[i].x;
-        //     vector.y = mesh->mNormals[i].y;
-        //     vector.z = mesh->mNormals[i].z;
-        //     vertex.Normal = vector;
-        // }
+        if (mesh->HasNormals())
+        {
+            vector.x = mesh->mNormals[i].x;
+            vector.y = mesh->mNormals[i].y;
+            vector.z = mesh->mNormals[i].z;
+            vertex.Normal = vector;
+        }
+
         // texture coordinates
         if(mesh->mTextureCoords[0]) // does the mesh contain texture coordinates?
         {
@@ -90,9 +95,9 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
             vec.x = mesh->mTextureCoords[0][i].x; 
             vec.y = mesh->mTextureCoords[0][i].y;
             vertex.TexCoord = vec;
-        }
-        else
+        } else {
             vertex.TexCoord = glm::vec2(0.0f, 0.0f);
+        }
         
         // if (mesh->HasTangentsAndBitangents())
         // {
@@ -119,10 +124,11 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
     for(unsigned int i = 0; i < mesh->mNumFaces; i++)
     {
         aiFace face = mesh->mFaces[i];
-        for(unsigned int j = 0; j < face.mNumIndices; j++)
+        for (unsigned int j = 0; j < face.mNumIndices; j++) {
             indices.push_back(face.mIndices[j]);
+        }
     }
-
+        
     // process material
     if(mesh->mMaterialIndex >= 0)
     {
@@ -131,14 +137,16 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
         // material->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness);
         // material->Get(AI_MATKEY_METALLIC_FACTOR, metallic);
 
-        vector<string> diffuseMaps;
-        for (size_t i = 0; i < material->GetTextureCount(aiTextureType_DIFFUSE); i++) {
+        size_t diffuseTextureCount = material->GetTextureCount(aiTextureType_DIFFUSE);
+        if (diffuseTextureCount >= 1) {
             aiString path;
-            material->GetTexture(aiTextureType_DIFFUSE, i, &path);
-            diffuseMaps.push_back(string(path.C_Str()));
+            material->GetTexture(aiTextureType_DIFFUSE, 0, &path);
+            diffuseMap = string(path.C_Str());
         }
 
-        texturePaths.insert(texturePaths.end(), diffuseMaps.begin(), diffuseMaps.end());
+        aiColor4D aiDiffuseColor;
+        aiGetMaterialColor(material, AI_MATKEY_COLOR_DIFFUSE, &aiDiffuseColor);
+        diffuse = {aiDiffuseColor.r, aiDiffuseColor.g, aiDiffuseColor.b};
         // vector<Texture> specularMaps = loadMaterialTextures(material, 
         //                                     aiTextureType_SPECULAR, "texture_specular");
         // textures.insert(textures.end(), specularMaps.begin(), specularMaps.end());
@@ -147,34 +155,10 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
         //                                     aiTextureType_HEIGHT, "texture_normal");
         // textures.insert(textures.end(), normalMaps.begin(), normalMaps.end());
     } else {
-        texturePaths.push_back("texture.jpg");
+        throw std::runtime_error(engineError::NO_MATERIALS);
     }
 
-    return Mesh(vertices, indices, texturePaths/*, shininess, roughness, metallic*/);
-}
-
-void Model::SetPosition(glm::vec3 pos) {
-    m_Position = pos;
-
-    m_NeedsUpdate = true;
-}
-
-glm::vec3 Model::GetPosition() {
-    return m_Position;
-}
-
-void Model::SetRotation(glm::vec3 rot) {
-    m_Rotation = rot;
-
-    m_NeedsUpdate = true;
-}
-
-glm::vec3 Model::GetRotation() {
-    return m_Rotation;
-}
-
-std::array<glm::vec3, 2> Model::GetBoundingBox() {
-    return m_BoundingBox;
+    return Mesh(vertices, indices, diffuseMap/*, shininess, roughness, metallic*/, diffuse);
 }
 
 glm::mat4 Model::GetModelMatrix() {

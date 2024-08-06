@@ -1,7 +1,7 @@
 [video]
 VSyncEnabled = false
-RenderWidth = 3840
-RenderHeight = 2160
+RenderWidth = 800
+RenderHeight = 600
 DisplayWidth = 800
 DisplayHeight = 600
 Fullscreen = false
@@ -9,7 +9,7 @@ IgnoreRenderResolution = true     # If IgnoreRenderResolution is true, it will i
 FieldOfView = 90
 
 [profile]
-ReportFPS = false
+ReportFPS = true
 
 [input]
 MouseSensitivity = 0.1

@@ -120,8 +120,8 @@ Engine::~Engine() {
         vkDestroyPipeline(m_EngineDevice, pipelineAndLayout.pipeline, NULL);
         vkDestroyPipelineLayout(m_EngineDevice, pipelineAndLayout.layout, NULL);
     }
-    for (RenderPass renderPass : m_RenderPasses)
-        vkDestroyRenderPass(m_EngineDevice, renderPass.vulkanRenderPass, NULL);
+    for (VkRenderPass renderPass : m_RenderPasses)
+        vkDestroyRenderPass(m_EngineDevice, renderPass, NULL);
     for (VkFramebuffer framebuffer : m_SwapchainFramebuffers)
         if (framebuffer)
             vkDestroyFramebuffer(m_EngineDevice, framebuffer, NULL);
@@ -164,11 +164,17 @@ Engine::~Engine() {
     if (m_RenderDescriptorSetLayout)
         vkDestroyDescriptorSetLayout(m_EngineDevice, m_RenderDescriptorSetLayout, NULL);
 
-    if (m_UpscaleDescriptorPool)
-        vkDestroyDescriptorPool(m_EngineDevice, m_UpscaleDescriptorPool, NULL);
+    if (m_ParticleDescriptorPool)
+        vkDestroyDescriptorPool(m_EngineDevice, m_ParticleDescriptorPool, NULL);
 
-    if (m_UpscaleDescriptorSetLayout)
-        vkDestroyDescriptorSetLayout(m_EngineDevice, m_UpscaleDescriptorSetLayout, NULL);
+    if (m_ParticleDescriptorSetLayout)
+        vkDestroyDescriptorSetLayout(m_EngineDevice, m_ParticleDescriptorSetLayout, NULL);
+
+    if (m_RescaleDescriptorPool)
+        vkDestroyDescriptorPool(m_EngineDevice, m_RescaleDescriptorPool, NULL);
+
+    if (m_RescaleDescriptorSetLayout)
+        vkDestroyDescriptorSetLayout(m_EngineDevice, m_RescaleDescriptorSetLayout, NULL);
 
     if (m_CommandPool)
         vkDestroyCommandPool(m_EngineDevice, m_CommandPool, NULL);
@@ -266,65 +272,72 @@ void Engine::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBu
     EndSingleTimeCommands(commandBuffer);
 }
 
-std::vector<TextureImageAndMemory> Engine::LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations) {
-    std::vector<TextureImageAndMemory> textures;
+// first element = diffuse
+std::array<TextureImageAndMemory, 1> Engine::LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations) {
+    std::array<TextureImageAndMemory, 1> textures;
     
-    for (string path : mesh.texturePaths) {
-        TextureBufferAndMemory textureBufferAndMemory = LoadTextureFromFile("textures/" + path);
-        VkFormat textureFormat = getBestFormatFromChannels(textureBufferAndMemory.channels);
+    {
+        if (!mesh.diffuseMapPath.empty()) {
+            TextureBufferAndMemory textureBufferAndMemory = LoadTextureFromFile("textures" / mesh.diffuseMapPath);
+            VkFormat textureFormat = getBestFormatFromChannels(textureBufferAndMemory.channels);
 
-        TextureImageAndMemory textureImageAndMemory = CreateImage(
-        textureBufferAndMemory.width, textureBufferAndMemory.height,
-        textureFormat, VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, recordAllocations
-            );
-        ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
-                    textureFormat, 
-                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+            textures[0] = CreateImage(
+            textureBufferAndMemory.width, textureBufferAndMemory.height,
+            textureFormat, VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, recordAllocations
                 );
-        CopyBufferToImage(textureBufferAndMemory, textureImageAndMemory.imageAndMemory.image);
-        ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
-                    textureFormat, 
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            ChangeImageLayout(textures[0].imageAndMemory.image, 
+                        textureFormat, 
+                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                    );
+            CopyBufferToImage(textureBufferAndMemory, textures[0].imageAndMemory.image);
+            ChangeImageLayout(textures[0].imageAndMemory.image, 
+                        textureFormat, 
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                    );
+            
+            vkDestroyBuffer(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.buffer, NULL);
+            vkFreeMemory(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.memory, NULL);
+
+            m_AllocatedBuffers.erase(std::find(m_AllocatedBuffers.begin(), m_AllocatedBuffers.end(), textureBufferAndMemory.bufferAndMemory.buffer));
+            m_AllocatedMemory.erase(std::find(m_AllocatedMemory.begin(), m_AllocatedMemory.end(), textureBufferAndMemory.bufferAndMemory.memory));
+        } else {
+            /* Allocate the buffer that stores our pixel data. */
+            BufferAndMemory textureBufferAndMemory;
+
+            VkDeviceSize stagingBufferSize = sizeof(Uint8) * 4;  // R8G8B8A8
+
+            AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, textureBufferAndMemory.buffer, textureBufferAndMemory.memory, false);
+
+            // copy the texture data into the buffer
+            void *data;
+            std::array<Uint8, 4> texColors = {static_cast<Uint8>(mesh.diffuse.r * 255), static_cast<Uint8>(mesh.diffuse.g * 255), static_cast<Uint8>(mesh.diffuse.b * 255), 255};
+
+            vkMapMemory(m_EngineDevice, textureBufferAndMemory.memory, 0, stagingBufferSize, 0, &data);
+            SDL_memcpy(data, (void *)texColors.data(), stagingBufferSize);
+            vkUnmapMemory(m_EngineDevice, textureBufferAndMemory.memory);
+
+            /* Transfer our newly created texture to an image */
+            textures[0] = CreateImage(
+            1, 1,
+            VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, recordAllocations
                 );
-        
-        vkDestroyBuffer(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.buffer, NULL);
-        vkFreeMemory(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.memory, NULL);
-
-        m_AllocatedBuffers.erase(std::find(m_AllocatedBuffers.begin(), m_AllocatedBuffers.end(), textureBufferAndMemory.bufferAndMemory.buffer));
-        m_AllocatedMemory.erase(std::find(m_AllocatedMemory.begin(), m_AllocatedMemory.end(), textureBufferAndMemory.bufferAndMemory.memory));
-
-        textures.push_back(textureImageAndMemory);
-    }
-
-    if (textures.empty()) {
-        TextureBufferAndMemory textureBufferAndMemory = LoadTextureFromFile("textures/texture.jpg");
-        VkFormat textureFormat = getBestFormatFromChannels(textureBufferAndMemory.channels);
-
-        TextureImageAndMemory textureImageAndMemory = CreateImage(
-        textureBufferAndMemory.width, textureBufferAndMemory.height,
-        textureFormat, VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, recordAllocations
-            );
-        ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
-                    textureFormat, 
-                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-                );
-        CopyBufferToImage(textureBufferAndMemory, textureImageAndMemory.imageAndMemory.image);
-        ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
-                    textureFormat, 
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                );
-        
-        vkDestroyBuffer(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.buffer, NULL);
-        vkFreeMemory(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.memory, NULL);
-
-        m_AllocatedBuffers.erase(std::find(m_AllocatedBuffers.begin(), m_AllocatedBuffers.end(), textureBufferAndMemory.bufferAndMemory.buffer));
-        m_AllocatedMemory.erase(std::find(m_AllocatedMemory.begin(), m_AllocatedMemory.end(), textureBufferAndMemory.bufferAndMemory.memory));
-
-        textures.push_back(textureImageAndMemory);
+            ChangeImageLayout(textures[0].imageAndMemory.image, 
+                        VK_FORMAT_R8G8B8A8_SRGB, 
+                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                    );
+            CopyBufferToImage({textureBufferAndMemory, 1, 1, 4}, textures[0].imageAndMemory.image);
+            ChangeImageLayout(textures[0].imageAndMemory.image, 
+                        VK_FORMAT_R8G8B8A8_SRGB, 
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                    );
+            
+            vkDestroyBuffer(m_EngineDevice, textureBufferAndMemory.buffer, NULL);
+            vkFreeMemory(m_EngineDevice, textureBufferAndMemory.memory, NULL);
+        }
     }
 
     return textures;
@@ -533,14 +546,11 @@ VkFormat Engine::FindBestFormat(const std::vector<VkFormat>& candidates, VkImage
     throw std::runtime_error(engineError::CANT_FIND_ANY_FORMAT);
 }
 
-Model *Engine::LoadModel(const string &path) {
-    // model
-    Model *model = new Model(path);
-
+void Engine::LoadModel(Model *model) {
     // create vertexBuffer
     std::vector<TextureImageAndMemory> textures;
 
-    for (Mesh mesh : model->meshes) {
+    for (Mesh &mesh : model->meshes) {
         RenderModel renderModel{};
 
         renderModel.model = model;
@@ -551,7 +561,7 @@ Model *Engine::LoadModel(const string &path) {
         renderModel.indices = mesh.indices;
         renderModel.indexBuffer = CreateIndexBuffer(mesh.indices, false);
 
-        std::vector<TextureImageAndMemory> meshTextures = LoadTexturesFromMesh(mesh, false);
+        std::array<TextureImageAndMemory, 1> meshTextures = LoadTexturesFromMesh(mesh, false);
         renderModel.diffTexture = meshTextures[0];
 
         VkFormat textureFormat = getBestFormatFromChannels(renderModel.diffTexture.channels);
@@ -565,7 +575,7 @@ Model *Engine::LoadModel(const string &path) {
         renderModel.diffTextureSampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
 
         // UBO
-        VkDeviceSize uniformBufferSize = sizeof(UniformBufferObject);
+        VkDeviceSize uniformBufferSize = sizeof(MatricesUBO);
 
         renderModel.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
 
@@ -573,70 +583,35 @@ Model *Engine::LoadModel(const string &path) {
 
         vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOMappedMemory);
 
-        std::vector<VkDescriptorSetLayout> layouts(1, m_RenderDescriptorSetLayout);
-        VkDescriptorSetAllocateInfo allocInfo = {};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = m_RenderDescriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = layouts.data();
-
-        if (vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, &renderModel.descriptorSet) != VK_SUCCESS)
-            throw std::runtime_error("Failed to allocate descriptor set!");
-
-        // update descriptor set with buffer
-        VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = renderModel.matricesUBOBuffer.buffer;
-        bufferInfo.offset = 0;
-        bufferInfo.range = uniformBufferSize;
-
-        // update descriptor set with image
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = renderModel.diffTextureImageView;
-        imageInfo.sampler = renderModel.diffTextureSampler;
-
-        std::array<VkWriteDescriptorSet, 2> descriptorWrites;
-        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[0].pNext = nullptr;
-        descriptorWrites[0].dstSet = renderModel.descriptorSet;
-        descriptorWrites[0].dstBinding = 0;
-        descriptorWrites[0].dstArrayElement = 0;
-        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptorWrites[0].descriptorCount = 1;
-        descriptorWrites[0].pBufferInfo = &bufferInfo;
-        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[1].pNext = nullptr;
-        descriptorWrites[1].dstSet = renderModel.descriptorSet;
-        descriptorWrites[1].dstBinding = 1;
-        descriptorWrites[1].dstArrayElement = 0;
-        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[1].descriptorCount = 1;
-        descriptorWrites[1].pImageInfo = &imageInfo;
-
-        vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
-
         m_RenderModels.push_back(renderModel);
     }
-
-    return model;
 }
 
-void Engine::UnloadModel(const Model *model) {
+void Engine::UnloadModel(Model *model) {
+    std::vector<size_t> removedRenderModels;
+
     for (size_t i = 0; i < m_RenderModels.size(); i++) {
         if (m_RenderModels[i].model != model)
             continue;
 
         RenderModel renderModel = m_RenderModels[i];
 
-        m_RenderModels.erase(m_RenderModels.begin() + i);
+        // m_RenderModels.erase(m_RenderModels.begin() + i);
+        removedRenderModels.push_back(i);
 
         // Before we start, wait for the InFlightFences to stop.
         vkWaitForFences(m_EngineDevice, m_InFlightFences.size(), m_InFlightFences.data(), true, UINT64_MAX);
 
-        vkDestroyImageView(m_EngineDevice, renderModel.diffTextureImageView, NULL);
-        vkDestroyImage(m_EngineDevice, renderModel.diffTexture.imageAndMemory.image, NULL);
-        vkFreeMemory(m_EngineDevice, renderModel.diffTexture.imageAndMemory.memory, NULL);
-        vkDestroySampler(m_EngineDevice, renderModel.diffTextureSampler, NULL);
+        if (renderModel.diffTextureImageView)
+            vkDestroyImageView(m_EngineDevice, renderModel.diffTextureImageView, NULL);
+
+        if (renderModel.diffTexture.imageAndMemory.image) {
+            vkDestroyImage(m_EngineDevice, renderModel.diffTexture.imageAndMemory.image, NULL);
+            vkFreeMemory(m_EngineDevice, renderModel.diffTexture.imageAndMemory.memory, NULL);
+        }
+
+        if (renderModel.diffTextureSampler)
+            vkDestroySampler(m_EngineDevice, renderModel.diffTextureSampler, NULL);
         
         vkDestroyBuffer(m_EngineDevice, renderModel.indexBuffer.buffer, NULL);
         vkFreeMemory(m_EngineDevice, renderModel.indexBuffer.memory, NULL);
@@ -647,7 +622,113 @@ void Engine::UnloadModel(const Model *model) {
         vkDestroyBuffer(m_EngineDevice, renderModel.matricesUBOBuffer.buffer, NULL);
         vkFreeMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, NULL);
 
-        delete model; // delete the pointer to the Model object
+
+        // Since now, the Model object is now owned by the caller.
+        // delete model; // delete the pointer to the Model object
+    }
+
+    auto renderModelsBegin = m_RenderModels.begin();
+    for (size_t i : removedRenderModels) {
+        m_RenderModels.erase(renderModelsBegin + i);
+    }
+}
+
+void Engine::AddParticle(Particle *particle) {
+    std::array<glm::vec3, 2> particleBoundingBox = particle->GetBoundingBox();
+
+    RenderParticle renderParticle{};
+
+    renderParticle.particle = particle;
+
+    // matrices UBO
+    VkDeviceSize matricesUniformBufferSize = sizeof(MatricesUBO);
+
+    renderParticle.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
+
+    AllocateBuffer(matricesUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderParticle.matricesUBOBuffer.buffer, renderParticle.matricesUBOBuffer.memory, false);
+
+    vkMapMemory(m_EngineDevice, renderParticle.matricesUBOBuffer.memory, 0, matricesUniformBufferSize, 0, &renderParticle.matricesUBOMappedMemory);
+
+    // particles UBO
+    VkDeviceSize particleUniformBufferSize = sizeof(ParticleUBO);
+
+    renderParticle.particleUBO = {particle->GetPosition(), particleBoundingBox[0], particleBoundingBox[1]};
+
+    AllocateBuffer(particleUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderParticle.particleUBOBuffer.buffer, renderParticle.particleUBOBuffer.memory, false);
+
+    vkMapMemory(m_EngineDevice, renderParticle.particleUBOBuffer.memory, 0, particleUniformBufferSize, 0, &renderParticle.particleUBOMappedMemory);
+
+    std::array<VkDescriptorSetLayout, 1> layouts = { m_ParticleDescriptorSetLayout };
+    VkDescriptorSetAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = m_ParticleDescriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = layouts.data();
+
+    VkResult result = vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, &renderParticle.descriptorSet);
+
+    if (result != VK_SUCCESS)
+        throw std::runtime_error(fmt::format("Failed to allocate descriptor set! ({})", string_VkResult(result)));
+
+    // update descriptor set with buffers
+    VkDescriptorBufferInfo matricesBufferInfo{};
+    matricesBufferInfo.buffer = renderParticle.matricesUBOBuffer.buffer;
+    matricesBufferInfo.offset = 0;
+    matricesBufferInfo.range = matricesUniformBufferSize;
+
+    // update descriptor set with buffer
+    VkDescriptorBufferInfo particleBufferInfo{};
+    particleBufferInfo.buffer = renderParticle.particleUBOBuffer.buffer;
+    particleBufferInfo.offset = 0;
+    particleBufferInfo.range = particleUniformBufferSize;
+
+    std::array<VkWriteDescriptorSet, 2> descriptorWrites;
+    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrites[0].pNext = nullptr;
+    descriptorWrites[0].dstSet = renderParticle.descriptorSet;
+    descriptorWrites[0].dstBinding = 0;
+    descriptorWrites[0].dstArrayElement = 0;
+    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    descriptorWrites[0].descriptorCount = 1;
+    descriptorWrites[0].pBufferInfo = &matricesBufferInfo;
+    descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrites[1].pNext = nullptr;
+    descriptorWrites[1].dstSet = renderParticle.descriptorSet;
+    descriptorWrites[1].dstBinding = 1;
+    descriptorWrites[1].dstArrayElement = 0;
+    descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    descriptorWrites[1].descriptorCount = 1;
+    descriptorWrites[1].pBufferInfo = &particleBufferInfo;
+
+    vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+
+    m_RenderParticles.push_back(renderParticle);
+}
+
+void Engine::RemoveParticle(Particle *particle) {
+    for (size_t i = 0; i < m_RenderParticles.size(); i++) {
+        if (m_RenderParticles[i].particle != particle)
+            continue;
+
+        RenderParticle renderParticle = m_RenderParticles[i];
+
+        m_RenderParticles.erase(m_RenderParticles.begin() + i);
+
+        // Before we start, wait for the InFlightFences to stop.
+        vkWaitForFences(m_EngineDevice, m_InFlightFences.size(), m_InFlightFences.data(), true, UINT64_MAX);
+
+        // vkDestroyImageView(m_EngineDevice, renderModel.diffTextureImageView, NULL);
+        // vkDestroyImage(m_EngineDevice, renderModel.diffTexture.imageAndMemory.image, NULL);
+        // vkFreeMemory(m_EngineDevice, renderModel.diffTexture.imageAndMemory.memory, NULL);
+        // vkDestroySampler(m_EngineDevice, renderModel.diffTextureSampler, NULL);
+
+        vkDestroyBuffer(m_EngineDevice, renderParticle.matricesUBOBuffer.buffer, NULL);
+        vkFreeMemory(m_EngineDevice, renderParticle.matricesUBOBuffer.memory, NULL);
+
+        vkDestroyBuffer(m_EngineDevice, renderParticle.particleUBOBuffer.buffer, NULL);
+        vkFreeMemory(m_EngineDevice, renderParticle.particleUBOBuffer.memory, NULL);
+
+        vkFreeDescriptorSets(m_EngineDevice, m_ParticleDescriptorPool, 1, &renderParticle.descriptorSet);
     }
 }
 
@@ -967,10 +1048,7 @@ void Engine::ChangeImageLayout(VkImage image, VkFormat format, VkImageLayout old
 /* Creates a Vulkan graphics pipeline, shaderName will be used as a part of the path.
  * Sanitization is the job of the caller.
  */
-PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, RenderPass &renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts) {
-    if (renderPass.graphicsPipeline.pipeline)
-        throw std::runtime_error(engineError::RENDERPASS_PIPELINE_EXISTS);
-
+PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts) {
     auto vertShader = readFile("shaders/" + shaderName + ".vert.spv");
     auto fragShader = readFile("shaders/" + shaderName + ".frag.spv");
 
@@ -1106,7 +1184,7 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
     pipelineInfo.layout = pipelineAndLayout.layout;
-    pipelineInfo.renderPass = renderPass.vulkanRenderPass;
+    pipelineInfo.renderPass = renderPass;
     pipelineInfo.subpass = subpassIndex;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
     pipelineInfo.basePipelineIndex = -1;
@@ -1122,8 +1200,6 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
     vkDestroyShaderModule(m_EngineDevice, fragShaderModule, NULL);
 
     m_PipelineAndLayouts.push_back(pipelineAndLayout);
-
-    renderPass.graphicsPipeline = pipelineAndLayout;
 
     return pipelineAndLayout;
 }
@@ -1204,6 +1280,8 @@ VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentSto
     VkRenderPass renderPass;
     if (vkCreateRenderPass(m_EngineDevice, &renderPassInfo, NULL, &renderPass))
         throw std::runtime_error(engineError::RENDERPASS_CREATION_FAILURE);
+
+    m_RenderPasses.push_back(renderPass);
 
     return renderPass;
 }
@@ -1358,6 +1436,8 @@ void Engine::Init() {
     if (vkCreateDevice(m_EnginePhysicalDevice, &deviceCreateInfo, nullptr, &m_EngineDevice) != VK_SUCCESS)
         throw std::runtime_error(engineError::CANT_CREATE_DEVICE);
 
+    vkCmdPushDescriptorSet = reinterpret_cast<PFN_vkCmdPushDescriptorSetKHR>(vkGetDeviceProcAddr(m_EngineDevice, "vkCmdPushDescriptorSetKHR"));
+
     vkGetDeviceQueue(m_EngineDevice, m_GraphicsQueueIndex, 0, &m_GraphicsQueue);
     vkGetDeviceQueue(m_EngineDevice, m_PresentQueueIndex,  0, &m_PresentQueue );
 
@@ -1365,8 +1445,8 @@ void Engine::Init() {
 
     m_RenderImageFormat = getBestFormatFromChannels(4);
 
-    m_MainRenderPass.vulkanRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1, m_RenderImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    m_UpscaleRenderPass.vulkanRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
+    m_MainRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 2, m_RenderImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    m_RescaleRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
 
     VkFormat depthFormat = FindDepthFormat();
 
@@ -1391,8 +1471,8 @@ void Engine::Init() {
     
     m_RenderImageAndMemory = renderImage.imageAndMemory;
 
-    m_RenderFramebuffer = CreateFramebuffer(m_MainRenderPass.vulkanRenderPass, renderImageView, {m_Settings.RenderWidth, m_Settings.RenderHeight}, depthImageView);
-    InitFramebuffers(m_UpscaleRenderPass.vulkanRenderPass, nullptr);
+    m_RenderFramebuffer = CreateFramebuffer(m_MainRenderPass, renderImageView, {m_Settings.RenderWidth, m_Settings.RenderHeight}, depthImageView);
+    InitFramebuffers(m_RescaleRenderPass, nullptr);
 
     // VkPhysicalDeviceProperties properties{};
     // vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
@@ -1427,10 +1507,37 @@ void Engine::Init() {
 
         VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
         descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        descriptorSetLayoutCreateInfo.flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT;
         descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
         descriptorSetLayoutCreateInfo.pBindings = bindings.data();
 
         if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_RenderDescriptorSetLayout) != VK_SUCCESS)
+            throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
+    }
+
+    {
+        VkDescriptorSetLayoutBinding matricesUBODescriptorSetLayoutBinding{};
+        matricesUBODescriptorSetLayoutBinding.binding = 0;
+        matricesUBODescriptorSetLayoutBinding.descriptorCount = 1;
+        matricesUBODescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        matricesUBODescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        matricesUBODescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+        VkDescriptorSetLayoutBinding particlesUBODescriptorSetLayoutBinding{};
+        particlesUBODescriptorSetLayoutBinding.binding = 1;
+        particlesUBODescriptorSetLayoutBinding.descriptorCount = 1;
+        particlesUBODescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        particlesUBODescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        particlesUBODescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {matricesUBODescriptorSetLayoutBinding, particlesUBODescriptorSetLayoutBinding};
+
+        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
+        descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+
+        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_ParticleDescriptorSetLayout) != VK_SUCCESS)
             throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
     }
 
@@ -1449,7 +1556,7 @@ void Engine::Init() {
         descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
         descriptorSetLayoutCreateInfo.pBindings = bindings.data();
 
-        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_UpscaleDescriptorSetLayout) != VK_SUCCESS)
+        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_RescaleDescriptorSetLayout) != VK_SUCCESS)
             throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
     }
 
@@ -1465,7 +1572,7 @@ void Engine::Init() {
     m_RenderScissor.extent = {m_Settings.RenderWidth, m_Settings.RenderHeight};
 
 
-    // Upscale
+    // Rescale
     m_DisplayViewport.x = 0.0f;
     m_DisplayViewport.y = 0.0f;
     m_DisplayViewport.width = (float) m_Settings.DisplayWidth;
@@ -1476,12 +1583,9 @@ void Engine::Init() {
     m_DisplayScissor.offset = {0, 0};
     m_DisplayScissor.extent = {m_Settings.DisplayWidth, m_Settings.DisplayHeight};
 
-    PipelineAndLayout mainGraphicsPipeline = CreateGraphicsPipeline("lighting", m_MainRenderPass, 0, VK_FRONT_FACE_COUNTER_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_RenderDescriptorSetLayout});
-    PipelineAndLayout upscaleGraphicsPipeline = CreateGraphicsPipeline("upscale", m_UpscaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UpscaleDescriptorSetLayout});
-
-    // we can now push back the render pass because we created the graphics pipelines.
-    m_RenderPasses.push_back(m_MainRenderPass);
-    m_RenderPasses.push_back(m_UpscaleRenderPass);
+    m_MainGraphicsPipeline = CreateGraphicsPipeline("lighting", m_MainRenderPass, 0, VK_FRONT_FACE_COUNTER_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_RenderDescriptorSetLayout});
+    m_ParticleGraphicsPipeline = CreateGraphicsPipeline("particle", m_MainRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_ParticleDescriptorSetLayout});
+    m_RescaleGraphicsPipeline = CreateGraphicsPipeline("rescale", m_RescaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_RescaleDescriptorSetLayout});
 
     /* RENDER DESCRIPTOR POOL INITIALIZATION */
     {
@@ -1490,6 +1594,7 @@ void Engine::Init() {
 
         VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
         descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        descriptorPoolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
         descriptorPoolCreateInfo.poolSizeCount = poolSizes.size();
         descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
         descriptorPoolCreateInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
@@ -1498,7 +1603,23 @@ void Engine::Init() {
             throw std::runtime_error("Failed to create descriptor pool!");
     }
     
-    /* UPSCALE DESCRIPTOR POOL INITIALIZATION */
+    /* PARTICLE DESCRIPTOR POOL INITIALIZATION */
+    {
+        std::array<VkDescriptorPoolSize, 2> poolSizes = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT,
+                                                         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT};
+
+        VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
+        descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        descriptorPoolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        descriptorPoolCreateInfo.poolSizeCount = poolSizes.size();
+        descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
+        descriptorPoolCreateInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
+
+        if (vkCreateDescriptorPool(m_EngineDevice, &descriptorPoolCreateInfo, NULL, &m_ParticleDescriptorPool) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create descriptor pool!");
+    }
+    
+    /* RESCALE DESCRIPTOR POOL INITIALIZATION */
     {
         std::array<VkDescriptorPoolSize, 1> poolSizes = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT};
 
@@ -1508,108 +1629,66 @@ void Engine::Init() {
         descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
         descriptorPoolCreateInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
 
-        if (vkCreateDescriptorPool(m_EngineDevice, &descriptorPoolCreateInfo, NULL, &m_UpscaleDescriptorPool) != VK_SUCCESS)
+        if (vkCreateDescriptorPool(m_EngineDevice, &descriptorPoolCreateInfo, NULL, &m_RescaleDescriptorPool) != VK_SUCCESS)
             throw std::runtime_error("Failed to create descriptor pool!");
     }
 
-    // Image view, for sampling the render texture for upscaling.
+    // Image view, for sampling the render texture for rescaling.
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
 
-    m_UpscaleRenderSampler = CreateSampler(properties.limits.maxSamplerAnisotropy);
+    m_RescaleRenderSampler = CreateSampler(properties.limits.maxSamplerAnisotropy);
 
-    std::vector<VkDescriptorSetLayout> layouts(1, m_UpscaleDescriptorSetLayout);
-    VkDescriptorSetAllocateInfo allocInfo = {};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_UpscaleDescriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = layouts.data();
+    {
+        std::vector<VkDescriptorSetLayout> layouts(1, m_RescaleDescriptorSetLayout);
+        VkDescriptorSetAllocateInfo allocInfo = {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = m_RescaleDescriptorPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts = layouts.data();
 
-    if (vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, &m_UpscaleDescriptorSet) != VK_SUCCESS)
-        throw std::runtime_error("Failed to allocate descriptor set for upscale render pass!");
+        if (vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, &m_RescaleDescriptorSet) != VK_SUCCESS)
+            throw std::runtime_error("Failed to allocate descriptor set for rescale render pass!");
 
-    // update descriptor set with image
-    VkDescriptorImageInfo imageInfo{};
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    imageInfo.imageView = renderImageView;
-    imageInfo.sampler = m_UpscaleRenderSampler;
+        // update descriptor set with image
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfo.imageView = renderImageView;
+        imageInfo.sampler = m_RescaleRenderSampler;
 
-    std::array<VkWriteDescriptorSet, 1> descriptorWrites;
-    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptorWrites[0].pNext = nullptr;
-    descriptorWrites[0].dstSet = m_UpscaleDescriptorSet;
-    descriptorWrites[0].dstBinding = 0;
-    descriptorWrites[0].dstArrayElement = 0;
-    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    descriptorWrites[0].descriptorCount = 1;
-    descriptorWrites[0].pImageInfo = &imageInfo;
+        std::array<VkWriteDescriptorSet, 1> descriptorWrites;
+        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[0].pNext = nullptr;
+        descriptorWrites[0].dstSet = m_RescaleDescriptorSet;
+        descriptorWrites[0].dstBinding = 0;
+        descriptorWrites[0].dstArrayElement = 0;
+        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[0].descriptorCount = 1;
+        descriptorWrites[0].pImageInfo = &imageInfo;
 
-    vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+        vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 
-    // Fullscreen Quad initialization
-    m_FullscreenQuadVertexBuffer = CreateVertexBuffer({
-                                                        {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
-                                                        {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, 1.0f)},
-                                                        {glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec2(0.0f, 1.0f)},
-                                                        {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
-                                                        {glm::vec3(1.0f, -1.0f, 0.0f), glm::vec2(1.0f, 0.0f)},
-                                                        {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, 1.0f)}
-                                                    });
+        // Fullscreen Quad initialization
+        m_FullscreenQuadVertexBuffer = CreateVertexBuffer({
+                                                            {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
+                                                            {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(1.0f, 1.0f)},
+                                                            {glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(0.0f, 1.0f)},
+                                                            {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
+                                                            {glm::vec3(1.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(1.0f, 0.0f)},
+                                                            {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(1.0f, 1.0f)}
+                                                        });
+    }
 
-    // std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_DescriptorSetLayout);
-    // VkDescriptorSetAllocateInfo allocInfo = {};
-    // allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    // allocInfo.descriptorPool = m_DescriptorPool;
-    // allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-    // allocInfo.pSetLayouts = layouts.data();
+    // {
+    //     std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_RenderDescriptorSetLayout);
+    //     VkDescriptorSetAllocateInfo allocInfo = {};
+    //     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    //     allocInfo.descriptorPool = m_RenderDescriptorPool;
+    //     allocInfo.descriptorSetCount = 1;
+    //     allocInfo.pSetLayouts = layouts.data();
 
-    // m_DescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-    // if (vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, m_DescriptorSets.data()) != VK_SUCCESS)
-    //     throw std::runtime_error("Failed to allocate descriptor set!");
-
-    // allocate and map uniform buffers.
-    // VkDeviceSize uniformBufferSize = sizeof(matricesUBO);
-
-    // m_UniformBuffers.resize(uniformBufferSize);
-    // m_UniformBuffersMemory.resize(uniformBufferSize);
-    // m_UniformBuffersMappedMemory.resize(uniformBufferSize);
-
-    // for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-    //     AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_UniformBuffers[i], m_UniformBuffersMemory[i]);
-
-    //     vkMapMemory(m_EngineDevice, m_UniformBuffersMemory[i], 0, uniformBufferSize, 0, &m_UniformBuffersMappedMemory[i]);
-
-    //     // update descriptor set with buffer
-    //     VkDescriptorBufferInfo bufferInfo{};
-    //     bufferInfo.buffer = m_UniformBuffers[i];
-    //     bufferInfo.offset = 0;
-    //     bufferInfo.range = sizeof(matricesUBO);
-
-    //     // update descriptor set with image
-    //     VkDescriptorImageInfo imageInfo{};
-    //     imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    //     imageInfo.imageView = imageView;
-    //     imageInfo.sampler = sampler;
-
-    //     std::array<VkWriteDescriptorSet, 2> descriptorWrites;
-    //     descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    //     descriptorWrites[0].pNext = nullptr;
-    //     descriptorWrites[0].dstSet = m_DescriptorSets[i];
-    //     descriptorWrites[0].dstBinding = 0;
-    //     descriptorWrites[0].dstArrayElement = 0;
-    //     descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    //     descriptorWrites[0].descriptorCount = 1;
-    //     descriptorWrites[0].pBufferInfo = &bufferInfo;
-    //     descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    //     descriptorWrites[1].pNext = nullptr;
-    //     descriptorWrites[1].dstSet = m_DescriptorSets[i];
-    //     descriptorWrites[1].dstBinding = 1;
-    //     descriptorWrites[1].dstArrayElement = 0;
-    //     descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    //     descriptorWrites[1].descriptorCount = 1;
-    //     descriptorWrites[1].pImageInfo = &imageInfo;
-
-    //     vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+    //     if (vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, &m_RenderDescriptorSet) != VK_SUCCESS)
+    //         throw std::runtime_error("Failed to allocate descriptor set!");
     // }
 
     m_CommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
@@ -1714,7 +1793,7 @@ void Engine::Start() {
         if (acquireNextImageResult == VK_ERROR_OUT_OF_DATE_KHR || acquireNextImageResult == VK_SUBOPTIMAL_KHR) {
             InitSwapchain();
 
-            InitFramebuffers(m_MainRenderPass.vulkanRenderPass, CreateDepthImage());
+            InitFramebuffers(m_MainRenderPass, CreateDepthImage());
 
             continue;
         } else if (acquireNextImageResult != VK_SUCCESS)
@@ -1758,7 +1837,7 @@ void Engine::Start() {
             // begin a render pass, this could be for example HDR pass, SSAO pass, lighting pass.
             VkRenderPassBeginInfo renderPassBeginInfo{};
             renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            renderPassBeginInfo.renderPass = m_MainRenderPass.vulkanRenderPass;
+            renderPassBeginInfo.renderPass = m_MainRenderPass;
             renderPassBeginInfo.framebuffer = m_RenderFramebuffer;
             renderPassBeginInfo.renderArea.offset = {0, 0};
             renderPassBeginInfo.renderArea.extent = {m_Settings.RenderWidth, m_Settings.RenderHeight};
@@ -1772,7 +1851,7 @@ void Engine::Start() {
 
             vkCmdBeginRenderPass(m_CommandBuffers[currentFrameIndex], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainRenderPass.graphicsPipeline.pipeline);
+            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainGraphicsPipeline.pipeline);
 
             vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderViewport);
 
@@ -1785,15 +1864,16 @@ void Engine::Start() {
         #endif
 
             glm::mat4 viewMatrix = m_PrimaryCamera->GetViewMatrix();
+            glm::mat4 projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), m_Settings.RenderWidth / (float) m_Settings.RenderHeight, CAMERA_NEAR, CAMERA_FAR);
+
+            // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
+            projectionMatrix[1][1] *= -1;
 
             for (RenderModel &renderModel : m_RenderModels) {
                 renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
 
                 renderModel.matricesUBO.viewMatrix = viewMatrix;
-                renderModel.matricesUBO.projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), m_Settings.RenderWidth / (float) m_Settings.RenderHeight, CAMERA_NEAR, CAMERA_FAR);
-
-                // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
-                renderModel.matricesUBO.projectionMatrix[1][1] *= -1;
+                renderModel.matricesUBO.projectionMatrix = projectionMatrix;
 
                 SDL_memcpy(renderModel.matricesUBOMappedMemory, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
 
@@ -1803,8 +1883,74 @@ void Engine::Start() {
 
                 vkCmdBindIndexBuffer(m_CommandBuffers[currentFrameIndex], renderModel.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-                vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainRenderPass.graphicsPipeline.layout, 0, 1, &renderModel.descriptorSet, 0, nullptr);
+                size_t uniformBufferSize = sizeof(MatricesUBO);
+
+                // update descriptor set with buffer
+                VkDescriptorBufferInfo bufferInfo{};
+                bufferInfo.buffer = renderModel.matricesUBOBuffer.buffer;
+                bufferInfo.offset = 0;
+                bufferInfo.range = uniformBufferSize;
+
+                // update descriptor set with image
+                VkDescriptorImageInfo imageInfo{};
+                imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                imageInfo.imageView = renderModel.diffTextureImageView;
+                imageInfo.sampler = renderModel.diffTextureSampler;
+
+                std::array<VkWriteDescriptorSet, 2> descriptorWrites;
+                descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                descriptorWrites[0].pNext = nullptr;
+                descriptorWrites[0].dstSet = m_RenderDescriptorSet; // Ignored
+                descriptorWrites[0].dstBinding = 0;
+                descriptorWrites[0].dstArrayElement = 0;
+                descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                descriptorWrites[0].descriptorCount = 1;
+                descriptorWrites[0].pBufferInfo = &bufferInfo;
+                descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                descriptorWrites[1].pNext = nullptr;
+                descriptorWrites[1].dstSet = m_RenderDescriptorSet; // Ignored
+                descriptorWrites[1].dstBinding = 1;
+                descriptorWrites[1].dstArrayElement = 0;
+                descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                descriptorWrites[1].descriptorCount = 1;
+                descriptorWrites[1].pImageInfo = &imageInfo;
+
+                vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
+
+                //vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainGraphicsPipeline.layout, 0, 1, &m_RenderDescriptorSet, 0, nullptr);
                 vkCmdDrawIndexed(m_CommandBuffers[currentFrameIndex], renderModel.indices.size(), 1, 0, 0, 0);
+            }
+
+            // PARTICLE SHADER!
+            vkCmdNextSubpass(m_CommandBuffers[currentFrameIndex], VK_SUBPASS_CONTENTS_INLINE);
+
+            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_ParticleGraphicsPipeline.pipeline);
+
+            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderViewport);
+
+            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderScissor);
+
+            for (RenderParticle &renderParticle : m_RenderParticles) {
+                // There is no model matrix for render particles, We already know where it is in world-space.
+                renderParticle.matricesUBO.viewMatrix = viewMatrix;
+                renderParticle.matricesUBO.projectionMatrix = projectionMatrix;
+
+                SDL_memcpy(renderParticle.matricesUBOMappedMemory, &renderParticle.matricesUBO, sizeof(renderParticle.matricesUBO));
+
+                std::array<glm::vec3, 2> particleBoundingBox = renderParticle.particle->GetBoundingBox();
+
+                renderParticle.particleUBO.Position = renderParticle.particle->GetPosition();
+                renderParticle.particleUBO.HigherCorner = particleBoundingBox[0];
+                renderParticle.particleUBO.LowerCorner = particleBoundingBox[1];
+
+                SDL_memcpy(renderParticle.particleUBOMappedMemory, &renderParticle.particleUBO, sizeof(renderParticle.particleUBO));
+
+                // vertex buffer binding!!
+                VkDeviceSize particleVertexOffsets[] = {0};
+                vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), particleVertexOffsets);
+
+                vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_ParticleGraphicsPipeline.layout, 0, 1, &renderParticle.descriptorSet, 0, nullptr);
+                vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
             }
 
             vkCmdEndRenderPass(m_CommandBuffers[currentFrameIndex]);
@@ -1816,7 +1962,7 @@ void Engine::Start() {
             // begin a render pass, this could be for example HDR pass, SSAO pass, lighting pass.
             VkRenderPassBeginInfo renderPassBeginInfo{};
             renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            renderPassBeginInfo.renderPass = m_UpscaleRenderPass.vulkanRenderPass;
+            renderPassBeginInfo.renderPass = m_RescaleRenderPass;
             renderPassBeginInfo.framebuffer = m_SwapchainFramebuffers[imageIndex];
             renderPassBeginInfo.renderArea.offset = {0, 0};
             renderPassBeginInfo.renderArea.extent = {m_Settings.DisplayWidth, m_Settings.DisplayHeight};
@@ -1830,7 +1976,7 @@ void Engine::Start() {
 
             vkCmdBeginRenderPass(m_CommandBuffers[currentFrameIndex], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UpscaleRenderPass.graphicsPipeline.pipeline);
+            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_RescaleGraphicsPipeline.pipeline);
 
             vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayViewport);
 
@@ -1846,7 +1992,7 @@ void Engine::Start() {
             VkDeviceSize mainOffsets[] = {0};
             vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), mainOffsets);
 
-            vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UpscaleRenderPass.graphicsPipeline.layout, 0, 1, &m_UpscaleDescriptorSet, 0, nullptr);
+            vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_RescaleGraphicsPipeline.layout, 0, 1, &m_RescaleDescriptorSet, 0, nullptr);
             vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
 
             vkCmdEndRenderPass(m_CommandBuffers[currentFrameIndex]);
@@ -1859,24 +2005,6 @@ void Engine::Start() {
 
         fmt::println("Time spent rendering: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderTime - afterRenderInitTime).count()));
 #endif
-
-        // // SECOND SUBPASS
-        // vkCmdNextSubpass(m_CommandBuffers[current_frame], VK_SUBPASS_CONTENTS_INLINE);
-
-        // vkCmdBindPipeline(m_CommandBuffers[current_frame], VK_PIPELINE_BIND_POINT_GRAPHICS, testGraphicsPipeline.pipeline);
-
-        // vkCmdSetViewport(m_CommandBuffers[current_frame], 0, 1, &m_RenderViewport);
-
-        // vkCmdSetScissor(m_CommandBuffers[current_frame], 0, 1, &m_RenderScissor);
-
-        // // vertex buffer binding!!
-        // VkBuffer testBuffers[] = {mainVertexBuffer.buffer};
-        // VkDeviceSize testOffsets[] = {0};
-        // vkCmdBindVertexBuffers(m_CommandBuffers[current_frame], 0, 1, testBuffers, testOffsets);
-
-        // vkCmdBindIndexBuffer(m_CommandBuffers[current_frame], mainIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-        // vkCmdDrawIndexed(m_CommandBuffers[current_frame], indices.size(), 1, 0, 0, 0);
 
         if (vkEndCommandBuffer(m_CommandBuffers[currentFrameIndex]) != VK_SUCCESS)
             throw std::runtime_error(engineError::COMMAND_BUFFER_END_FAILURE);

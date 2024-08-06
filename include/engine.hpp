@@ -2,6 +2,7 @@
 #define ENGINE_HPP
 
 #include "camera.hpp"
+#include "particles.hpp"
 #ifndef VK_EXT_DEBUG_REPORT_EXTENSION_NAME
 #define VK_EXT_DEBUG_REPORT_EXTENSION_NAME "VK_EXT_debug_report"
 #endif
@@ -48,13 +49,14 @@
 
 const std::vector<const char *> requiredDeviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME
 };
 
 const std::vector<const char *> requiredInstanceExtensions = { 
 };
 
 const std::vector<const char *> requiredLayerExtensions {
-    "VK_LAYER_KHRONOS_validation",
+   "VK_LAYER_KHRONOS_validation",
 };
 
 struct SwapChainSupportDetails {
@@ -92,10 +94,16 @@ struct TextureImageAndMemory {
     Uint8 channels;
 };
 
-struct UniformBufferObject {
+struct MatricesUBO {
     glm::mat4 viewMatrix;
     glm::mat4 modelMatrix;
     glm::mat4 projectionMatrix;
+};
+
+struct ParticleUBO {
+    glm::vec3 Position;
+    glm::vec3 HigherCorner;
+    glm::vec3 LowerCorner;
 };
 
 struct RenderModel {
@@ -109,9 +117,26 @@ struct RenderModel {
     VkImageView diffTextureImageView;
     VkSampler diffTextureSampler;
 
-    UniformBufferObject matricesUBO;
+    MatricesUBO matricesUBO;
     BufferAndMemory matricesUBOBuffer;
     void *matricesUBOMappedMemory;
+};
+
+struct RenderParticle {
+    Particle *particle;
+
+    // might want this later
+    // TextureImageAndMemory diffTexture;
+    // VkImageView diffTextureImageView;
+    // VkSampler diffTextureSampler;
+
+    MatricesUBO matricesUBO;
+    BufferAndMemory matricesUBOBuffer;
+    void *matricesUBOMappedMemory;
+
+    ParticleUBO particleUBO;
+    BufferAndMemory particleUBOBuffer;
+    void *particleUBOMappedMemory;
 
     VkDescriptorSet descriptorSet;
 };
@@ -126,8 +151,12 @@ public:
     Engine(Settings &settings, Camera *primaryCam) : m_PrimaryCamera(primaryCam), m_Settings(settings) {};
     ~Engine();
 
-    Model *LoadModel(const string &path);   // this is the first function created to be used by main.cpp
-    void UnloadModel(const Model *model);
+    void LoadModel(Model *model);   // this is the first function created to be used by main.cpp
+    void UnloadModel(Model *model);
+
+    void AddParticle(Particle *particle);
+    void RemoveParticle(Particle *particle);
+
     void RegisterUpdateFunction(const std::function<void()> &func);
     // Fixed Updates are called 60 times a second.
     void RegisterFixedUpdateFunction(const std::function<void(std::array<bool, 322>)> &func);
@@ -137,13 +166,15 @@ public:
     void  Init();
     void  Start();
 private:
+    PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSet;
+
     void CallFixedUpdateFunctions(bool *shouldQuitFlag);
 
     void InitInstance();
     void InitSwapchain();
     void InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageView);
     VkImageView CreateDepthImage();
-    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, RenderPass &renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {});
+    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {});
     VkRenderPass CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, bool shouldContainDepthImage = true);
     VkFramebuffer CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkExtent2D resolution, VkImageView depthImageView = nullptr);
     bool QuitEventCheck(SDL_Event &event);
@@ -155,7 +186,7 @@ private:
     void AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &memory, bool recordAllocation = true);
     void CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size);
 
-    std::vector<TextureImageAndMemory> LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations = true);
+    std::array<TextureImageAndMemory, 1> LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations = true);
 
     BufferAndMemory CreateVertexBuffer(const std::vector<Vertex> &verts, bool recordAllocation = true);
     BufferAndMemory CreateIndexBuffer(const std::vector<Uint32> &inds, bool recordAllocation = true);
@@ -185,6 +216,8 @@ private:
     Camera *m_PrimaryCamera;
     Settings m_Settings;
 
+    std::vector<RenderParticle> m_RenderParticles;
+
     SDL_Window *m_EngineWindow = nullptr;
 
     VkDevice m_EngineDevice = nullptr;
@@ -202,27 +235,37 @@ private:
     std::vector<VkCommandBuffer> m_CommandBuffers;
 
     VkDescriptorSetLayout m_RenderDescriptorSetLayout = nullptr;
-    VkDescriptorPool m_RenderDescriptorPool = nullptr;
+    VkDescriptorSetLayout m_ParticleDescriptorSetLayout = nullptr;
 
-    VkDescriptorSetLayout m_UpscaleDescriptorSetLayout = nullptr;
-    VkDescriptorPool m_UpscaleDescriptorPool = nullptr;
-    VkDescriptorSet m_UpscaleDescriptorSet = nullptr;
-    VkSampler m_UpscaleRenderSampler = nullptr;
+    VkDescriptorPool m_RenderDescriptorPool = nullptr;
+    VkDescriptorPool m_ParticleDescriptorPool = nullptr;
+
+    VkDescriptorSet m_RenderDescriptorSet = nullptr;
+    Uint32 m_RenderDescriptorSetSize = 0;   // This is tracked by LoadModel
+
+    VkDescriptorSetLayout m_RescaleDescriptorSetLayout = nullptr;
+    VkDescriptorPool m_RescaleDescriptorPool = nullptr;
+    VkDescriptorSet m_RescaleDescriptorSet = nullptr;
+    VkSampler m_RescaleRenderSampler = nullptr;
+
+    PipelineAndLayout m_MainGraphicsPipeline; // Used to render the 3D scene
+    PipelineAndLayout m_ParticleGraphicsPipeline; // Used to add shiny particles
+    PipelineAndLayout m_RescaleGraphicsPipeline; // Used to rescale.
 
     BufferAndMemory m_FullscreenQuadVertexBuffer;
 
     std::vector<RenderModel> m_RenderModels;    // to be used in the loop.
 
     VkSwapchainKHR m_Swapchain = nullptr;
-    std::vector<RenderPass> m_RenderPasses;
+    std::vector<VkRenderPass> m_RenderPasses;
     std::vector<PipelineAndLayout> m_PipelineAndLayouts;
 
-    RenderPass m_MainRenderPass;
+    VkRenderPass m_MainRenderPass;
     VkFramebuffer m_RenderFramebuffer;
     ImageAndMemory m_RenderImageAndMemory;
     VkFormat m_RenderImageFormat;
 
-    RenderPass m_UpscaleRenderPass;   // This uses the swapchain framebuffers
+    VkRenderPass m_RescaleRenderPass;   // This uses the swapchain framebuffers
 
     std::vector<VkImage> m_SwapchainImages;
     std::vector<VkImageView> m_SwapchainImageViews;

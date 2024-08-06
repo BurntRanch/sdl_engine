@@ -41,6 +41,7 @@ namespace engineError {
     inline string CANT_FIND_ANY_FORMAT = "Tried to find best format, but none can be used!";
     inline string RENDERPASS_PIPELINE_EXISTS = "Tried to create a graphics pipeline for a renderpass that already has a graphics pipeline!";
     inline string SURFACE_CREATION_FAILURE = "Failed to create a surface!";
+    inline string NO_MATERIALS = "No materials found in model!";
 };
 
 #endif
