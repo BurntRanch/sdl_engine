@@ -3,6 +3,7 @@
 
 #include "camera.hpp"
 #include "particles.hpp"
+#include <future>
 #include <mutex>
 #ifndef VK_EXT_DEBUG_REPORT_EXTENSION_NAME
 #define VK_EXT_DEBUG_REPORT_EXTENSION_NAME "VK_EXT_debug_report"

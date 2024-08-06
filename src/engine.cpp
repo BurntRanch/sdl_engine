@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <engine.hpp>
+#include <exception>
 #include <fmt/core.h>
 #include <fstream>
 #include <future>
@@ -307,16 +308,16 @@ std::array<TextureImageAndMemory, 1> Engine::LoadTexturesFromMesh(Mesh &mesh, bo
             /* Allocate the buffer that stores our pixel data. */
             BufferAndMemory textureBufferAndMemory;
 
-            VkDeviceSize stagingBufferSize = sizeof(Uint8) * 4;  // R8G8B8A8
+            VkDeviceSize bufferSize = sizeof(Uint8) * 4;  // R8G8B8A8
 
-            AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, textureBufferAndMemory.buffer, textureBufferAndMemory.memory, false);
+            AllocateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, textureBufferAndMemory.buffer, textureBufferAndMemory.memory, recordAllocations);
 
             // copy the texture data into the buffer
             void *data;
             std::array<Uint8, 4> texColors = {static_cast<Uint8>(mesh.diffuse.r * 255), static_cast<Uint8>(mesh.diffuse.g * 255), static_cast<Uint8>(mesh.diffuse.b * 255), 255};
 
-            vkMapMemory(m_EngineDevice, textureBufferAndMemory.memory, 0, stagingBufferSize, 0, &data);
-            SDL_memcpy(data, (void *)texColors.data(), stagingBufferSize);
+            vkMapMemory(m_EngineDevice, textureBufferAndMemory.memory, 0, bufferSize, 0, &data);
+            SDL_memcpy(data, (void *)texColors.data(), bufferSize);
             vkUnmapMemory(m_EngineDevice, textureBufferAndMemory.memory);
 
             /* Transfer our newly created texture to an image */
@@ -593,8 +594,9 @@ void Engine::LoadModel(Model *model) {
         tasks.push_back(std::async(std::launch::async, &Engine::LoadMesh, this, std::ref(mesh), model));
     }
 
+    // Any exception here is going to just happen and get caught like a regular engine error.
     for (std::future<void> &task : tasks) {
-        task.wait();
+        task.share().get();
     }
 
     return;
@@ -1374,7 +1376,7 @@ void Engine::Init() {
     vkEnumeratePhysicalDevices(m_EngineVulkanInstance, &physicalDeviceCount, physicalDevices.data());
 
     // find first capable card, capable cards are cards that have all of the required Device Extensions.
-    for (int i = 0; i < physicalDevices.size(); i++) {
+    for (size_t i = 0; i < physicalDevices.size(); i++) {
         if (checkDeviceExtensionSupport(physicalDevices[i])) {
             VkPhysicalDeviceFeatures deviceFeatures;
             vkGetPhysicalDeviceFeatures(physicalDevices[i], &deviceFeatures);
@@ -1464,8 +1466,6 @@ void Engine::Init() {
 
     m_MainRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 2, m_RenderImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     m_RescaleRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
-
-    VkFormat depthFormat = FindDepthFormat();
 
     VkImageView depthImageView = CreateDepthImage();
 
