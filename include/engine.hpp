@@ -3,6 +3,7 @@
 
 #include "camera.hpp"
 #include "particles.hpp"
+#include <mutex>
 #ifndef VK_EXT_DEBUG_REPORT_EXTENSION_NAME
 #define VK_EXT_DEBUG_REPORT_EXTENSION_NAME "VK_EXT_debug_report"
 #endif
@@ -278,6 +279,8 @@ private:
     std::vector<VkSemaphore> m_ImageAvailableSemaphores;
     std::vector<VkSemaphore> m_RenderFinishedSemaphores;
     std::vector<VkFence> m_InFlightFences;
+
+    std::mutex m_SingleTimeCommandMutex;
 
     VkViewport m_RenderViewport;
     VkViewport m_DisplayViewport;

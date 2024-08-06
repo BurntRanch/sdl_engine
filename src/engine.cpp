@@ -931,6 +931,8 @@ void Engine::InitInstance() {
 }
 
 VkCommandBuffer Engine::BeginSingleTimeCommands() {
+    m_SingleTimeCommandMutex.lock();
+
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -961,6 +963,8 @@ void Engine::EndSingleTimeCommands(VkCommandBuffer commandBuffer) {
     vkQueueWaitIdle(m_GraphicsQueue);
 
     vkFreeCommandBuffers(m_EngineDevice, m_CommandPool, 1, &commandBuffer);
+
+    m_SingleTimeCommandMutex.unlock();
 }
 
 void Engine::CopyBufferToImage(TextureBufferAndMemory textureBuffer, VkImage image) {
