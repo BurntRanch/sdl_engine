@@ -20,7 +20,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\5b106c26cc7e5c429ba4e5de573d0dce.jpg
 
 newmtl Book2
 Ns 225.000000
@@ -31,7 +30,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\finalimage.jpg
 
 newmtl Carpet
 Ns 225.000000
@@ -42,7 +40,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\drive-download-20210610T021657Z-001\\Fabric_Rug_006_COLOR.jpg
 map_Ns Texture\\drive-download-20210610T021657Z-001\\Fabric_Rug_006_ROUGH.jpg
 
 newmtl Cermin
@@ -84,7 +81,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\ParquetFlooring05_MR_2K\\ParquetFlooring05_2K_BaseColor.png
 
 newmtl Gelas
 Ns 225.000000
@@ -95,7 +91,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\Marble09_MR_2K\\Marble09_2K_BaseColor.png
 map_Ns Texture\\Marble09_MR_2K\\Marble09_2K_Roughness.png
 
 newmtl InsideBook
@@ -117,7 +112,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\png-clipart-black-analog-clock-at-11-55-clock-face-clocks-angle-text.png
 
 newmtl Kaca
 Ns 323.999994
@@ -148,7 +142,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\Wood09_MR_2K\\Wood09_2K_BaseColor.png
 map_Ns Texture\\Wood09_MR_2K\\Wood09_2K_Roughness.png
 
 newmtl Meja
@@ -160,7 +153,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\Wood09_MR_2K\\Wood09_2K_BaseColor.png
 map_Ns Texture\\Wood09_MR_2K\\Wood09_2K_Roughness.png
 
 newmtl Netflix
@@ -172,7 +164,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\Netflix_TV_interface_test_wm_1594887506248.jpg
 
 newmtl None
 Ns 500
@@ -191,7 +182,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\Best-Abstract-Art-course-tutorial-class-certification-training-online-scaled.jpg
 
 newmtl Picture2
 Ns 225.000000
@@ -202,7 +192,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\639170_18090338_3255399_0cc8cc8e_image.jpg
 
 newmtl Picture3
 Ns 225.000000
@@ -213,7 +202,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\Ocean_Dreams_-_Contemporary_Abstract_Painting_7aa795bd-f372-40cf-b6c0-99a7b985aae4.jpg
 
 newmtl Picture4
 Ns 225.000000
@@ -224,7 +212,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\On-Impulse-36x36-1-1200x1200.jpeg
 
 newmtl PictureBorder
 Ns 225.000000
@@ -265,7 +252,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\Concrete_Wall\\Concrete_Wall_009_basecolor.jpg
 map_Ns Texture\\Concrete_Wall\\Concrete_Wall_009_roughness.jpg
 
 newmtl Sofa
@@ -329,7 +315,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\Tree07_4K.png
 map_d Texture\\Tree07_4K.png
 
 newmtl Tree_Branch
@@ -341,7 +326,6 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\Mapple\\Tree Branch.png
 map_d Texture\\Mapple\\Tree Branch.png
 
 newmtl Wall
@@ -364,5 +348,4 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd Texture\\White Brick\\WhiteBrickWall01_2K_BaseColor.png
 map_Ns Texture\\White Brick\\WhiteBrickWall01_2K_Roughness.png
