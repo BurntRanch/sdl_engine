@@ -1,4 +1,5 @@
 #include "error.hpp"
+#include <SDL3/SDL_error.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_oldnames.h>
@@ -413,7 +414,7 @@ TextureBufferAndMemory Engine::LoadTextureFromFile(const std::string &name) {
     VkDeviceSize imageSize = texWidth * texHeight * 4;
 
     if (!imageData)
-        throw std::runtime_error(engineError::TEXTURE_LOADING_FAILURE);
+        throw std::runtime_error(fmt::format(engineError::TEXTURE_LOADING_FAILURE, stbi_failure_reason(), name));
 
     fmt::println("Image loaded ({}x{}, {} channels) with an expected buffer size of {}.", texWidth, texHeight, 4, texWidth * texHeight * 4);
 
@@ -556,7 +557,7 @@ void Engine::LoadMesh(Mesh &mesh, Model *model) {
     BufferAndMemory vertexBuffer = CreateVertexBuffer(mesh.vertices, false);
     renderModel.vertexBuffer = vertexBuffer;
 
-    renderModel.indices = mesh.indices;
+    renderModel.indexBufferSize = mesh.indices.size();
     renderModel.indexBuffer = CreateIndexBuffer(mesh.indices, false);
 
     std::array<TextureImageAndMemory, 1> meshTextures = LoadTexturesFromMesh(mesh, false);
@@ -582,6 +583,10 @@ void Engine::LoadMesh(Mesh &mesh, Model *model) {
     vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOMappedMemory);
 
     m_RenderModels.push_back(renderModel);
+}
+
+void Engine::SetMouseCaptureState(bool capturing) {
+    SDL_SetWindowRelativeMouseMode(m_EngineWindow, capturing);
 }
 
 void Engine::LoadModel(Model *model) {
@@ -756,6 +761,10 @@ void Engine::RegisterFixedUpdateFunction(const std::function<void(std::array<boo
 }
 
 void Engine::InitSwapchain() {
+    if (m_Swapchain) {
+        vkDestroySwapchainKHR(m_EngineDevice, m_Swapchain, NULL);
+    }
+
     SwapChainSupportDetails swapchainSupport = QuerySwapChainSupport(m_EnginePhysicalDevice, m_EngineSurface);
 
     // this will be used to tell the swapchain how many views we want
@@ -1326,7 +1335,7 @@ VkFramebuffer Engine::CreateFramebuffer(VkRenderPass renderPass, VkImageView ima
 
 
 bool Engine::QuitEventCheck(SDL_Event &event) {
-    if (event.type == SDL_EVENT_QUIT || (event.type == SDL_EVENT_KEY_DOWN && event.key.keysym.sym == SDLK_ESCAPE))
+    if (event.type == SDL_EVENT_QUIT || (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE))
         return true;
     return false;
 }
@@ -1368,8 +1377,8 @@ void Engine::Init() {
     if (physicalDeviceCount == 0)
         throw std::runtime_error(engineError::NO_VULKAN_DEVICES);
     
-    if (SDL_Vulkan_CreateSurface(m_EngineWindow, m_EngineVulkanInstance, NULL, &m_EngineSurface) != SDL_TRUE)
-        throw std::runtime_error(engineError::SURFACE_CREATION_FAILURE);
+    if (SDL_Vulkan_CreateSurface(m_EngineWindow, m_EngineVulkanInstance, NULL, &m_EngineSurface) != 0)
+        throw std::runtime_error(fmt::format(engineError::SURFACE_CREATION_FAILURE, SDL_GetError()));
 
     // now we can get a list of physical devices
     std::vector<VkPhysicalDevice> physicalDevices(physicalDeviceCount);
@@ -1775,10 +1784,10 @@ void Engine::Start() {
             
             switch (event.type) {
                 case SDL_EVENT_KEY_DOWN:
-                    m_KeyMap[event.key.keysym.scancode] = true;
+                    m_KeyMap[event.key.scancode] = true;
                     break;
                 case SDL_EVENT_KEY_UP:
-                    m_KeyMap[event.key.keysym.scancode] = false;
+                    m_KeyMap[event.key.scancode] = false;
                     break;
             }
         }
@@ -1807,10 +1816,16 @@ void Engine::Start() {
         
         // the swapchain can become "out of date" if the user were to, say, resize the window.
         // suboptimal means it is kind of out of date but not invalid, can still be used.
-        if (acquireNextImageResult == VK_ERROR_OUT_OF_DATE_KHR || acquireNextImageResult == VK_SUBOPTIMAL_KHR) {
+        if (acquireNextImageResult == VK_ERROR_OUT_OF_DATE_KHR) {
             InitSwapchain();
 
-            InitFramebuffers(m_MainRenderPass, CreateDepthImage());
+            // VkImageView depthImageView = CreateDepthImage();
+
+            // TextureImageAndMemory renderImage = CreateImage(m_Settings.RenderWidth, m_Settings.RenderHeight, m_RenderImageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            // VkImageView renderImageView = CreateImageView(renderImage, m_RenderImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
+
+            // m_RenderFramebuffer = CreateFramebuffer(m_MainRenderPass, renderImageView, {m_Settings.RenderWidth, m_Settings.RenderHeight}, depthImageView);
+            InitFramebuffers(m_RescaleRenderPass, nullptr);
 
             continue;
         } else if (acquireNextImageResult != VK_SUCCESS)
@@ -1935,7 +1950,7 @@ void Engine::Start() {
                 vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
 
                 //vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainGraphicsPipeline.layout, 0, 1, &m_RenderDescriptorSet, 0, nullptr);
-                vkCmdDrawIndexed(m_CommandBuffers[currentFrameIndex], renderModel.indices.size(), 1, 0, 0, 0);
+                vkCmdDrawIndexed(m_CommandBuffers[currentFrameIndex], renderModel.indexBufferSize, 1, 0, 0, 0);
             }
 
             // PARTICLE SHADER!

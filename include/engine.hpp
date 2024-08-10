@@ -113,8 +113,9 @@ struct RenderModel {
 
     BufferAndMemory vertexBuffer;
 
-    std::vector<Uint32> indices;
+    VkDeviceSize indexBufferSize;
     BufferAndMemory indexBuffer;
+
     TextureImageAndMemory diffTexture;
     VkImageView diffTextureImageView;
     VkSampler diffTextureSampler;
@@ -152,6 +153,8 @@ class Engine {
 public:
     Engine(Settings &settings, Camera *primaryCam) : m_PrimaryCamera(primaryCam), m_Settings(settings) {};
     ~Engine();
+
+    void SetMouseCaptureState(bool capturing);
 
     void LoadModel(Model *model);   // this is the first function created to be used by main.cpp
     void UnloadModel(Model *model);

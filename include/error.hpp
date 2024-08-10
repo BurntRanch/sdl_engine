@@ -32,7 +32,7 @@ namespace engineError {
     inline string VERTEX_BUFFER_ALREADY_EXISTS = "Tried to create a vertex buffer more than twice!";
     inline string INDEX_BUFFER_ALREADY_EXISTS = "Tried to create an index buffer more than twice!";
     inline string DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE = "Failed to create descriptor set layout!";
-    inline string TEXTURE_LOADING_FAILURE = "Failed to load texture file!";
+    inline string TEXTURE_LOADING_FAILURE = "Failed to load texture file, Reason: {}, File: ({})!";
     inline string IMAGE_CREATION_FAILURE = "Failed to create image!";
     inline string UNSUPPORTED_LAYOUT_TRANSITION = "Unsupported image layout transition!";
     inline string SAMPLER_CREATION_FAILURE = "Failed to create sampler!";
@@ -40,7 +40,7 @@ namespace engineError {
     inline string UNSUPPORTED_FORMAT = "Attempted to convert unsupported VkFormat to channel count!";
     inline string CANT_FIND_ANY_FORMAT = "Tried to find best format, but none can be used!";
     inline string RENDERPASS_PIPELINE_EXISTS = "Tried to create a graphics pipeline for a renderpass that already has a graphics pipeline!";
-    inline string SURFACE_CREATION_FAILURE = "Failed to create a surface!";
+    inline string SURFACE_CREATION_FAILURE = "Failed to create a surface, Reason: {}!";
     inline string NO_MATERIALS = "No materials found in model!";
 };
 

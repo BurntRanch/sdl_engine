@@ -1,5 +1,6 @@
 #include "error.hpp"
 #include <assimp/material.h>
+#include <assimp/mesh.h>
 #include <assimp/postprocess.h>
 #include <model.hpp>
 #include <stdexcept>
@@ -44,7 +45,7 @@ void Model::processNode(aiNode *node, const aiScene *scene)
 Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
 {
     vector<Vertex> vertices;
-    vector<unsigned int> indices;
+    vector<Uint32> indices;
     string diffuseMap;
 
     glm::vec3 diffuse;
@@ -52,7 +53,7 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
     //float roughness = 0.1;
     //float metallic = 0.0;
 
-    for(unsigned int i = 0; i < mesh->mNumVertices; i++)
+    for(size_t i = 0; i < mesh->mNumVertices; i++)
     {
         Vertex vertex;
         // process vertex positions, normals and texture coordinates

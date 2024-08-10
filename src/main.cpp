@@ -230,7 +230,7 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
     Uint32 mouseState = SDL_GetRelativeMouseState(&x, &y);
 
     if (!(lastMouseState & SDL_BUTTON_MMASK) && (mouseState & SDL_BUTTON_MMASK) && !State::IsMouseSpamming) {
-        SDL_SetRelativeMouseMode(!State::IsMouseCaptured);
+        engine->SetMouseCaptureState(!State::IsMouseCaptured);
         State::IsMouseCaptured = !State::IsMouseCaptured;
     }
     

@@ -65,7 +65,7 @@ class Mesh {
 public:
     // mesh data
     vector<Vertex>       vertices;
-    vector<unsigned int> indices;
+    vector<Uint32> indices;
     path                 diffuseMapPath;
     // glm::vec3            ambient;
     // glm::vec3            specular;
