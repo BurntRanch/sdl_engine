@@ -1,3 +1,4 @@
+#include "camera.hpp"
 #include <settings.hpp>
 
 Settings::Settings(const string_view &fileName) {
@@ -16,10 +17,12 @@ Settings::Settings(const string_view &fileName) {
     Fullscreen = GetValue("video.Fullscreen", false);
     IgnoreRenderResolution = GetValue("video.IgnoreRenderResolution", false);
     FieldOfView = GetValue("video.FieldOfView", FIELDOFVIEW);
+    CameraNear = GetValue("video.CameraNear", CAMERA_NEAR);
 
     ReportFPS = GetValue("profile.ReportFPS", true);
 
     MouseSensitivity = GetValue("input.MouseSensitivity", 0.1f);
+    Velocity = GetValue("input.Velocity", 5.0f);
     InvertVertical = GetValue("input.InvertVertical", false);
     InvertHorizontal = GetValue("input.InvertHorizontal", false);
 }

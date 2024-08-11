@@ -4,7 +4,6 @@
 #include <toml++/toml.hpp>
 #include <fmt/core.h>
 #include <SDL3/SDL_stdinc.h>
-#include "camera.hpp"
 
 using std::string_view;
 
@@ -16,12 +15,14 @@ public:
     Uint32 DisplayWidth, DisplayHeight;
     bool Fullscreen, IgnoreRenderResolution;
     float FieldOfView;
+    float CameraNear;
 
 // Profiling information
     bool ReportFPS;
 
 // Input
     float MouseSensitivity;
+    float Velocity;
     bool InvertVertical;
     bool InvertHorizontal;
 

@@ -3,3 +3,4 @@ SDL
 build
 
 src/*.o
+main

@@ -24,7 +24,7 @@ SRC 	   	 = $(sort $(wildcard src/*.cpp))
 OBJ 	   	 = $(SRC:.cpp=.o)
 LDFLAGS   	+= -lassimp -lfmt -lSDL3 -lvulkan
 CXXFLAGS  	?= -mtune=generic -march=native
-CXXFLAGS        += -Wno-ignored-attributes -funroll-all-loops -fpermissive -Iinclude -std=c++17 $(VARS)
+CXXFLAGS        += -Wno-ignored-attributes -funroll-all-loops -Iinclude -std=c++17 $(VARS)
 
 all: $(TARGET)
 

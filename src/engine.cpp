@@ -10,8 +10,10 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <engine.hpp>
 #include <exception>
+#include <filesystem>
 #include <fmt/core.h>
 #include <fstream>
 #include <future>
@@ -82,7 +84,7 @@ static std::vector<char> readFile(const std::string &name) {
     std::ifstream file(name, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
-        throw std::runtime_error("Failed to read a file!");
+        throw std::runtime_error("Failed to read " + name + "!");
     }
 
     size_t fileSize = file.tellg();
@@ -281,7 +283,25 @@ std::array<TextureImageAndMemory, 1> Engine::LoadTexturesFromMesh(Mesh &mesh, bo
     
     {
         if (!mesh.diffuseMapPath.empty()) {
-            TextureBufferAndMemory textureBufferAndMemory = LoadTextureFromFile("textures" / mesh.diffuseMapPath);
+            std::filesystem::path path;
+            // map_Kd /home/toni/.../brown_mud_dry_diff_4k.jpg
+            if (mesh.diffuseMapPath.has_root_path())
+            {
+                path = mesh.diffuseMapPath;
+            }
+            else
+            {
+                // https://stackoverflow.com/a/73927710
+                auto rel = std::filesystem::relative(mesh.diffuseMapPath, "textures");
+                // map_Kd textures/brown_mud_dry_diff_4k.jpg
+                if (!rel.empty() && rel.native()[0] != '.')
+                    path = mesh.diffuseMapPath;
+                // map_Kd brown_mud_dry_diff_4k.jpg
+                else
+                    path = "textures" / mesh.diffuseMapPath;
+            }
+
+            TextureBufferAndMemory textureBufferAndMemory = LoadTextureFromFile(path);
             VkFormat textureFormat = getBestFormatFromChannels(textureBufferAndMemory.channels);
 
             textures[0] = CreateImage(
@@ -410,11 +430,15 @@ BufferAndMemory Engine::CreateIndexBuffer(const std::vector<Uint32> &inds, bool 
 TextureBufferAndMemory Engine::LoadTextureFromFile(const std::string &name) {
     int texWidth, texHeight;
     
+    fmt::println("Loading image {} ...", name);
     stbi_uc *imageData = stbi_load(name.data(), &texWidth, &texHeight, nullptr, STBI_rgb_alpha);
     VkDeviceSize imageSize = texWidth * texHeight * 4;
 
     if (!imageData)
+    {
+        fmt::println("fopen() error: {}", strerror(errno));
         throw std::runtime_error(fmt::format(engineError::TEXTURE_LOADING_FAILURE, stbi_failure_reason(), name));
+    }
 
     fmt::println("Image loaded ({}x{}, {} channels) with an expected buffer size of {}.", texWidth, texHeight, 4, texWidth * texHeight * 4);
 
@@ -1896,7 +1920,7 @@ void Engine::Start() {
         #endif
 
             glm::mat4 viewMatrix = m_PrimaryCamera->GetViewMatrix();
-            glm::mat4 projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), m_Settings.RenderWidth / (float) m_Settings.RenderHeight, CAMERA_NEAR, CAMERA_FAR);
+            glm::mat4 projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), m_Settings.RenderWidth / (float) m_Settings.RenderHeight, m_Settings.CameraNear, CAMERA_FAR);
 
             // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
             projectionMatrix[1][1] *= -1;

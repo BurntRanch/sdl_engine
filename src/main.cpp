@@ -4,13 +4,13 @@
 #include <SDL3/SDL_scancode.h>
 #include <chrono>
 #include <engine.hpp>
-#include <iterator>
 #include <memory>
 #include <settings.hpp>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 #include <stdexcept>
 #include <string>
+#include "camera.hpp"
 #include "model.hpp"
 #include "util.hpp"
 #include "rapidxml.hpp"
@@ -359,6 +359,7 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
 int main() {
     cam.MouseSensitivity = settings.MouseSensitivity;
     cam.FOV = settings.FieldOfView;
+    cam.MovementSpeed = settings.Velocity;
 
     engine = std::make_unique<Engine>(settings, &cam);
     
