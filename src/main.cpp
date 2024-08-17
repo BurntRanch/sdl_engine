@@ -109,7 +109,15 @@ void exportScene(const std::vector<Model *> &models, const std::string &path) {
     sceneXML.clear();
 }
 
-// Import an xml scene, overwriting the current one.
+/* Import an xml scene, overwriting the current one.
+    * Throws std::runtime_error and rapidxml::parse_error
+
+Input:
+    - fileName, name of the XML scene file.
+
+Output:
+    - True if the scene was sucessfully imported.
+*/
 bool importScene(const std::string &fileName) {
     for (Model *model : State::Models) {
         engine->UnloadModel(model);
@@ -125,17 +133,18 @@ bool importScene(const std::string &fileName) {
 
     using namespace rapidxml;
 
-    std::ifstream sceneFile(fileName, std::ios::ate | std::ios::binary);
+    std::ifstream sceneFile(fileName, std::ios::binary | std::ios::ate);
 
-    if (sceneFile.bad())
+    if (!sceneFile.good())
         return false;
 
-    std::vector<char> sceneRawXML(sceneFile.tellg());
+    std::vector<char> sceneRawXML(static_cast<int>(sceneFile.tellg()) + 1);
     
     sceneFile.seekg(0);
     sceneFile.read(sceneRawXML.data(), sceneRawXML.size());
 
     xml_document<char> sceneXML;
+
     sceneXML.parse<0>(sceneRawXML.data());
 
     xml_node<char> *sceneNode = sceneXML.first_node("Scene");
@@ -169,14 +178,10 @@ bool importScene(const std::string &fileName) {
             std::vector<std::string> indicesData = split(indicesStr, ',');
             mesh.indices.resize(indicesData.size());
 
-            {
-
             size_t i = 0;
             for (const std::string &str : indicesData) {
                 mesh.indices[i] = std::stoi(str);
                 i++;
-            }
-
             }
 
             xml_node<char> *diffuseMapPathNode = meshNode->first_node("DiffuseMap");
