@@ -31,6 +31,12 @@ struct Vertex {
     glm::vec2 TexCoord;
 };
 
+struct Vertex2D {
+    glm::vec2 Position;
+    //glm::vec3 Color;  // might add later
+    glm::vec2 TexCoord;
+};
+
 inline struct VkVertexInputBindingDescription getVertexBindingDescription() {
     VkVertexInputBindingDescription bindingDescrption{};
     bindingDescrption.binding = 0;
@@ -57,6 +63,31 @@ inline struct array<VkVertexInputAttributeDescription, 3> getVertexAttributeDesc
     attributeDescriptions[2].location = 2;
     attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
     attributeDescriptions[2].offset = offsetof(Vertex, TexCoord);
+
+    return attributeDescriptions;
+}
+
+inline struct VkVertexInputBindingDescription getVertex2DBindingDescription() {
+    VkVertexInputBindingDescription bindingDescrption{};
+    bindingDescrption.binding = 0;
+    bindingDescrption.stride = sizeof(Vertex2D);
+    bindingDescrption.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    return bindingDescrption;
+}
+
+inline struct array<VkVertexInputAttributeDescription, 2> getVertex2DAttributeDescriptions() {
+    array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+
+    attributeDescriptions[0].binding = 0;
+    attributeDescriptions[0].location = 0;
+    attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[0].offset = offsetof(Vertex2D, Position);
+
+    attributeDescriptions[1].binding = 0;
+    attributeDescriptions[1].location = 1;
+    attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[1].offset = offsetof(Vertex2D, TexCoord);
 
     return attributeDescriptions;
 }

@@ -5,13 +5,16 @@
 #include <chrono>
 #include <engine.hpp>
 #include <memory>
+#include <new>
 #include <settings.hpp>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 #include <stdexcept>
 #include <string>
 #include "camera.hpp"
+#include "common.hpp"
 #include "model.hpp"
+#include "ui/panel.hpp"
 #include "util.hpp"
 #include "rapidxml.hpp"
 #include "rapidxml_print.hpp"
@@ -371,13 +374,28 @@ int main() {
     try {
         engine->Init();
 
+        EngineSharedContext sharedContext = engine->GetSharedContext();
+
+        UI::Panel *panel = new UI::Panel(sharedContext, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec4(0.5f, 0.5f, 0.2f, 0.2f));
+
+        engine->AddUIPanel(panel);
+
         engine->RegisterUpdateFunction(Update);
         engine->RegisterFixedUpdateFunction(FixedUpdate);
 
         engine->Start();
+
+        engine->RemoveUIPanel(panel);
+
+        delete panel;
+        
+        for (Model *&model : State::Models) {
+            delete model;
+        }
     } catch(const std::runtime_error &e) {
         fmt::println("Exception has occurred: {}", e.what());
         return -1;
     }
+
     return 0;
 }

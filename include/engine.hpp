@@ -3,6 +3,8 @@
 
 #include "camera.hpp"
 #include "particles.hpp"
+#include "common.hpp"
+#include "ui/panel.hpp"
 #include <future>
 #include <mutex>
 #ifndef VK_EXT_DEBUG_REPORT_EXTENSION_NAME
@@ -72,30 +74,6 @@ struct PipelineAndLayout {
     VkPipelineLayout layout = nullptr;
 };
 
-struct BufferAndMemory {
-    VkBuffer buffer;
-    VkDeviceMemory memory;
-};
-
-struct ImageAndMemory {
-    VkImage image;
-    VkDeviceMemory memory;
-};
-
-struct TextureBufferAndMemory {
-    BufferAndMemory bufferAndMemory;
-    Uint32 width;
-    Uint32 height;
-    Uint8 channels;
-};
-
-struct TextureImageAndMemory {
-    ImageAndMemory imageAndMemory;
-    Uint32 width;
-    Uint32 height;
-    Uint8 channels;
-};
-
 struct MatricesUBO {
     glm::mat4 viewMatrix;
     glm::mat4 modelMatrix;
@@ -144,6 +122,13 @@ struct RenderParticle {
     VkDescriptorSet descriptorSet;
 };
 
+struct RenderUIPanel {
+    UI::Panel *panel;
+
+    VkImageView textureView;
+    VkSampler textureSampler;
+};
+
 struct RenderPass {
     VkRenderPass vulkanRenderPass;
     PipelineAndLayout graphicsPipeline;
@@ -157,16 +142,22 @@ public:
     void SetMouseCaptureState(bool capturing);
 
     void LoadModel(Model *model);   // this is the first function created to be used by main.cpp
-    void UnloadModel(Model *model);
+    /* Do not set waitForFences to false, unless you know what you're doing. */
+    void UnloadModel(Model *model, bool waitForFences = true);
 
     void AddParticle(Particle *particle);
     void RemoveParticle(Particle *particle);
+
+    void AddUIPanel(UI::Panel *panel);
+    void RemoveUIPanel(UI::Panel *panel);
 
     void RegisterUpdateFunction(const std::function<void()> &func);
     // Fixed Updates are called 60 times a second.
     void RegisterFixedUpdateFunction(const std::function<void(std::array<bool, 322>)> &func);
 
     void SetPrimaryCamera(Camera &cam);
+
+    inline EngineSharedContext GetSharedContext() { return {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex}; };
 
     void  Init();
     void  Start();
@@ -179,7 +170,7 @@ private:
     void InitSwapchain();
     void InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageView);
     VkImageView CreateDepthImage();
-    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {});
+    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {}, bool is2D = false);
     VkRenderPass CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, bool shouldContainDepthImage = true);
     VkFramebuffer CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkExtent2D resolution, VkImageView depthImageView = nullptr);
     bool QuitEventCheck(SDL_Event &event);
@@ -188,23 +179,12 @@ private:
     VkShaderModule CreateShaderModule(VkDevice device, const std::vector<char> &code);
     Uint32 FindMemoryType(Uint32 typeFilter, VkMemoryPropertyFlags properties);
 
-    void AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &memory, bool recordAllocation = true);
     void CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size);
 
     void LoadMesh(Mesh &mesh, Model *model);
     std::array<TextureImageAndMemory, 1> LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations = true);
 
-    BufferAndMemory CreateVertexBuffer(const std::vector<Vertex> &verts, bool recordAllocation = true);
-    BufferAndMemory CreateIndexBuffer(const std::vector<Uint32> &inds, bool recordAllocation = true);
-
-    VkCommandBuffer BeginSingleTimeCommands();
-    void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
-
-    void CopyBufferToImage(TextureBufferAndMemory textureBuffer, VkImage image);
-    void ChangeImageLayout(VkImage image, VkFormat format, VkImageLayout oldImageLayout, VkImageLayout newImageLayout);
-
     TextureBufferAndMemory LoadTextureFromFile(const std::string &name);
-    TextureImageAndMemory CreateImage(Uint32 width, Uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, bool recordAllocation = true);
     VkImageView CreateImageView(TextureImageAndMemory &imageAndMemory, VkFormat format, VkImageAspectFlags aspectMask, bool recordCreation = true);
     VkSampler CreateSampler(float maxAnisotropy, bool recordCreation = true);
 
@@ -223,6 +203,7 @@ private:
     Settings m_Settings;
 
     std::vector<RenderParticle> m_RenderParticles;
+    std::vector<RenderUIPanel> m_UIPanels;
 
     SDL_Window *m_EngineWindow = nullptr;
 
@@ -249,6 +230,8 @@ private:
     VkDescriptorSet m_RenderDescriptorSet = nullptr;
     Uint32 m_RenderDescriptorSetSize = 0;   // This is tracked by LoadModel
 
+    VkDescriptorSetLayout m_UIPanelDescriptorSetLayout = nullptr;
+
     VkDescriptorSetLayout m_RescaleDescriptorSetLayout = nullptr;
     VkDescriptorPool m_RescaleDescriptorPool = nullptr;
     VkDescriptorSet m_RescaleDescriptorSet = nullptr;
@@ -257,8 +240,9 @@ private:
     PipelineAndLayout m_MainGraphicsPipeline; // Used to render the 3D scene
     PipelineAndLayout m_ParticleGraphicsPipeline; // Used to add shiny particles
     PipelineAndLayout m_RescaleGraphicsPipeline; // Used to rescale.
+    PipelineAndLayout m_UIPanelGraphicsPipeline; // Used for UI Panels.
 
-    BufferAndMemory m_FullscreenQuadVertexBuffer;
+    BufferAndMemory m_FullscreenQuadVertexBuffer = {nullptr, nullptr};
 
     std::vector<RenderModel> m_RenderModels;    // to be used in the loop.
 

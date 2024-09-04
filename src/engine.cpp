@@ -1,4 +1,6 @@
+#include "common.hpp"
 #include "error.hpp"
+#include "ui/panel.hpp"
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_mouse.h>
@@ -62,24 +64,6 @@ static VkFormat getBestFormatFromChannels(Uint8 channels) {
     }
 }
 
-static Uint8 getChannelsFromFormats(VkFormat format) {
-    switch (format) {
-        case VK_FORMAT_R8_SRGB:
-            return 1;
-        case VK_FORMAT_D32_SFLOAT:
-            return 1;
-        case VK_FORMAT_R8G8_UINT:
-            return 2;
-        // unsupported by many hardware, make sure to throw an error.
-        // case VK_FORMAT_R8G8B8_UINT:
-        //  return 3;
-        case VK_FORMAT_R8G8B8A8_SRGB:
-            return 4;
-        default:
-            throw std::runtime_error(engineError::UNSUPPORTED_FORMAT);
-    }
-}
-
 static std::vector<char> readFile(const std::string &name) {
     std::ifstream file(name, std::ios::ate | std::ios::binary);
 
@@ -115,11 +99,16 @@ Get ready for loss of braincells!
 Engine::~Engine() {
     fmt::println("Destroying Engine!");
 
-    for (RenderModel &renderModel : m_RenderModels)
-        this->UnloadModel(renderModel.model);
-
     if (m_EngineDevice)
         vkDeviceWaitIdle(m_EngineDevice);
+
+    if (m_FullscreenQuadVertexBuffer.buffer && m_FullscreenQuadVertexBuffer.memory) {
+        vkDestroyBuffer(m_EngineDevice, m_FullscreenQuadVertexBuffer.buffer, NULL);
+        vkFreeMemory(m_EngineDevice, m_FullscreenQuadVertexBuffer.memory, NULL);
+    }
+
+    for (RenderModel &renderModel : m_RenderModels)
+        this->UnloadModel(renderModel.model, false);
 
     for (PipelineAndLayout pipelineAndLayout : m_PipelineAndLayouts) {
         vkDestroyPipeline(m_EngineDevice, pipelineAndLayout.pipeline, NULL);
@@ -181,6 +170,9 @@ Engine::~Engine() {
     if (m_RescaleDescriptorSetLayout)
         vkDestroyDescriptorSetLayout(m_EngineDevice, m_RescaleDescriptorSetLayout, NULL);
 
+    if (m_UIPanelDescriptorSetLayout)
+        vkDestroyDescriptorSetLayout(m_EngineDevice, m_UIPanelDescriptorSetLayout, NULL);
+
     if (m_CommandPool)
         vkDestroyCommandPool(m_EngineDevice, m_CommandPool, NULL);
     
@@ -234,38 +226,10 @@ SwapChainSupportDetails Engine::QuerySwapChainSupport(VkPhysicalDevice physicalD
     return details;
 }
 
-void Engine::AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer &buffer, VkDeviceMemory &memory, bool recordAllocation) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    if (vkCreateBuffer(m_EngineDevice, &bufferInfo, NULL, &buffer) != VK_SUCCESS)
-        throw std::runtime_error(engineError::CANT_CREATE_VERTEX_BUFFER);
-    
-    if (recordAllocation)
-        m_AllocatedBuffers.push_back(buffer);
-
-    VkMemoryRequirements memoryRequirements;
-    vkGetBufferMemoryRequirements(m_EngineDevice, buffer, &memoryRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memoryRequirements.size;
-    allocInfo.memoryTypeIndex = FindMemoryType(memoryRequirements.memoryTypeBits, properties);
-
-    if (vkAllocateMemory(m_EngineDevice, &allocInfo, NULL, &memory) != VK_SUCCESS)
-        throw std::runtime_error(engineError::CANT_ALLOCATE_MEMORY);
-    
-    if (recordAllocation)
-        m_AllocatedMemory.push_back(memory);
-
-    vkBindBufferMemory(m_EngineDevice, buffer, memory, 0);
-}
-
 void Engine::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size) {
-    VkCommandBuffer commandBuffer = BeginSingleTimeCommands();
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+
+    VkCommandBuffer commandBuffer = BeginSingleTimeCommands(sharedContext);
 
     VkBufferCopy bufferCopy{};
     bufferCopy.srcOffset = 0;   // start
@@ -274,12 +238,14 @@ void Engine::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBu
 
     vkCmdCopyBuffer(commandBuffer, hostBuffer, deviceBuffer, 1, &bufferCopy);
 
-    EndSingleTimeCommands(commandBuffer);
+    EndSingleTimeCommands(sharedContext, commandBuffer);
 }
 
 // first element = diffuse
 std::array<TextureImageAndMemory, 1> Engine::LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations) {
     std::array<TextureImageAndMemory, 1> textures;
+
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
     
     {
         if (!mesh.diffuseMapPath.empty()) {
@@ -304,18 +270,18 @@ std::array<TextureImageAndMemory, 1> Engine::LoadTexturesFromMesh(Mesh &mesh, bo
             TextureBufferAndMemory textureBufferAndMemory = LoadTextureFromFile(path);
             VkFormat textureFormat = getBestFormatFromChannels(textureBufferAndMemory.channels);
 
-            textures[0] = CreateImage(
+            textures[0] = CreateImage(sharedContext,
             textureBufferAndMemory.width, textureBufferAndMemory.height,
             textureFormat, VK_IMAGE_TILING_OPTIMAL,
             VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, recordAllocations
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
                 );
-            ChangeImageLayout(textures[0].imageAndMemory.image, 
+            ChangeImageLayout(sharedContext, textures[0].imageAndMemory.image, 
                         textureFormat, 
                         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
                     );
-            CopyBufferToImage(textureBufferAndMemory, textures[0].imageAndMemory.image);
-            ChangeImageLayout(textures[0].imageAndMemory.image, 
+            CopyBufferToImage(sharedContext, textureBufferAndMemory, textures[0].imageAndMemory.image);
+            ChangeImageLayout(sharedContext, textures[0].imageAndMemory.image, 
                         textureFormat, 
                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                     );
@@ -326,105 +292,11 @@ std::array<TextureImageAndMemory, 1> Engine::LoadTexturesFromMesh(Mesh &mesh, bo
             m_AllocatedBuffers.erase(std::find(m_AllocatedBuffers.begin(), m_AllocatedBuffers.end(), textureBufferAndMemory.bufferAndMemory.buffer));
             m_AllocatedMemory.erase(std::find(m_AllocatedMemory.begin(), m_AllocatedMemory.end(), textureBufferAndMemory.bufferAndMemory.memory));
         } else {
-            /* Allocate the buffer that stores our pixel data. */
-            BufferAndMemory textureBufferAndMemory;
-
-            VkDeviceSize bufferSize = sizeof(Uint8) * 4;  // R8G8B8A8
-
-            AllocateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, textureBufferAndMemory.buffer, textureBufferAndMemory.memory, recordAllocations);
-
-            // copy the texture data into the buffer
-            void *data;
-            std::array<Uint8, 4> texColors = {static_cast<Uint8>(mesh.diffuse.r * 255), static_cast<Uint8>(mesh.diffuse.g * 255), static_cast<Uint8>(mesh.diffuse.b * 255), 255};
-
-            vkMapMemory(m_EngineDevice, textureBufferAndMemory.memory, 0, bufferSize, 0, &data);
-            SDL_memcpy(data, (void *)texColors.data(), bufferSize);
-            vkUnmapMemory(m_EngineDevice, textureBufferAndMemory.memory);
-
-            /* Transfer our newly created texture to an image */
-            textures[0] = CreateImage(
-            1, 1,
-            VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, recordAllocations
-                );
-            ChangeImageLayout(textures[0].imageAndMemory.image, 
-                        VK_FORMAT_R8G8B8A8_SRGB, 
-                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-                    );
-            CopyBufferToImage({textureBufferAndMemory, 1, 1, 4}, textures[0].imageAndMemory.image);
-            ChangeImageLayout(textures[0].imageAndMemory.image, 
-                        VK_FORMAT_R8G8B8A8_SRGB, 
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                    );
-            
-            vkDestroyBuffer(m_EngineDevice, textureBufferAndMemory.buffer, NULL);
-            vkFreeMemory(m_EngineDevice, textureBufferAndMemory.memory, NULL);
+            textures[0] = CreateSinglePixelImage(sharedContext, mesh.diffuse);
         }
     }
 
     return textures;
-}
-
-BufferAndMemory Engine::CreateVertexBuffer(const std::vector<Vertex> &verts, bool recordAllocation) {
-    //if (m_VertexBuffer || m_VertexBufferMemory)
-    //    throw std::runtime_error(engineError::VERTEX_BUFFER_ALREADY_EXISTS);
-
-    // allocate the staging buffer (this is used for performance, having a buffer readable by the GPU and CPU is slower than a GPU-exclusive memory, so we will use that as our real vertex buffer)
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-
-    VkDeviceSize stagingBufferSize = sizeof(Vertex) * verts.size();
-
-    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory, false);
-
-    // copy the vertex data into the buffer
-    void *data;
-    vkMapMemory(m_EngineDevice, stagingBufferMemory, 0, stagingBufferSize, 0, &data);
-    SDL_memcpy(data, (void *)verts.data(), stagingBufferSize);
-    vkUnmapMemory(m_EngineDevice, stagingBufferMemory);
-
-    // allocate the gpu-exclusive vertex buffer
-    VkBuffer vertexBuffer;
-    VkDeviceMemory vertexBufferMemory;
-    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory, recordAllocation);
-
-    CopyHostBufferToDeviceBuffer(stagingBuffer, vertexBuffer, stagingBufferSize);
-
-    vkDestroyBuffer(m_EngineDevice, stagingBuffer, NULL);
-    vkFreeMemory(m_EngineDevice, stagingBufferMemory, NULL);
-
-    return {vertexBuffer, vertexBufferMemory};
-}
-
-BufferAndMemory Engine::CreateIndexBuffer(const std::vector<Uint32> &inds, bool recordAllocation) {
-    //if (m_IndexBuffer || m_IndexBufferMemory)
-    //    throw std::runtime_error(engineError::INDEX_BUFFER_ALREADY_EXISTS);
-
-    // allocate the staging buffer (this is used for performance, having a buffer readable by the GPU and CPU is slower than a GPU-exclusive memory, so we will use that as our real index buffer)
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-
-    VkDeviceSize stagingBufferSize = sizeof(Uint32) * inds.size();
-    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory, false);
-
-    // copy the index data into the buffer
-    void *data;
-    vkMapMemory(m_EngineDevice, stagingBufferMemory, 0, stagingBufferSize, 0, &data);
-    SDL_memcpy(data, (void *)inds.data(), stagingBufferSize);
-    vkUnmapMemory(m_EngineDevice, stagingBufferMemory);
-
-    // allocate the gpu-exclusive index buffer
-    VkBuffer indexBuffer;
-    VkDeviceMemory indexBufferMemory;
-    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory, recordAllocation);
-
-    CopyHostBufferToDeviceBuffer(stagingBuffer, indexBuffer, stagingBufferSize);
-
-    vkDestroyBuffer(m_EngineDevice, stagingBuffer, NULL);
-    vkFreeMemory(m_EngineDevice, stagingBufferMemory, NULL);
-
-    return {indexBuffer, indexBufferMemory};
 }
 
 TextureBufferAndMemory Engine::LoadTextureFromFile(const std::string &name) {
@@ -442,10 +314,14 @@ TextureBufferAndMemory Engine::LoadTextureFromFile(const std::string &name) {
 
     fmt::println("Image loaded ({}x{}, {} channels) with an expected buffer size of {}.", texWidth, texHeight, 4, texWidth * texHeight * 4);
 
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+
     VkBuffer imageStagingBuffer;
     VkDeviceMemory imageStagingMemory;
 
-    AllocateBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, imageStagingBuffer, imageStagingMemory);
+    AllocateBuffer(sharedContext, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, imageStagingBuffer, imageStagingMemory);
+    m_AllocatedBuffers.push_back(imageStagingBuffer);
+    m_AllocatedMemory.push_back(imageStagingMemory);
 
     void *data;
     vkMapMemory(m_EngineDevice, imageStagingMemory, 0, imageSize, 0, &data);
@@ -455,54 +331,6 @@ TextureBufferAndMemory Engine::LoadTextureFromFile(const std::string &name) {
     stbi_image_free(imageData);
 
     return {{imageStagingBuffer, imageStagingMemory}, (Uint32)texWidth, (Uint32)texHeight, (Uint8)4};
-}
-
-TextureImageAndMemory Engine::CreateImage(Uint32 width, Uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, bool recordAllocation) {
-    TextureImageAndMemory textureImageAndMemory;
-
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = width;
-    imageInfo.extent.height = height;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = format;
-    imageInfo.tiling = tiling;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = usage;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    if (vkCreateImage(m_EngineDevice, &imageInfo, nullptr, &textureImageAndMemory.imageAndMemory.image) != VK_SUCCESS) {
-        throw std::runtime_error(engineError::IMAGE_CREATION_FAILURE);
-    }
-
-    VkMemoryRequirements memRequirements;
-    vkGetImageMemoryRequirements(m_EngineDevice, textureImageAndMemory.imageAndMemory.image, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties);
-
-    if (vkAllocateMemory(m_EngineDevice, &allocInfo, nullptr, &textureImageAndMemory.imageAndMemory.memory) != VK_SUCCESS) {
-        throw std::runtime_error(engineError::CANT_ALLOCATE_MEMORY);
-    }
-
-    textureImageAndMemory.width = width;
-    textureImageAndMemory.height = height;
-    textureImageAndMemory.channels = getChannelsFromFormats(format);
-
-    vkBindImageMemory(m_EngineDevice, textureImageAndMemory.imageAndMemory.image, textureImageAndMemory.imageAndMemory.memory, 0);
-
-    if (recordAllocation) {
-        m_AllocatedImages.push_back(textureImageAndMemory.imageAndMemory.image);
-        m_AllocatedMemory.push_back(textureImageAndMemory.imageAndMemory.memory);
-    }
-
-    return textureImageAndMemory;
 }
 
 VkImageView Engine::CreateImageView(TextureImageAndMemory &imageAndMemory, VkFormat format, VkImageAspectFlags aspectMask, bool recordCreation) {
@@ -574,15 +402,17 @@ VkFormat Engine::FindBestFormat(const std::vector<VkFormat>& candidates, VkImage
 }
 
 void Engine::LoadMesh(Mesh &mesh, Model *model) {
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+
     RenderModel renderModel{};
 
     renderModel.model = model;
 
-    BufferAndMemory vertexBuffer = CreateVertexBuffer(mesh.vertices, false);
+    BufferAndMemory vertexBuffer = CreateVertexBuffer(sharedContext, mesh.vertices);
     renderModel.vertexBuffer = vertexBuffer;
 
     renderModel.indexBufferSize = mesh.indices.size();
-    renderModel.indexBuffer = CreateIndexBuffer(mesh.indices, false);
+    renderModel.indexBuffer = CreateIndexBuffer(sharedContext, mesh.indices);
 
     std::array<TextureImageAndMemory, 1> meshTextures = LoadTexturesFromMesh(mesh, false);
     renderModel.diffTexture = meshTextures[0];
@@ -602,7 +432,7 @@ void Engine::LoadMesh(Mesh &mesh, Model *model) {
 
     renderModel.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
 
-    AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer.buffer, renderModel.matricesUBOBuffer.memory, false);
+    AllocateBuffer(sharedContext, uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer.buffer, renderModel.matricesUBOBuffer.memory);
 
     vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOMappedMemory);
 
@@ -631,7 +461,7 @@ void Engine::LoadModel(Model *model) {
     return;
 }
 
-void Engine::UnloadModel(Model *model) {
+void Engine::UnloadModel(Model *model, bool waitForFences) {
     std::vector<size_t> removedRenderModels;
 
     for (size_t i = 0; i < m_RenderModels.size(); i++) {
@@ -643,8 +473,10 @@ void Engine::UnloadModel(Model *model) {
         // m_RenderModels.erase(m_RenderModels.begin() + i);
         removedRenderModels.push_back(i);
 
-        // Before we start, wait for the InFlightFences to stop.
-        vkWaitForFences(m_EngineDevice, m_InFlightFences.size(), m_InFlightFences.data(), true, UINT64_MAX);
+        if (waitForFences) {
+            // Before we start, wait for the InFlightFences to stop.
+            vkWaitForFences(m_EngineDevice, m_InFlightFences.size(), m_InFlightFences.data(), true, UINT64_MAX);
+        }
 
         if (renderModel.diffTextureImageView)
             vkDestroyImageView(m_EngineDevice, renderModel.diffTextureImageView, NULL);
@@ -678,6 +510,8 @@ void Engine::UnloadModel(Model *model) {
 }
 
 void Engine::AddParticle(Particle *particle) {
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+
     std::array<glm::vec3, 2> particleBoundingBox = particle->GetBoundingBox();
 
     RenderParticle renderParticle{};
@@ -689,7 +523,7 @@ void Engine::AddParticle(Particle *particle) {
 
     renderParticle.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
 
-    AllocateBuffer(matricesUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderParticle.matricesUBOBuffer.buffer, renderParticle.matricesUBOBuffer.memory, false);
+    AllocateBuffer(sharedContext, matricesUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderParticle.matricesUBOBuffer.buffer, renderParticle.matricesUBOBuffer.memory);
 
     vkMapMemory(m_EngineDevice, renderParticle.matricesUBOBuffer.memory, 0, matricesUniformBufferSize, 0, &renderParticle.matricesUBOMappedMemory);
 
@@ -698,7 +532,7 @@ void Engine::AddParticle(Particle *particle) {
 
     renderParticle.particleUBO = {particle->GetPosition(), particleBoundingBox[0], particleBoundingBox[1]};
 
-    AllocateBuffer(particleUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderParticle.particleUBOBuffer.buffer, renderParticle.particleUBOBuffer.memory, false);
+    AllocateBuffer(sharedContext, particleUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderParticle.particleUBOBuffer.buffer, renderParticle.particleUBOBuffer.memory);
 
     vkMapMemory(m_EngineDevice, renderParticle.particleUBOBuffer.memory, 0, particleUniformBufferSize, 0, &renderParticle.particleUBOMappedMemory);
 
@@ -773,6 +607,35 @@ void Engine::RemoveParticle(Particle *particle) {
         vkFreeMemory(m_EngineDevice, renderParticle.particleUBOBuffer.memory, NULL);
 
         vkFreeDescriptorSets(m_EngineDevice, m_ParticleDescriptorPool, 1, &renderParticle.descriptorSet);
+    }
+}
+
+void Engine::AddUIPanel(UI::Panel *panel) {
+    RenderUIPanel renderUIPanel{};
+
+    renderUIPanel.panel = panel;
+    renderUIPanel.textureView = CreateImageView(panel->texture, panel->texture.format, VK_IMAGE_ASPECT_COLOR_BIT, false);
+    renderUIPanel.textureSampler = CreateSampler(1.0f, false);
+
+    m_UIPanels.push_back(renderUIPanel);
+}
+
+void Engine::RemoveUIPanel(UI::Panel *panel) {
+    for (size_t i = 0; i < m_UIPanels.size(); i++) {
+        RenderUIPanel &renderUIPanel = m_UIPanels[i];
+
+        if (renderUIPanel.panel != panel) {
+            continue;
+        }
+
+        m_UIPanels.erase(m_UIPanels.begin() + i);
+
+        vkDeviceWaitIdle(m_EngineDevice);
+
+        vkDestroySampler(m_EngineDevice, renderUIPanel.textureSampler, NULL);
+        vkDestroyImageView(m_EngineDevice, renderUIPanel.textureView, NULL);
+
+        break;
     }
 }
 
@@ -901,12 +764,17 @@ void Engine::InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageVie
 }
 
 VkImageView Engine::CreateDepthImage() {
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+
     VkFormat depthFormat = FindDepthFormat();
 
-    TextureImageAndMemory depthImageAndMemory = CreateImage(m_Settings.RenderWidth, m_Settings.RenderHeight, 
+    TextureImageAndMemory depthImageAndMemory = CreateImage(sharedContext, m_Settings.RenderWidth, m_Settings.RenderHeight, 
                         depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkImageView depthImageView = CreateImageView(depthImageAndMemory, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    m_AllocatedImages.push_back(depthImageAndMemory.imageAndMemory.image);
+    m_AllocatedMemory.push_back(depthImageAndMemory.imageAndMemory.memory);
 
     return depthImageView;
 }
@@ -965,142 +833,10 @@ void Engine::InitInstance() {
         throw std::runtime_error(engineError::INSTANCE_CREATION_FAILURE);
 }
 
-VkCommandBuffer Engine::BeginSingleTimeCommands() {
-    m_SingleTimeCommandMutex.lock();
-
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = m_CommandPool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(m_EngineDevice, &allocInfo, &commandBuffer);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
-    return commandBuffer;
-}
-
-void Engine::EndSingleTimeCommands(VkCommandBuffer commandBuffer) {
-    vkEndCommandBuffer(commandBuffer);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(m_GraphicsQueue);
-
-    vkFreeCommandBuffers(m_EngineDevice, m_CommandPool, 1, &commandBuffer);
-
-    m_SingleTimeCommandMutex.unlock();
-}
-
-void Engine::CopyBufferToImage(TextureBufferAndMemory textureBuffer, VkImage image) {
-    VkCommandBuffer commandBuffer = BeginSingleTimeCommands();
-
-    VkBufferImageCopy bufferImageCopy{};
-    bufferImageCopy.bufferImageHeight = textureBuffer.height;
-    bufferImageCopy.bufferOffset = 0;
-    bufferImageCopy.bufferRowLength = 0;
-
-    bufferImageCopy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    bufferImageCopy.imageSubresource.baseArrayLayer = 0;
-    bufferImageCopy.imageSubresource.layerCount = 1;
-    bufferImageCopy.imageSubresource.mipLevel = 0;
-
-    bufferImageCopy.imageOffset = {0, 0, 0};
-    bufferImageCopy.imageExtent = {
-        textureBuffer.width, 
-        textureBuffer.height, 
-        1
-    };
-
-    vkCmdCopyBufferToImage(
-        commandBuffer, 
-        textureBuffer.bufferAndMemory.buffer, 
-        image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
-        1, &bufferImageCopy
-    );
-
-    EndSingleTimeCommands(commandBuffer);
-}
-
-void Engine::ChangeImageLayout(VkImage image, VkFormat format, VkImageLayout oldImageLayout, VkImageLayout newImageLayout) {
-    VkCommandBuffer commandBuffer = BeginSingleTimeCommands();
-
-    VkImageMemoryBarrier memoryBarrier{};
-    memoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    memoryBarrier.image = image;
-    memoryBarrier.oldLayout = oldImageLayout;
-    memoryBarrier.newLayout = newImageLayout;
-    memoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    memoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-    memoryBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    memoryBarrier.subresourceRange.baseArrayLayer = 0;
-    memoryBarrier.subresourceRange.baseMipLevel = 0;
-    memoryBarrier.subresourceRange.layerCount = 1;
-    memoryBarrier.subresourceRange.levelCount = 1;
-
-    VkPipelineStageFlags sourceStageFlags;
-    VkPipelineStageFlags destStageFlags;
-
-    if (oldImageLayout == VK_IMAGE_LAYOUT_UNDEFINED && newImageLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        memoryBarrier.srcAccessMask = 0;
-        memoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-        sourceStageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        destStageFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    } else if (oldImageLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newImageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        memoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-        sourceStageFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        destStageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    } else if (oldImageLayout == VK_IMAGE_LAYOUT_UNDEFINED && newImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-        memoryBarrier.srcAccessMask = 0;
-        memoryBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-        sourceStageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        destStageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    }  else if (oldImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && newImageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        memoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-        sourceStageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        destStageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    }  else if (oldImageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL && newImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-        memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        memoryBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-        sourceStageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-        destStageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    } else {
-        throw std::invalid_argument(engineError::UNSUPPORTED_LAYOUT_TRANSITION);
-    }
-
-    vkCmdPipelineBarrier(commandBuffer, 
-        sourceStageFlags, destStageFlags,
-        0, 
-        0, nullptr, 
-        0, nullptr, 
-        1, &memoryBarrier
-    );
-
-    EndSingleTimeCommands(commandBuffer);
-}
-
 /* Creates a Vulkan graphics pipeline, shaderName will be used as a part of the path.
  * Sanitization is the job of the caller.
  */
-PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts) {
+PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts, bool is2D) {
     auto vertShader = readFile("shaders/" + shaderName + ".vert.spv");
     auto fragShader = readFile("shaders/" + shaderName + ".frag.spv");
 
@@ -1120,8 +856,6 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
     fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     fragShaderStageInfo.module = fragShaderModule;
     fragShaderStageInfo.pName = "main";
-
-    vertShaderStageInfo.pNext = &fragShaderStageInfo;
 
     VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
 
@@ -1145,15 +879,23 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
     dynamicState.dynamicStateCount = static_cast<Uint32>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
 
-    auto bindingDescription = getVertexBindingDescription();
-    auto attributeDescriptions = getVertexAttributeDescriptions();
-
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInputInfo.vertexBindingDescriptionCount = 1;
-    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
-    vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptions.size();
-    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+
+    if (is2D) {
+        auto bindingDescription = getVertex2DBindingDescription();
+        auto attributeDescriptions = getVertex2DAttributeDescriptions();
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+        vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptions.size();
+        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+    } else {
+        auto bindingDescription = getVertexBindingDescription();
+        auto attributeDescriptions = getVertexAttributeDescriptions();
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+        vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptions.size();
+        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+    }
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -1366,7 +1108,7 @@ bool Engine::QuitEventCheck(SDL_Event &event) {
 
 void Engine::Init() {
     int SDL_INIT_STATUS = SDL_Init(SDL_INIT_VIDEO);
-    if (SDL_INIT_STATUS != 0)
+    if (SDL_INIT_STATUS == SDL_FALSE)
         throw std::runtime_error(fmt::format(engineError::FAILED_SDL_INIT, SDL_INIT_STATUS));
 
     m_EngineWindow = SDL_CreateWindow("Test!", m_Settings.DisplayWidth, m_Settings.DisplayHeight, SDL_WINDOW_VULKAN | (m_Settings.Fullscreen & SDL_WINDOW_FULLSCREEN));
@@ -1389,7 +1131,7 @@ void Engine::Init() {
     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER, "1");
 
     // lets prepare
-    if (SDL_Vulkan_LoadLibrary(NULL) != 0)
+    if (SDL_Vulkan_LoadLibrary(NULL) == SDL_FALSE)
         throw std::runtime_error(engineError::FAILED_VULKAN_LOAD);
 
     // will throw an exception and everything for us
@@ -1401,7 +1143,7 @@ void Engine::Init() {
     if (physicalDeviceCount == 0)
         throw std::runtime_error(engineError::NO_VULKAN_DEVICES);
     
-    if (SDL_Vulkan_CreateSurface(m_EngineWindow, m_EngineVulkanInstance, NULL, &m_EngineSurface) != 0)
+    if (SDL_Vulkan_CreateSurface(m_EngineWindow, m_EngineVulkanInstance, NULL, &m_EngineSurface) == SDL_FALSE)
         throw std::runtime_error(fmt::format(engineError::SURFACE_CREATION_FAILURE, SDL_GetError()));
 
     // now we can get a list of physical devices
@@ -1498,12 +1240,16 @@ void Engine::Init() {
     m_RenderImageFormat = getBestFormatFromChannels(4);
 
     m_MainRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 2, m_RenderImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    m_RescaleRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 1, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
+    m_RescaleRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 2, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
 
     VkImageView depthImageView = CreateDepthImage();
 
-    TextureImageAndMemory renderImage = CreateImage(m_Settings.RenderWidth, m_Settings.RenderHeight, m_RenderImageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, nullptr, m_GraphicsQueue, m_SingleTimeCommandMutex};
+    TextureImageAndMemory renderImage = CreateImage(sharedContext, m_Settings.RenderWidth, m_Settings.RenderHeight, m_RenderImageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkImageView renderImageView = CreateImageView(renderImage, m_RenderImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    m_AllocatedImages.push_back(renderImage.imageAndMemory.image);
+    m_AllocatedMemory.push_back(renderImage.imageAndMemory.memory);
 
     // command pools are basically lists of commands, they are recorded and sent to the GPU i think
     VkCommandPoolCreateInfo commandPoolCreateInfo{};
@@ -1610,6 +1356,26 @@ void Engine::Init() {
             throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
     }
 
+    {
+        VkDescriptorSetLayoutBinding samplerDescriptorSetLayoutBinding{};
+        samplerDescriptorSetLayoutBinding.binding = 0;
+        samplerDescriptorSetLayoutBinding.descriptorCount = 1;
+        samplerDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        samplerDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        samplerDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+        std::array<VkDescriptorSetLayoutBinding, 1> bindings = {samplerDescriptorSetLayoutBinding};
+
+        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        descriptorSetLayoutCreateInfo.flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT;
+        descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
+        descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+
+        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_UIPanelDescriptorSetLayout) != VK_SUCCESS)
+            throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
+    }
+
     // Render
     m_RenderViewport.x = 0.0f;
     m_RenderViewport.y = 0.0f;
@@ -1634,8 +1400,9 @@ void Engine::Init() {
     m_DisplayScissor.extent = {m_Settings.DisplayWidth, m_Settings.DisplayHeight};
 
     m_MainGraphicsPipeline = CreateGraphicsPipeline("lighting", m_MainRenderPass, 0, VK_FRONT_FACE_COUNTER_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_RenderDescriptorSetLayout});
-    m_ParticleGraphicsPipeline = CreateGraphicsPipeline("particle", m_MainRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_ParticleDescriptorSetLayout});
-    m_RescaleGraphicsPipeline = CreateGraphicsPipeline("rescale", m_RescaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_RescaleDescriptorSetLayout});
+    m_ParticleGraphicsPipeline = CreateGraphicsPipeline("particle", m_MainRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_ParticleDescriptorSetLayout}, true);
+    m_RescaleGraphicsPipeline = CreateGraphicsPipeline("rescale", m_RescaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_RescaleDescriptorSetLayout}, true);
+    m_UIPanelGraphicsPipeline = CreateGraphicsPipeline("uipanel", m_RescaleRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UIPanelDescriptorSetLayout}, true);
 
     /* RENDER DESCRIPTOR POOL INITIALIZATION */
     {
@@ -1717,15 +1484,17 @@ void Engine::Init() {
         descriptorWrites[0].pImageInfo = &imageInfo;
 
         vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
-
+        
+        EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+        
         // Fullscreen Quad initialization
-        m_FullscreenQuadVertexBuffer = CreateVertexBuffer({
-                                                            {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(1.0f, 1.0f)},
-                                                            {glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(0.0f, 1.0f)},
-                                                            {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec3(1.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(1.0f, 0.0f)},
-                                                            {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(1.0f, 1.0f)}
+        m_FullscreenQuadVertexBuffer = CreateVertex2DBuffer(sharedContext, {
+                                                            {glm::vec2(-1.0f, -1.0f), glm::vec2(0.0f, 0.0f)},
+                                                            {glm::vec2(1.0f, 1.0f), glm::vec2(1.0f, 1.0f)},
+                                                            {glm::vec2(-1.0f, 1.0f), glm::vec2(0.0f, 1.0f)},
+                                                            {glm::vec2(-1.0f, -1.0f), glm::vec2(0.0f, 0.0f)},
+                                                            {glm::vec2(1.0f, -1.0f), glm::vec2(1.0f, 0.0f)},
+                                                            {glm::vec2(1.0f, 1.0f), glm::vec2(1.0f, 1.0f)}
                                                         });
     }
 
@@ -2050,6 +1819,40 @@ void Engine::Start() {
 
             vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_RescaleGraphicsPipeline.layout, 0, 1, &m_RescaleDescriptorSet, 0, nullptr);
             vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
+
+            // UI::Panel shader
+            vkCmdNextSubpass(m_CommandBuffers[currentFrameIndex], VK_SUBPASS_CONTENTS_INLINE);
+
+            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIPanelGraphicsPipeline.pipeline);
+
+            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayViewport);
+
+            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayScissor);
+
+            for (RenderUIPanel &renderUIPanel : m_UIPanels) {
+                // vertex buffer binding!!
+                VkDeviceSize panelVertexOffsets[] = {0};
+                vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(renderUIPanel.panel->vertex2DBuffer.buffer), panelVertexOffsets);
+
+                // update descriptor set with image
+                VkDescriptorImageInfo imageInfo{};
+                imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                imageInfo.imageView = renderUIPanel.textureView;
+                imageInfo.sampler = renderUIPanel.textureSampler;
+
+                std::array<VkWriteDescriptorSet, 1> descriptorWrites;
+                descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                descriptorWrites[0].pNext = nullptr;
+                descriptorWrites[0].dstSet = m_RescaleDescriptorSet; // Ignored
+                descriptorWrites[0].dstBinding = 0;
+                descriptorWrites[0].dstArrayElement = 0;
+                descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                descriptorWrites[0].descriptorCount = 1;
+                descriptorWrites[0].pImageInfo = &imageInfo;
+
+                vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIPanelGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
+                vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
+            }
 
             vkCmdEndRenderPass(m_CommandBuffers[currentFrameIndex]);
         }
