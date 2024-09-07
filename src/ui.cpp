@@ -51,7 +51,7 @@ Label::Label(EngineSharedContext &sharedContext, std::string text) : m_SharedCon
         throw std::runtime_error("Failed to initialize FreeType!");
     }
 
-    if (FT_New_Face(m_FTLibrary, "/usr/share/fonts/google-noto/NotoSans-Black.ttf", 0, &m_FTFace)) {
+    if (FT_New_Face(m_FTLibrary, "NotoSans-Black.ttf", 0, &m_FTFace)) {
         throw std::runtime_error("Failed to locate the LiberationMono-Regular.ttf font in your system!");
     }
 
