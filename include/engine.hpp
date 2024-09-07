@@ -4,7 +4,7 @@
 #include "camera.hpp"
 #include "particles.hpp"
 #include "common.hpp"
-#include "ui/panel.hpp"
+#include "ui.hpp"
 #include <future>
 #include <mutex>
 #ifndef VK_EXT_DEBUG_REPORT_EXTENSION_NAME
@@ -60,7 +60,9 @@ const std::vector<const char *> requiredInstanceExtensions = {
 };
 
 const std::vector<const char *> requiredLayerExtensions {
+#if DEBUG
    "VK_LAYER_KHRONOS_validation",
+#endif
 };
 
 struct SwapChainSupportDetails {
@@ -129,6 +131,12 @@ struct RenderUIPanel {
     VkSampler textureSampler;
 };
 
+struct RenderUILabel {
+    UI::Label *label;
+
+    std::vector<std::pair<char, std::pair<VkImageView, VkSampler>>> textureShaderData;
+};
+
 struct RenderPass {
     VkRenderPass vulkanRenderPass;
     PipelineAndLayout graphicsPipeline;
@@ -143,7 +151,7 @@ public:
 
     void LoadModel(Model *model);   // this is the first function created to be used by main.cpp
     /* Do not set waitForFences to false, unless you know what you're doing. */
-    void UnloadModel(Model *model, bool waitForFences = true);
+    void UnloadModel(Model *model);
 
     void AddParticle(Particle *particle);
     void RemoveParticle(Particle *particle);
@@ -151,13 +159,16 @@ public:
     void AddUIPanel(UI::Panel *panel);
     void RemoveUIPanel(UI::Panel *panel);
 
+    void AddUILabel(UI::Label *label);
+    void RemoveUILabel(UI::Label *label);
+
     void RegisterUpdateFunction(const std::function<void()> &func);
     // Fixed Updates are called 60 times a second.
     void RegisterFixedUpdateFunction(const std::function<void(std::array<bool, 322>)> &func);
 
     void SetPrimaryCamera(Camera &cam);
 
-    inline EngineSharedContext GetSharedContext() { return {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex}; };
+    inline EngineSharedContext GetSharedContext() { return {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex}; };
 
     void  Init();
     void  Start();
@@ -204,6 +215,7 @@ private:
 
     std::vector<RenderParticle> m_RenderParticles;
     std::vector<RenderUIPanel> m_UIPanels;
+    std::vector<RenderUILabel> m_UILabels;
 
     SDL_Window *m_EngineWindow = nullptr;
 
@@ -241,6 +253,7 @@ private:
     PipelineAndLayout m_ParticleGraphicsPipeline; // Used to add shiny particles
     PipelineAndLayout m_RescaleGraphicsPipeline; // Used to rescale.
     PipelineAndLayout m_UIPanelGraphicsPipeline; // Used for UI Panels.
+    PipelineAndLayout m_UILabelGraphicsPipeline; // Used for UI Labels.
 
     BufferAndMemory m_FullscreenQuadVertexBuffer = {nullptr, nullptr};
 

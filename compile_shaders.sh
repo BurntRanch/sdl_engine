@@ -9,3 +9,6 @@ glslc shaders/rescale.frag -o shaders/rescale.frag.spv
 
 glslc shaders/uipanel.vert -o shaders/uipanel.vert.spv
 glslc shaders/uipanel.frag -o shaders/uipanel.frag.spv
+
+glslc shaders/uilabel.vert -o shaders/uilabel.vert.spv
+glslc shaders/uilabel.frag -o shaders/uilabel.frag.spv

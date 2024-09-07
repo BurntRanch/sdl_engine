@@ -1,10 +1,10 @@
 [video]
 VSyncEnabled = false
-RenderWidth = 800
-RenderHeight = 600
+RenderWidth = 400
+RenderHeight = 300
 DisplayWidth = 800
 DisplayHeight = 600
-Fullscreen = false
+Fullscreen = true
 IgnoreRenderResolution = true     # If IgnoreRenderResolution is true, it will ignore your RenderWidth and RenderHeight preferences, if false, it will enforce your RenderWidth and RenderHeight preferences (which may cause stretching).
 FieldOfView = 90
 CameraNear = 0.0001
@@ -16,4 +16,4 @@ ReportFPS = false
 MouseSensitivity = 0.1
 InvertVertical = false
 InvertHorizontal = false
-Velocity = 10.0
+Velocity = 1.0

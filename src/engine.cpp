@@ -1,5 +1,6 @@
 #include "common.hpp"
 #include "error.hpp"
+#include "ui/label.hpp"
 #include "ui/panel.hpp"
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_events.h>
@@ -24,6 +25,7 @@
 #include <stdexcept>
 #include <algorithm>
 #include <thread>
+#include <utility>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vk_enum_string_helper.h>
@@ -108,7 +110,16 @@ Engine::~Engine() {
     }
 
     for (RenderModel &renderModel : m_RenderModels)
-        this->UnloadModel(renderModel.model, false);
+        this->UnloadModel(renderModel.model);
+
+    for (RenderUIPanel &renderPanel : m_UIPanels) {
+        this->RemoveUIPanel(renderPanel.panel);
+
+        renderPanel.panel->DestroyBuffers();
+    }
+
+    for (RenderParticle &renderParticle : m_RenderParticles)
+        this->RemoveParticle(renderParticle.particle);
 
     for (PipelineAndLayout pipelineAndLayout : m_PipelineAndLayouts) {
         vkDestroyPipeline(m_EngineDevice, pipelineAndLayout.pipeline, NULL);
@@ -227,7 +238,7 @@ SwapChainSupportDetails Engine::QuerySwapChainSupport(VkPhysicalDevice physicalD
 }
 
 void Engine::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size) {
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
 
     VkCommandBuffer commandBuffer = BeginSingleTimeCommands(sharedContext);
 
@@ -245,7 +256,7 @@ void Engine::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBu
 std::array<TextureImageAndMemory, 1> Engine::LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations) {
     std::array<TextureImageAndMemory, 1> textures;
 
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
     
     {
         if (!mesh.diffuseMapPath.empty()) {
@@ -314,7 +325,7 @@ TextureBufferAndMemory Engine::LoadTextureFromFile(const std::string &name) {
 
     fmt::println("Image loaded ({}x{}, {} channels) with an expected buffer size of {}.", texWidth, texHeight, 4, texWidth * texHeight * 4);
 
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
 
     VkBuffer imageStagingBuffer;
     VkDeviceMemory imageStagingMemory;
@@ -402,7 +413,7 @@ VkFormat Engine::FindBestFormat(const std::vector<VkFormat>& candidates, VkImage
 }
 
 void Engine::LoadMesh(Mesh &mesh, Model *model) {
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
 
     RenderModel renderModel{};
 
@@ -461,7 +472,7 @@ void Engine::LoadModel(Model *model) {
     return;
 }
 
-void Engine::UnloadModel(Model *model, bool waitForFences) {
+void Engine::UnloadModel(Model *model) {
     std::vector<size_t> removedRenderModels;
 
     for (size_t i = 0; i < m_RenderModels.size(); i++) {
@@ -473,10 +484,7 @@ void Engine::UnloadModel(Model *model, bool waitForFences) {
         // m_RenderModels.erase(m_RenderModels.begin() + i);
         removedRenderModels.push_back(i);
 
-        if (waitForFences) {
-            // Before we start, wait for the InFlightFences to stop.
-            vkWaitForFences(m_EngineDevice, m_InFlightFences.size(), m_InFlightFences.data(), true, UINT64_MAX);
-        }
+        vkDeviceWaitIdle(m_EngineDevice);
 
         if (renderModel.diffTextureImageView)
             vkDestroyImageView(m_EngineDevice, renderModel.diffTextureImageView, NULL);
@@ -510,7 +518,7 @@ void Engine::UnloadModel(Model *model, bool waitForFences) {
 }
 
 void Engine::AddParticle(Particle *particle) {
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
 
     std::array<glm::vec3, 2> particleBoundingBox = particle->GetBoundingBox();
 
@@ -592,8 +600,9 @@ void Engine::RemoveParticle(Particle *particle) {
 
         m_RenderParticles.erase(m_RenderParticles.begin() + i);
 
-        // Before we start, wait for the InFlightFences to stop.
-        vkWaitForFences(m_EngineDevice, m_InFlightFences.size(), m_InFlightFences.data(), true, UINT64_MAX);
+        // Before we start, wait for the device to be idle
+        // This is already called in ~Engine, but sometimes the user calls RemoveParticle manually.
+        vkDeviceWaitIdle(m_EngineDevice);
 
         // vkDestroyImageView(m_EngineDevice, renderModel.diffTextureImageView, NULL);
         // vkDestroyImage(m_EngineDevice, renderModel.diffTexture.imageAndMemory.image, NULL);
@@ -622,7 +631,7 @@ void Engine::AddUIPanel(UI::Panel *panel) {
 
 void Engine::RemoveUIPanel(UI::Panel *panel) {
     for (size_t i = 0; i < m_UIPanels.size(); i++) {
-        RenderUIPanel &renderUIPanel = m_UIPanels[i];
+        RenderUIPanel renderUIPanel = m_UIPanels[i];
 
         if (renderUIPanel.panel != panel) {
             continue;
@@ -634,6 +643,46 @@ void Engine::RemoveUIPanel(UI::Panel *panel) {
 
         vkDestroySampler(m_EngineDevice, renderUIPanel.textureSampler, NULL);
         vkDestroyImageView(m_EngineDevice, renderUIPanel.textureView, NULL);
+
+        break;
+    }
+}
+
+void Engine::AddUILabel(UI::Label *label) {
+    RenderUILabel renderUILabel{};
+
+    renderUILabel.label = label;
+
+    for (auto &glyph : label->glyphBuffers) {
+        VkImageView textureView = CreateImageView(glyph.second.first, glyph.second.first.format, VK_IMAGE_ASPECT_COLOR_BIT, false);
+        VkSampler textureSampler = CreateSampler(1.0f, false);
+
+        renderUILabel.textureShaderData.push_back(std::make_pair(glyph.first, std::make_pair(textureView, textureSampler)));
+    }
+
+    m_UILabels.push_back(renderUILabel);
+}
+
+void Engine::RemoveUILabel(UI::Label *label) {
+    for (size_t i = 0; i < m_UILabels.size(); i++) {
+        RenderUILabel renderUILabel = m_UILabels[i];
+
+        if (renderUILabel.label != label) {
+            continue;
+        }
+
+        m_UILabels.erase(m_UILabels.begin() + i);
+
+        vkDeviceWaitIdle(m_EngineDevice);
+
+        for (size_t i = 0; i < renderUILabel.textureShaderData.size(); i++) {
+            auto shaderData = renderUILabel.textureShaderData[i];
+
+            renderUILabel.textureShaderData.erase(renderUILabel.textureShaderData.begin() + i);
+
+            vkDestroyImageView(m_EngineDevice, shaderData.second.first, NULL);
+            vkDestroySampler(m_EngineDevice, shaderData.second.second, NULL);
+        }
 
         break;
     }
@@ -764,7 +813,7 @@ void Engine::InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageVie
 }
 
 VkImageView Engine::CreateDepthImage() {
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
 
     VkFormat depthFormat = FindDepthFormat();
 
@@ -883,15 +932,17 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInputInfo.vertexBindingDescriptionCount = 1;
 
+
+    auto bindingDescription2D = getVertex2DBindingDescription();
+    auto attributeDescriptions2D = getVertex2DAttributeDescriptions();
+    auto bindingDescription = getVertexBindingDescription();
+    auto attributeDescriptions = getVertexAttributeDescriptions();
+
     if (is2D) {
-        auto bindingDescription = getVertex2DBindingDescription();
-        auto attributeDescriptions = getVertex2DAttributeDescriptions();
-        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
-        vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptions.size();
-        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription2D;
+        vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptions2D.size();
+        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions2D.data();
     } else {
-        auto bindingDescription = getVertexBindingDescription();
-        auto attributeDescriptions = getVertexAttributeDescriptions();
         vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
         vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptions.size();
         vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
@@ -924,13 +975,13 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
 
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
-    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE; // Optional
-    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
-    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD; // Optional
-    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE; // Optional
-    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
-    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD; // Optional
+    colorBlendAttachment.blendEnable = VK_TRUE;
+    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -1240,11 +1291,11 @@ void Engine::Init() {
     m_RenderImageFormat = getBestFormatFromChannels(4);
 
     m_MainRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 2, m_RenderImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    m_RescaleRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 2, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
+    m_RescaleRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 3, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
 
     VkImageView depthImageView = CreateDepthImage();
 
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, nullptr, m_GraphicsQueue, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, nullptr, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
     TextureImageAndMemory renderImage = CreateImage(sharedContext, m_Settings.RenderWidth, m_Settings.RenderHeight, m_RenderImageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkImageView renderImageView = CreateImageView(renderImage, m_RenderImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 
@@ -1403,6 +1454,7 @@ void Engine::Init() {
     m_ParticleGraphicsPipeline = CreateGraphicsPipeline("particle", m_MainRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_ParticleDescriptorSetLayout}, true);
     m_RescaleGraphicsPipeline = CreateGraphicsPipeline("rescale", m_RescaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_RescaleDescriptorSetLayout}, true);
     m_UIPanelGraphicsPipeline = CreateGraphicsPipeline("uipanel", m_RescaleRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UIPanelDescriptorSetLayout}, true);
+    m_UILabelGraphicsPipeline = CreateGraphicsPipeline("uilabel", m_RescaleRenderPass, 2, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UIPanelDescriptorSetLayout}, true);
 
     /* RENDER DESCRIPTOR POOL INITIALIZATION */
     {
@@ -1485,7 +1537,7 @@ void Engine::Init() {
 
         vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
         
-        EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_SingleTimeCommandMutex};
+        EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
         
         // Fullscreen Quad initialization
         m_FullscreenQuadVertexBuffer = CreateVertex2DBuffer(sharedContext, {
@@ -1564,7 +1616,7 @@ void Engine::Start() {
     high_resolution_clock::time_point lastFrameTime, frameTime;
     high_resolution_clock::time_point afterFenceTime, afterAcquireImageResultTime, afterRenderInitTime, afterRenderTime, postRenderTime;
 
-    double accumulative;
+    double accumulative = 0.0;
 
     lastFrameTime = high_resolution_clock::now();
 
@@ -1820,7 +1872,7 @@ void Engine::Start() {
             vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_RescaleGraphicsPipeline.layout, 0, 1, &m_RescaleDescriptorSet, 0, nullptr);
             vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
 
-            // UI::Panel shader
+            // Panel Shader
             vkCmdNextSubpass(m_CommandBuffers[currentFrameIndex], VK_SUBPASS_CONTENTS_INLINE);
 
             vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIPanelGraphicsPipeline.pipeline);
@@ -1852,6 +1904,44 @@ void Engine::Start() {
 
                 vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIPanelGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
                 vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
+            }
+
+            // Label Shader
+            vkCmdNextSubpass(m_CommandBuffers[currentFrameIndex], VK_SUBPASS_CONTENTS_INLINE);
+
+            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UILabelGraphicsPipeline.pipeline);
+
+            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayViewport);
+
+            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayScissor);
+
+            for (RenderUILabel &renderUILabel : m_UILabels) {
+                // vertex buffer binding!!
+                VkDeviceSize labelVertexOffsets[] = {0};
+
+                size_t i = 0;
+                for (auto &shaderData : renderUILabel.textureShaderData) {
+                    vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(renderUILabel.label->glyphBuffers[i++].second.second.buffer), labelVertexOffsets);
+
+                    // update descriptor set with image
+                    VkDescriptorImageInfo imageInfo{};
+                    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                    imageInfo.imageView = shaderData.second.first;
+                    imageInfo.sampler = shaderData.second.second;
+
+                    std::array<VkWriteDescriptorSet, 1> descriptorWrites;
+                    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    descriptorWrites[0].pNext = nullptr;
+                    descriptorWrites[0].dstSet = m_RescaleDescriptorSet; // Ignored
+                    descriptorWrites[0].dstBinding = 0;
+                    descriptorWrites[0].dstArrayElement = 0;
+                    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    descriptorWrites[0].descriptorCount = 1;
+                    descriptorWrites[0].pImageInfo = &imageInfo;
+
+                    vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UILabelGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
+                    vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
+                }
             }
 
             vkCmdEndRenderPass(m_CommandBuffers[currentFrameIndex]);

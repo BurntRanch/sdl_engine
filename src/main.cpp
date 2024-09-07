@@ -378,20 +378,27 @@ int main() {
 
         UI::Panel *panel = new UI::Panel(sharedContext, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec4(0.5f, 0.5f, 0.2f, 0.2f));
 
+        UI::Label *label = new UI::Label(sharedContext, "test");
+
         engine->AddUIPanel(panel);
+        engine->AddUILabel(label);
 
         engine->RegisterUpdateFunction(Update);
         engine->RegisterFixedUpdateFunction(FixedUpdate);
 
         engine->Start();
 
-        engine->RemoveUIPanel(panel);
+        // engine->RemoveUIPanel(panel);
 
-        delete panel;
+        // delete panel;
         
-        for (Model *&model : State::Models) {
-            delete model;
-        }
+        // for (Model *&model : State::Models) {
+        //     delete model;
+        // }
+
+        // if (State::CurrentlySelectedObjectParticle) {
+        //     engine->RemoveParticle(State::CurrentlySelectedObjectParticle);
+        // }
     } catch(const std::runtime_error &e) {
         fmt::println("Exception has occurred: {}", e.what());
         return -1;

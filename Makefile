@@ -9,6 +9,7 @@ LOG_FRAME   ?= 0
 ifeq ($(DEBUG), 1)
         BUILDDIR  = build/debug
         CXXFLAGS := -ggdb -Wall $(DEBUG_CXXFLAGS) $(CXXFLAGS)
+		VARS += -DDEBUG=1
 else
         BUILDDIR  = build/release
         CXXFLAGS := -O2 $(CXXFLAGS)
@@ -22,9 +23,9 @@ NAME		 = BurntEngine
 TARGET		 = main
 SRC 	   	 = $(sort $(wildcard src/*.cpp))
 OBJ 	   	 = $(SRC:.cpp=.o)
-LDFLAGS   	+= -lassimp -lfmt -lSDL3 -lvulkan
+LDFLAGS   	+= -lassimp -lfmt -lSDL3 -lvulkan -lfreetype
 CXXFLAGS  	?= -mtune=generic -march=native
-CXXFLAGS        += -Wno-ignored-attributes -funroll-all-loops -Iinclude -std=c++17 $(VARS)
+CXXFLAGS        += -Wno-ignored-attributes -funroll-all-loops -Iinclude -isystem/usr/include/freetype2 -std=c++17 $(VARS)
 
 all: $(TARGET)
 

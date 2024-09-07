@@ -12,6 +12,8 @@ public:
 
     /* Dimensions are expected to be provided as a 4D vector, {X, Y, W, H}. */
     Panel(struct EngineSharedContext &sharedContext, glm::vec3 color, glm::vec4 dimensions);
+
+    void DestroyBuffers();
 private:
     struct EngineSharedContext m_SharedContext;
 };

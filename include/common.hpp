@@ -2,6 +2,7 @@
 
 #include "error.hpp"
 #include "model.hpp"
+#include "settings.hpp"
 #include <glm/ext/vector_float3.hpp>
 #include <mutex>
 #include <stdexcept>
@@ -13,6 +14,7 @@
 struct BufferAndMemory {
     VkBuffer buffer;
     VkDeviceMemory memory;
+    void *mappedData = nullptr;
 };
 
 struct ImageAndMemory {
@@ -40,6 +42,7 @@ struct EngineSharedContext {
     VkPhysicalDevice physicalDevice;
     VkCommandPool commandPool;
     VkQueue graphicsQueue;
+    Settings &settings;
 
     std::mutex &singleTimeCommandMutex;
 };
@@ -257,7 +260,7 @@ inline void CopyHostBufferToDeviceBuffer(EngineSharedContext &sharedContext, VkB
     EndSingleTimeCommands(sharedContext, commandBuffer);
 }
 
-inline BufferAndMemory CreateVertex2DBuffer(EngineSharedContext &sharedContext, const std::vector<Vertex2D> &vert2Ds) {
+inline BufferAndMemory CreateVertex2DBuffer(EngineSharedContext &sharedContext, const std::vector<Vertex2D> &vert2Ds, bool returnStaging = false) {
     //if (m_VertexBuffer || m_VertexBufferMemory)
     //    throw std::runtime_error(engineError::VERTEX_BUFFER_ALREADY_EXISTS);
 
@@ -273,6 +276,11 @@ inline BufferAndMemory CreateVertex2DBuffer(EngineSharedContext &sharedContext, 
     void *data;
     vkMapMemory(sharedContext.engineDevice, stagingBufferMemory, 0, stagingBufferSize, 0, &data);
     SDL_memcpy(data, (void *)vert2Ds.data(), stagingBufferSize);
+
+    if (returnStaging) {
+        return {stagingBuffer, stagingBufferMemory, data};
+    }
+
     vkUnmapMemory(sharedContext.engineDevice, stagingBufferMemory);
 
     // allocate the gpu-exclusive vertex buffer
