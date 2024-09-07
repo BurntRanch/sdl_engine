@@ -2,6 +2,7 @@
 #include "error.hpp"
 #include "ui/label.hpp"
 #include "ui/panel.hpp"
+#include "ui/waypoint.hpp"
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_mouse.h>
@@ -112,20 +113,20 @@ Engine::~Engine() {
     for (RenderModel &renderModel : m_RenderModels)
         this->UnloadModel(renderModel.model);
 
-    for (RenderUIPanel &renderPanel : m_UIPanels) {
+    for (RenderUIPanel renderPanel : m_UIPanels) {
         this->RemoveUIPanel(renderPanel.panel);
 
         renderPanel.panel->DestroyBuffers();
     }
 
-    for (RenderUILabel &renderLabel : m_UILabels) {
+    for (RenderUILabel renderLabel : m_UILabels) {
         this->RemoveUILabel(renderLabel.label);
 
         renderLabel.label->DestroyBuffers();
     }
 
-    for (RenderParticle &renderParticle : m_RenderParticles)
-        this->RemoveParticle(renderParticle.particle);
+    for (RenderUIWaypoint &renderUIWaypoint : m_RenderUIWaypoints)
+        this->RemoveUIWaypoint(renderUIWaypoint.waypoint);
 
     for (PipelineAndLayout pipelineAndLayout : m_PipelineAndLayouts) {
         vkDestroyPipeline(m_EngineDevice, pipelineAndLayout.pipeline, NULL);
@@ -175,11 +176,14 @@ Engine::~Engine() {
     if (m_RenderDescriptorSetLayout)
         vkDestroyDescriptorSetLayout(m_EngineDevice, m_RenderDescriptorSetLayout, NULL);
 
-    if (m_ParticleDescriptorPool)
-        vkDestroyDescriptorPool(m_EngineDevice, m_ParticleDescriptorPool, NULL);
+    if (m_UIWaypointDescriptorPool)
+        vkDestroyDescriptorPool(m_EngineDevice, m_UIWaypointDescriptorPool, NULL);
 
-    if (m_ParticleDescriptorSetLayout)
-        vkDestroyDescriptorSetLayout(m_EngineDevice, m_ParticleDescriptorSetLayout, NULL);
+    if (m_UIWaypointDescriptorSetLayout)
+        vkDestroyDescriptorSetLayout(m_EngineDevice, m_UIWaypointDescriptorSetLayout, NULL);
+
+    if (m_UILabelDescriptorSetLayout)
+        vkDestroyDescriptorSetLayout(m_EngineDevice, m_UILabelDescriptorSetLayout, NULL);
 
     if (m_RescaleDescriptorPool)
         vkDestroyDescriptorPool(m_EngineDevice, m_RescaleDescriptorPool, NULL);
@@ -244,7 +248,7 @@ SwapChainSupportDetails Engine::QuerySwapChainSupport(VkPhysicalDevice physicalD
 }
 
 void Engine::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size) {
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = GetSharedContext();
 
     VkCommandBuffer commandBuffer = BeginSingleTimeCommands(sharedContext);
 
@@ -262,7 +266,7 @@ void Engine::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBu
 std::array<TextureImageAndMemory, 1> Engine::LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations) {
     std::array<TextureImageAndMemory, 1> textures;
 
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = GetSharedContext();
     
     {
         if (!mesh.diffuseMapPath.empty()) {
@@ -331,7 +335,7 @@ TextureBufferAndMemory Engine::LoadTextureFromFile(const std::string &name) {
 
     fmt::println("Image loaded ({}x{}, {} channels) with an expected buffer size of {}.", texWidth, texHeight, 4, texWidth * texHeight * 4);
 
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = GetSharedContext();
 
     VkBuffer imageStagingBuffer;
     VkDeviceMemory imageStagingMemory;
@@ -419,7 +423,7 @@ VkFormat Engine::FindBestFormat(const std::vector<VkFormat>& candidates, VkImage
 }
 
 void Engine::LoadMesh(Mesh &mesh, Model *model) {
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = GetSharedContext();
 
     RenderModel renderModel{};
 
@@ -523,61 +527,59 @@ void Engine::UnloadModel(Model *model) {
     }
 }
 
-void Engine::AddParticle(Particle *particle) {
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
+void Engine::AddUIWaypoint(UI::Waypoint *waypoint) {
+    EngineSharedContext sharedContext = GetSharedContext();
 
-    std::array<glm::vec3, 2> particleBoundingBox = particle->GetBoundingBox();
+    RenderUIWaypoint renderUIWaypoint{};
 
-    RenderParticle renderParticle{};
-
-    renderParticle.particle = particle;
+    renderUIWaypoint.waypoint = waypoint;
 
     // matrices UBO
     VkDeviceSize matricesUniformBufferSize = sizeof(MatricesUBO);
 
-    renderParticle.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
+    renderUIWaypoint.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
 
-    AllocateBuffer(sharedContext, matricesUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderParticle.matricesUBOBuffer.buffer, renderParticle.matricesUBOBuffer.memory);
+    AllocateBuffer(sharedContext, matricesUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderUIWaypoint.matricesUBOBuffer.buffer, renderUIWaypoint.matricesUBOBuffer.memory);
 
-    vkMapMemory(m_EngineDevice, renderParticle.matricesUBOBuffer.memory, 0, matricesUniformBufferSize, 0, &renderParticle.matricesUBOBuffer.mappedData);
+    vkMapMemory(m_EngineDevice, renderUIWaypoint.matricesUBOBuffer.memory, 0, matricesUniformBufferSize, 0, &renderUIWaypoint.matricesUBOBuffer.mappedData);
 
-    // particles UBO
-    VkDeviceSize particleUniformBufferSize = sizeof(ParticleUBO);
+    // waypoint UBO
+    VkDeviceSize waypointUniformBufferSize = sizeof(UIWaypointUBO);
 
-    renderParticle.particleUBO = {particle->GetPosition(), particleBoundingBox[0], particleBoundingBox[1]};
+    renderUIWaypoint.waypointUBO = {waypoint->GetPosition()};
 
-    AllocateBuffer(sharedContext, particleUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderParticle.particleUBOBuffer.buffer, renderParticle.particleUBOBuffer.memory);
+    AllocateBuffer(sharedContext, waypointUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderUIWaypoint.waypointUBOBuffer.buffer, renderUIWaypoint.waypointUBOBuffer.memory);
 
-    vkMapMemory(m_EngineDevice, renderParticle.particleUBOBuffer.memory, 0, particleUniformBufferSize, 0, &renderParticle.particleUBOBuffer.mappedData);
+    vkMapMemory(m_EngineDevice, renderUIWaypoint.waypointUBOBuffer.memory, 0, waypointUniformBufferSize, 0, &renderUIWaypoint.waypointUBOBuffer.mappedData);
 
-    std::array<VkDescriptorSetLayout, 1> layouts = { m_ParticleDescriptorSetLayout };
+    std::array<VkDescriptorSetLayout, 1> layouts = { m_UIWaypointDescriptorSetLayout };
     VkDescriptorSetAllocateInfo allocInfo = {};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_ParticleDescriptorPool;
+    allocInfo.descriptorPool = m_UIWaypointDescriptorPool;
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = layouts.data();
 
-    VkResult result = vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, &renderParticle.descriptorSet);
+    VkResult result = vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, &renderUIWaypoint.descriptorSet);
 
     if (result != VK_SUCCESS)
         throw std::runtime_error(fmt::format("Failed to allocate descriptor set! ({})", string_VkResult(result)));
 
     // update descriptor set with buffers
     VkDescriptorBufferInfo matricesBufferInfo{};
-    matricesBufferInfo.buffer = renderParticle.matricesUBOBuffer.buffer;
+    matricesBufferInfo.buffer = renderUIWaypoint.matricesUBOBuffer.buffer;
     matricesBufferInfo.offset = 0;
     matricesBufferInfo.range = matricesUniformBufferSize;
 
     // update descriptor set with buffer
-    VkDescriptorBufferInfo particleBufferInfo{};
-    particleBufferInfo.buffer = renderParticle.particleUBOBuffer.buffer;
-    particleBufferInfo.offset = 0;
-    particleBufferInfo.range = particleUniformBufferSize;
+    VkDescriptorBufferInfo waypointBufferInfo{};
+    waypointBufferInfo.buffer = renderUIWaypoint.waypointUBOBuffer.buffer;
+    waypointBufferInfo.offset = 0;
+    waypointBufferInfo.range = waypointUniformBufferSize;
 
     std::array<VkWriteDescriptorSet, 2> descriptorWrites;
     descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     descriptorWrites[0].pNext = nullptr;
-    descriptorWrites[0].dstSet = renderParticle.descriptorSet;
+    descriptorWrites[0].dstSet = renderUIWaypoint.descriptorSet;
     descriptorWrites[0].dstBinding = 0;
     descriptorWrites[0].dstArrayElement = 0;
     descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -585,29 +587,29 @@ void Engine::AddParticle(Particle *particle) {
     descriptorWrites[0].pBufferInfo = &matricesBufferInfo;
     descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     descriptorWrites[1].pNext = nullptr;
-    descriptorWrites[1].dstSet = renderParticle.descriptorSet;
+    descriptorWrites[1].dstSet = renderUIWaypoint.descriptorSet;
     descriptorWrites[1].dstBinding = 1;
     descriptorWrites[1].dstArrayElement = 0;
     descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     descriptorWrites[1].descriptorCount = 1;
-    descriptorWrites[1].pBufferInfo = &particleBufferInfo;
+    descriptorWrites[1].pBufferInfo = &waypointBufferInfo;
 
     vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 
-    m_RenderParticles.push_back(renderParticle);
+    m_RenderUIWaypoints.push_back(renderUIWaypoint);
 }
 
-void Engine::RemoveParticle(Particle *particle) {
-    for (size_t i = 0; i < m_RenderParticles.size(); i++) {
-        if (m_RenderParticles[i].particle != particle)
+void Engine::RemoveUIWaypoint(UI::Waypoint *waypoint) {
+    for (size_t i = 0; i < m_RenderUIWaypoints.size(); i++) {
+        if (m_RenderUIWaypoints[i].waypoint != waypoint)
             continue;
 
-        RenderParticle renderParticle = m_RenderParticles[i];
+        RenderUIWaypoint renderUIWaypoint = m_RenderUIWaypoints[i];
 
-        m_RenderParticles.erase(m_RenderParticles.begin() + i);
+        m_RenderUIWaypoints.erase(m_RenderUIWaypoints.begin() + i);
 
         // Before we start, wait for the device to be idle
-        // This is already called in ~Engine, but sometimes the user calls RemoveParticle manually.
+        // This is already called in ~Engine, but sometimes the user calls RemoveWaypoint manually.
         vkDeviceWaitIdle(m_EngineDevice);
 
         // vkDestroyImageView(m_EngineDevice, renderModel.diffTextureImageView, NULL);
@@ -615,13 +617,13 @@ void Engine::RemoveParticle(Particle *particle) {
         // vkFreeMemory(m_EngineDevice, renderModel.diffTexture.imageAndMemory.memory, NULL);
         // vkDestroySampler(m_EngineDevice, renderModel.diffTextureSampler, NULL);
 
-        vkDestroyBuffer(m_EngineDevice, renderParticle.matricesUBOBuffer.buffer, NULL);
-        vkFreeMemory(m_EngineDevice, renderParticle.matricesUBOBuffer.memory, NULL);
+        vkDestroyBuffer(m_EngineDevice, renderUIWaypoint.matricesUBOBuffer.buffer, NULL);
+        vkFreeMemory(m_EngineDevice, renderUIWaypoint.matricesUBOBuffer.memory, NULL);
 
-        vkDestroyBuffer(m_EngineDevice, renderParticle.particleUBOBuffer.buffer, NULL);
-        vkFreeMemory(m_EngineDevice, renderParticle.particleUBOBuffer.memory, NULL);
+        vkDestroyBuffer(m_EngineDevice, renderUIWaypoint.waypointUBOBuffer.buffer, NULL);
+        vkFreeMemory(m_EngineDevice, renderUIWaypoint.waypointUBOBuffer.memory, NULL);
 
-        vkFreeDescriptorSets(m_EngineDevice, m_ParticleDescriptorPool, 1, &renderParticle.descriptorSet);
+        vkFreeDescriptorSets(m_EngineDevice, m_UIWaypointDescriptorPool, 1, &renderUIWaypoint.descriptorSet);
     }
 }
 
@@ -688,14 +690,15 @@ void Engine::RemoveUILabel(UI::Label *label) {
 
         vkDeviceWaitIdle(m_EngineDevice);
 
-        for (size_t i = 0; i < renderUILabel.textureShaderData.size(); i++) {
-            auto shaderData = renderUILabel.textureShaderData[0];
-
-            renderUILabel.textureShaderData.erase(renderUILabel.textureShaderData.begin());
-
+        for (auto shaderData : renderUILabel.textureShaderData) {
             vkDestroyImageView(m_EngineDevice, shaderData.second.first, NULL);
             vkDestroySampler(m_EngineDevice, shaderData.second.second, NULL);
         }
+
+        renderUILabel.textureShaderData.clear();
+
+        vkDestroyBuffer(m_EngineDevice, renderUILabel.uboBuffer.buffer, NULL);
+        vkFreeMemory(m_EngineDevice, renderUILabel.uboBuffer.memory, NULL);
 
         break;
     }
@@ -826,7 +829,7 @@ void Engine::InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageVie
 }
 
 VkImageView Engine::CreateDepthImage() {
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = GetSharedContext();
 
     VkFormat depthFormat = FindDepthFormat();
 
@@ -1308,7 +1311,7 @@ void Engine::Init() {
 
     VkImageView depthImageView = CreateDepthImage();
 
-    EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, nullptr, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
+    EngineSharedContext sharedContext = GetSharedContext();
     TextureImageAndMemory renderImage = CreateImage(sharedContext, m_Settings.RenderWidth, m_Settings.RenderHeight, m_RenderImageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkImageView renderImageView = CreateImageView(renderImage, m_RenderImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 
@@ -1383,21 +1386,21 @@ void Engine::Init() {
         matricesUBODescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         matricesUBODescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
 
-        VkDescriptorSetLayoutBinding particlesUBODescriptorSetLayoutBinding{};
-        particlesUBODescriptorSetLayoutBinding.binding = 1;
-        particlesUBODescriptorSetLayoutBinding.descriptorCount = 1;
-        particlesUBODescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        particlesUBODescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        particlesUBODescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+        VkDescriptorSetLayoutBinding waypointsUBODescriptorSetLayoutBinding{};
+        waypointsUBODescriptorSetLayoutBinding.binding = 1;
+        waypointsUBODescriptorSetLayoutBinding.descriptorCount = 1;
+        waypointsUBODescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        waypointsUBODescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        waypointsUBODescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
 
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {matricesUBODescriptorSetLayoutBinding, particlesUBODescriptorSetLayoutBinding};
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {matricesUBODescriptorSetLayoutBinding, waypointsUBODescriptorSetLayoutBinding};
 
         VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
         descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
         descriptorSetLayoutCreateInfo.pBindings = bindings.data();
 
-        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_ParticleDescriptorSetLayout) != VK_SUCCESS)
+        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_UIWaypointDescriptorSetLayout) != VK_SUCCESS)
             throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
     }
 
@@ -1491,7 +1494,7 @@ void Engine::Init() {
     m_DisplayScissor.extent = {m_Settings.DisplayWidth, m_Settings.DisplayHeight};
 
     m_MainGraphicsPipeline = CreateGraphicsPipeline("lighting", m_MainRenderPass, 0, VK_FRONT_FACE_COUNTER_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_RenderDescriptorSetLayout});
-    m_ParticleGraphicsPipeline = CreateGraphicsPipeline("particle", m_MainRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_ParticleDescriptorSetLayout}, true);
+    m_UIWaypointGraphicsPipeline = CreateGraphicsPipeline("uiwaypoint", m_MainRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_UIWaypointDescriptorSetLayout}, true);
     m_RescaleGraphicsPipeline = CreateGraphicsPipeline("rescale", m_RescaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_RescaleDescriptorSetLayout}, true);
     m_UIPanelGraphicsPipeline = CreateGraphicsPipeline("uipanel", m_RescaleRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UIPanelDescriptorSetLayout}, true);
     m_UILabelGraphicsPipeline = CreateGraphicsPipeline("uilabel", m_RescaleRenderPass, 2, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UILabelDescriptorSetLayout}, true);
@@ -1512,7 +1515,7 @@ void Engine::Init() {
             throw std::runtime_error("Failed to create descriptor pool!");
     }
     
-    /* PARTICLE DESCRIPTOR POOL INITIALIZATION */
+    /* UI WAYPOINT DESCRIPTOR POOL INITIALIZATION */
     {
         std::array<VkDescriptorPoolSize, 2> poolSizes = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT,
                                                          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT};
@@ -1524,7 +1527,7 @@ void Engine::Init() {
         descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
         descriptorPoolCreateInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
 
-        if (vkCreateDescriptorPool(m_EngineDevice, &descriptorPoolCreateInfo, NULL, &m_ParticleDescriptorPool) != VK_SUCCESS)
+        if (vkCreateDescriptorPool(m_EngineDevice, &descriptorPoolCreateInfo, NULL, &m_UIWaypointDescriptorPool) != VK_SUCCESS)
             throw std::runtime_error("Failed to create descriptor pool!");
     }
     
@@ -1577,7 +1580,7 @@ void Engine::Init() {
 
         vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
         
-        EngineSharedContext sharedContext = {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex};
+        EngineSharedContext sharedContext = GetSharedContext();
         
         // Fullscreen Quad initialization
         m_FullscreenQuadVertexBuffer = CreateVertex2DBuffer(sharedContext, {
@@ -1838,35 +1841,31 @@ void Engine::Start() {
                 vkCmdDrawIndexed(m_CommandBuffers[currentFrameIndex], renderModel.indexBufferSize, 1, 0, 0, 0);
             }
 
-            // PARTICLE SHADER!
+            // WAYPOINT SHADER!
             vkCmdNextSubpass(m_CommandBuffers[currentFrameIndex], VK_SUBPASS_CONTENTS_INLINE);
 
-            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_ParticleGraphicsPipeline.pipeline);
+            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIWaypointGraphicsPipeline.pipeline);
 
             vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderViewport);
 
             vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderScissor);
 
-            for (RenderParticle &renderParticle : m_RenderParticles) {
-                // There is no model matrix for render particles, We already know where it is in world-space.
-                renderParticle.matricesUBO.viewMatrix = viewMatrix;
-                renderParticle.matricesUBO.projectionMatrix = projectionMatrix;
+            for (RenderUIWaypoint &renderUIWaypoint : m_RenderUIWaypoints) {
+                // There is no model matrix for render waypoints, We already know where it is in world-space.
+                renderUIWaypoint.matricesUBO.viewMatrix = viewMatrix;
+                renderUIWaypoint.matricesUBO.projectionMatrix = projectionMatrix;
 
-                SDL_memcpy(renderParticle.matricesUBOBuffer.mappedData, &renderParticle.matricesUBO, sizeof(renderParticle.matricesUBO));
+                SDL_memcpy(renderUIWaypoint.matricesUBOBuffer.mappedData, &renderUIWaypoint.matricesUBO, sizeof(renderUIWaypoint.matricesUBO));
 
-                std::array<glm::vec3, 2> particleBoundingBox = renderParticle.particle->GetBoundingBox();
+                renderUIWaypoint.waypointUBO.Position = renderUIWaypoint.waypoint->GetPosition();
 
-                renderParticle.particleUBO.Position = renderParticle.particle->GetPosition();
-                renderParticle.particleUBO.HigherCorner = particleBoundingBox[0];
-                renderParticle.particleUBO.LowerCorner = particleBoundingBox[1];
-
-                SDL_memcpy(renderParticle.particleUBOBuffer.mappedData, &renderParticle.particleUBO, sizeof(renderParticle.particleUBO));
+                SDL_memcpy(renderUIWaypoint.waypointUBOBuffer.mappedData, &renderUIWaypoint.waypointUBO, sizeof(renderUIWaypoint.waypointUBO));
 
                 // vertex buffer binding!!
-                VkDeviceSize particleVertexOffsets[] = {0};
-                vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), particleVertexOffsets);
+                VkDeviceSize waypointVertexOffsets[] = {0};
+                vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), waypointVertexOffsets);
 
-                vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_ParticleGraphicsPipeline.layout, 0, 1, &renderParticle.descriptorSet, 0, nullptr);
+                vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIWaypointGraphicsPipeline.layout, 0, 1, &renderUIWaypoint.descriptorSet, 0, nullptr);
                 vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
             }
 

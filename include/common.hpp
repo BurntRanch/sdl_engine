@@ -11,6 +11,8 @@
 #include <SDL3/SDL_stdinc.h>
 #include <array>
 
+class Engine;
+
 struct BufferAndMemory {
     VkBuffer buffer;
     VkDeviceMemory memory;
@@ -38,6 +40,8 @@ struct TextureImageAndMemory {
 };
 
 struct EngineSharedContext {
+    Engine *engine;
+
     VkDevice engineDevice;
     VkPhysicalDevice physicalDevice;
     VkCommandPool commandPool;

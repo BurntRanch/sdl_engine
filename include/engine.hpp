@@ -2,7 +2,6 @@
 #define ENGINE_HPP
 
 #include "camera.hpp"
-#include "particles.hpp"
 #include "common.hpp"
 #include "ui.hpp"
 #include <future>
@@ -82,7 +81,7 @@ struct MatricesUBO {
     glm::mat4 projectionMatrix;
 };
 
-struct ParticleUBO {
+struct UIWaypointUBO {
     glm::vec3 Position;
     glm::vec3 HigherCorner;
     glm::vec3 LowerCorner;
@@ -108,8 +107,8 @@ struct RenderModel {
     BufferAndMemory matricesUBOBuffer;
 };
 
-struct RenderParticle {
-    Particle *particle;
+struct RenderUIWaypoint {
+    UI::Waypoint *waypoint;
 
     // might want this later
     // TextureImageAndMemory diffTexture;
@@ -119,8 +118,8 @@ struct RenderParticle {
     MatricesUBO matricesUBO;
     BufferAndMemory matricesUBOBuffer;
 
-    ParticleUBO particleUBO;
-    BufferAndMemory particleUBOBuffer;
+    UIWaypointUBO waypointUBO;
+    BufferAndMemory waypointUBOBuffer;
 
     VkDescriptorSet descriptorSet;
 };
@@ -157,8 +156,8 @@ public:
     /* Do not set waitForFences to false, unless you know what you're doing. */
     void UnloadModel(Model *model);
 
-    void AddParticle(Particle *particle);
-    void RemoveParticle(Particle *particle);
+    void AddUIWaypoint(UI::Waypoint *waypoint);
+    void RemoveUIWaypoint(UI::Waypoint *waypoint);
 
     void AddUIPanel(UI::Panel *panel);
     void RemoveUIPanel(UI::Panel *panel);
@@ -172,7 +171,7 @@ public:
 
     void SetPrimaryCamera(Camera &cam);
 
-    inline EngineSharedContext GetSharedContext() { return {m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex}; };
+    inline EngineSharedContext GetSharedContext() { return {this, m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex}; };
 
     void  Init();
     void  Start();
@@ -217,7 +216,7 @@ private:
     Camera *m_PrimaryCamera;
     Settings m_Settings;
 
-    std::vector<RenderParticle> m_RenderParticles;
+    std::vector<RenderUIWaypoint> m_RenderUIWaypoints;
     std::vector<RenderUIPanel> m_UIPanels;
     std::vector<RenderUILabel> m_UILabels;
 
@@ -238,10 +237,10 @@ private:
     std::vector<VkCommandBuffer> m_CommandBuffers;
 
     VkDescriptorSetLayout m_RenderDescriptorSetLayout = nullptr;
-    VkDescriptorSetLayout m_ParticleDescriptorSetLayout = nullptr;
+    VkDescriptorSetLayout m_UIWaypointDescriptorSetLayout = nullptr;
 
     VkDescriptorPool m_RenderDescriptorPool = nullptr;
-    VkDescriptorPool m_ParticleDescriptorPool = nullptr;
+    VkDescriptorPool m_UIWaypointDescriptorPool = nullptr;
 
     VkDescriptorSet m_RenderDescriptorSet = nullptr;
 
@@ -254,7 +253,7 @@ private:
     VkSampler m_RescaleRenderSampler = nullptr;
 
     PipelineAndLayout m_MainGraphicsPipeline; // Used to render the 3D scene
-    PipelineAndLayout m_ParticleGraphicsPipeline; // Used to add shiny particles
+    PipelineAndLayout m_UIWaypointGraphicsPipeline; // Used to add shiny waypoints
     PipelineAndLayout m_RescaleGraphicsPipeline; // Used to rescale.
     PipelineAndLayout m_UIPanelGraphicsPipeline; // Used for UI Panels.
     PipelineAndLayout m_UILabelGraphicsPipeline; // Used for UI Labels.

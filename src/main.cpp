@@ -28,7 +28,7 @@ std::unique_ptr<Engine> engine;
 
 namespace State {
     Model **CurrentlySelectedObject = nullptr;
-    Particle *CurrentlySelectedObjectParticle = nullptr;
+    UI::Waypoint *CurrentlySelectedObjectWaypoint = nullptr;
 
     std::vector<Model *> Models;
 
@@ -129,10 +129,10 @@ bool importScene(const std::string &fileName) {
 
     State::CurrentlySelectedObject = nullptr;
 
-    if (State::CurrentlySelectedObjectParticle) {
-        engine->RemoveParticle(State::CurrentlySelectedObjectParticle);
+    if (State::CurrentlySelectedObjectWaypoint) {
+        engine->RemoveUIWaypoint(State::CurrentlySelectedObjectWaypoint);
     }
-    State::CurrentlySelectedObjectParticle = nullptr;
+    State::CurrentlySelectedObjectWaypoint = nullptr;
 
     using namespace rapidxml;
 
@@ -279,11 +279,11 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
 
         State::CurrentlySelectedObject = nullptr;
 
-        if (State::CurrentlySelectedObjectParticle) {
-            engine->RemoveParticle(State::CurrentlySelectedObjectParticle);
-            delete State::CurrentlySelectedObjectParticle;
+        if (State::CurrentlySelectedObjectWaypoint) {
+            engine->RemoveUIWaypoint(State::CurrentlySelectedObjectWaypoint);
+            delete State::CurrentlySelectedObjectWaypoint;
 
-            State::CurrentlySelectedObjectParticle = nullptr;
+            State::CurrentlySelectedObjectWaypoint = nullptr;
         }
 
         for (Model *&model : State::Models) {
@@ -291,8 +291,8 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
                 fmt::println("Left mouse button pressed on a model!");
                 State::CurrentlySelectedObject = &model;
 
-                State::CurrentlySelectedObjectParticle = new Particle(model->GetPosition(), model->boundingBox[0]);
-                engine->AddParticle(State::CurrentlySelectedObjectParticle);
+                State::CurrentlySelectedObjectWaypoint = new UI::Waypoint(model->GetPosition(), model->boundingBox[0]);
+                engine->AddUIWaypoint(State::CurrentlySelectedObjectWaypoint);
 
                 break;
             }
@@ -313,11 +313,11 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
         *State::CurrentlySelectedObject = nullptr;
         State::CurrentlySelectedObject = nullptr;
 
-        if (State::CurrentlySelectedObjectParticle) {
-            engine->RemoveParticle(State::CurrentlySelectedObjectParticle);
-            delete State::CurrentlySelectedObjectParticle;
+        if (State::CurrentlySelectedObjectWaypoint) {
+            engine->RemoveUIWaypoint(State::CurrentlySelectedObjectWaypoint);
+            delete State::CurrentlySelectedObjectWaypoint;
 
-            State::CurrentlySelectedObjectParticle = nullptr;
+            State::CurrentlySelectedObjectWaypoint = nullptr;
         }
     }
 
@@ -396,8 +396,8 @@ int main() {
         //     delete model;
         // }
 
-        // if (State::CurrentlySelectedObjectParticle) {
-        //     engine->RemoveParticle(State::CurrentlySelectedObjectParticle);
+        // if (State::CurrentlySelectedObjectWaypoint) {
+        //     engine->RemoveWaypoint(State::CurrentlySelectedObjectWaypoint);
         // }
     } catch(const std::runtime_error &e) {
         fmt::println("Exception has occurred: {}", e.what());
