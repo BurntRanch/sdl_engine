@@ -2,6 +2,7 @@
 #include "common.hpp"
 #include "ui/label.hpp"
 #include <SDL3/SDL_stdinc.h>
+#include <filesystem>
 #include <freetype/freetype.h>
 #include <stdexcept>
 #include <utility>
@@ -15,9 +16,6 @@ Panel::~Panel() {
 
 Panel::Panel(EngineSharedContext &sharedContext, glm::vec3 color, glm::vec4 dimensions) : m_SharedContext(sharedContext) {
     texture = CreateSinglePixelImage(sharedContext, color);
-
-    dimensions *= 2;
-    dimensions -= 1;
 
     vertex2DBuffer = CreateVertex2DBuffer(sharedContext, {
                                                             {glm::vec2(dimensions.x, dimensions.y), glm::vec2(0.0f, 0.0f)},
@@ -46,31 +44,51 @@ Label::~Label() {
     DestroyBuffers();
 }
 
-Label::Label(EngineSharedContext &sharedContext, std::string text) : m_SharedContext(sharedContext) {
+Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesystem::path fontPath, glm::vec2 position) : Position(position), m_SharedContext(sharedContext) {
     if (FT_Init_FreeType(&m_FTLibrary)) {
         throw std::runtime_error("Failed to initialize FreeType!");
     }
 
-    if (FT_New_Face(m_FTLibrary, "NotoSans-Black.ttf", 0, &m_FTFace)) {
-        throw std::runtime_error("Failed to locate the LiberationMono-Regular.ttf font in your system!");
+    if (FT_New_Face(m_FTLibrary, fontPath.c_str(), 0, &m_FTFace)) {
+        throw std::runtime_error(fmt::format("Failed to locate the requested font ({}) in your system!", fontPath.string()));
     }
 
     FT_Set_Pixel_Sizes(m_FTFace, 0, 64);
 
-    float x = 0.0f;
-    float y = 0.0f;
+    float x = 0.5f;
+
+    /* This value needs to be -1.5 for SOME reason. 
+     *
+     *  If it is too high, the glyph shifts to the bottom and artifacts start showing from above.
+     *  If it is too low, the glyph shifts to the top and artifacts start showing from below.
+     *
+     * Tested against NotoSans-Black.ttf and LiberationMono-Bold.ttf
+     */
+    float y = -1.5f;
 
     for (char c : text) {
-        std::pair<TextureImageAndMemory, BufferAndMemory> glyph = GenerateGlyph(c, x, y);
+        auto glyph = GenerateGlyph(c, x, y);
 
-        glyphBuffers.push_back(std::make_pair(c, glyph));
+        if (!glyph.has_value()) {
+            continue;
+        }
+
+        GlyphBuffers.push_back(std::make_pair(c, glyph.value()));
     }
 }
 
-std::pair<TextureImageAndMemory, BufferAndMemory> Label::GenerateGlyph(char c, float &x, float &y) {
+std::optional<std::pair<TextureImageAndMemory, BufferAndMemory>> Label::GenerateGlyph(char c, float &x, float &y) {
+    if (c == ' ') {
+        x += m_FTFace->glyph->advance.x >> 6;
+
+        return {};
+    }
+
     if (FT_Load_Char(m_FTFace, c, FT_LOAD_RENDER)) {
         throw std::runtime_error(fmt::format("Failed to load the glyph for '{}' with FreeType", c));
     }
+
+    m_StringWidth += ((m_FTFace->glyph->advance.x >> 6)/1920.0f);
 
     VkDeviceSize glyphBufferSize = m_FTFace->glyph->bitmap.width * m_FTFace->glyph->bitmap.rows;
 
@@ -104,6 +122,9 @@ std::pair<TextureImageAndMemory, BufferAndMemory> Label::GenerateGlyph(char c, f
     float w = (m_FTFace->glyph->bitmap.width)/static_cast<float>(m_SharedContext.settings.DisplayWidth);
     float h = (m_FTFace->glyph->bitmap.rows)/static_cast<float>(m_SharedContext.settings.DisplayHeight);
 
+    xpos -= 1.0f;
+    ypos -= 1.0f - (64.0f / static_cast<float>(m_SharedContext.settings.DisplayHeight));
+
     BufferAndMemory bufferAndMemory = CreateVertex2DBuffer(m_SharedContext, {
                                                             {glm::vec2(xpos, ypos), glm::vec2(0.0f, 0.0f)},
                                                             {glm::vec2(xpos + w, ypos + h), glm::vec2(1.0f, 1.0f)},
@@ -113,12 +134,10 @@ std::pair<TextureImageAndMemory, BufferAndMemory> Label::GenerateGlyph(char c, f
                                                             {glm::vec2(xpos + w, ypos + h), glm::vec2(1.0f, 1.0f)}
                                                         }, false);
 
-    chars[c] = {glm::vec2(m_FTFace->glyph->bitmap.width, m_FTFace->glyph->bitmap.rows),
-                glm::vec2(m_FTFace->glyph->bitmap_left, m_FTFace->glyph->bitmap_top),
-                static_cast<Uint32>(m_FTFace->glyph->advance.x)};
-
     // The bitshift by 6 is required because Advance is 1/64th of a pixel.
     x += m_FTFace->glyph->advance.x >> 6;
+
+    m_StringWidth += w;
 
     return std::make_pair(textureImageAndMemory, bufferAndMemory);
 }
@@ -126,16 +145,15 @@ std::pair<TextureImageAndMemory, BufferAndMemory> Label::GenerateGlyph(char c, f
 void Label::DestroyBuffers() {
     vkDeviceWaitIdle(m_SharedContext.engineDevice);
 
-    for (size_t i = 0; i < glyphBuffers.size(); i++) {
-        auto glyphBuffer = glyphBuffers[i];
-
-        glyphBuffers.erase(glyphBuffers.begin() + i);
+    for (size_t i = 0; i < GlyphBuffers.size(); i++) {
+        auto glyphBuffer = GlyphBuffers[i];
 
         vkDestroyImage(m_SharedContext.engineDevice, glyphBuffer.second.first.imageAndMemory.image, NULL);
         vkFreeMemory(m_SharedContext.engineDevice, glyphBuffer.second.first.imageAndMemory.memory, NULL);
 
-        vkUnmapMemory(m_SharedContext.engineDevice, glyphBuffer.second.second.memory);
         vkDestroyBuffer(m_SharedContext.engineDevice, glyphBuffer.second.second.buffer, NULL);
         vkFreeMemory(m_SharedContext.engineDevice, glyphBuffer.second.second.memory, NULL);
     }
+
+    GlyphBuffers.clear();
 }

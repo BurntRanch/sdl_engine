@@ -88,6 +88,10 @@ struct ParticleUBO {
     glm::vec3 LowerCorner;
 };
 
+struct UILabelPositionUBO {
+    glm::vec2 PositionOffset;
+};
+
 struct RenderModel {
     Model *model;
 
@@ -102,7 +106,6 @@ struct RenderModel {
 
     MatricesUBO matricesUBO;
     BufferAndMemory matricesUBOBuffer;
-    void *matricesUBOMappedMemory;
 };
 
 struct RenderParticle {
@@ -115,11 +118,9 @@ struct RenderParticle {
 
     MatricesUBO matricesUBO;
     BufferAndMemory matricesUBOBuffer;
-    void *matricesUBOMappedMemory;
 
     ParticleUBO particleUBO;
     BufferAndMemory particleUBOBuffer;
-    void *particleUBOMappedMemory;
 
     VkDescriptorSet descriptorSet;
 };
@@ -135,6 +136,9 @@ struct RenderUILabel {
     UI::Label *label;
 
     std::vector<std::pair<char, std::pair<VkImageView, VkSampler>>> textureShaderData;
+
+    UILabelPositionUBO ubo;
+    BufferAndMemory uboBuffer;
 };
 
 struct RenderPass {
@@ -240,9 +244,9 @@ private:
     VkDescriptorPool m_ParticleDescriptorPool = nullptr;
 
     VkDescriptorSet m_RenderDescriptorSet = nullptr;
-    Uint32 m_RenderDescriptorSetSize = 0;   // This is tracked by LoadModel
 
     VkDescriptorSetLayout m_UIPanelDescriptorSetLayout = nullptr;
+    VkDescriptorSetLayout m_UILabelDescriptorSetLayout = nullptr;
 
     VkDescriptorSetLayout m_RescaleDescriptorSetLayout = nullptr;
     VkDescriptorPool m_RescaleDescriptorPool = nullptr;

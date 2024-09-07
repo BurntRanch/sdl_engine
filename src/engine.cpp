@@ -118,6 +118,12 @@ Engine::~Engine() {
         renderPanel.panel->DestroyBuffers();
     }
 
+    for (RenderUILabel &renderLabel : m_UILabels) {
+        this->RemoveUILabel(renderLabel.label);
+
+        renderLabel.label->DestroyBuffers();
+    }
+
     for (RenderParticle &renderParticle : m_RenderParticles)
         this->RemoveParticle(renderParticle.particle);
 
@@ -445,7 +451,7 @@ void Engine::LoadMesh(Mesh &mesh, Model *model) {
 
     AllocateBuffer(sharedContext, uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer.buffer, renderModel.matricesUBOBuffer.memory);
 
-    vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOMappedMemory);
+    vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOBuffer.mappedData);
 
     m_RenderModels.push_back(renderModel);
 }
@@ -533,7 +539,7 @@ void Engine::AddParticle(Particle *particle) {
 
     AllocateBuffer(sharedContext, matricesUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderParticle.matricesUBOBuffer.buffer, renderParticle.matricesUBOBuffer.memory);
 
-    vkMapMemory(m_EngineDevice, renderParticle.matricesUBOBuffer.memory, 0, matricesUniformBufferSize, 0, &renderParticle.matricesUBOMappedMemory);
+    vkMapMemory(m_EngineDevice, renderParticle.matricesUBOBuffer.memory, 0, matricesUniformBufferSize, 0, &renderParticle.matricesUBOBuffer.mappedData);
 
     // particles UBO
     VkDeviceSize particleUniformBufferSize = sizeof(ParticleUBO);
@@ -542,7 +548,7 @@ void Engine::AddParticle(Particle *particle) {
 
     AllocateBuffer(sharedContext, particleUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderParticle.particleUBOBuffer.buffer, renderParticle.particleUBOBuffer.memory);
 
-    vkMapMemory(m_EngineDevice, renderParticle.particleUBOBuffer.memory, 0, particleUniformBufferSize, 0, &renderParticle.particleUBOMappedMemory);
+    vkMapMemory(m_EngineDevice, renderParticle.particleUBOBuffer.memory, 0, particleUniformBufferSize, 0, &renderParticle.particleUBOBuffer.mappedData);
 
     std::array<VkDescriptorSetLayout, 1> layouts = { m_ParticleDescriptorSetLayout };
     VkDescriptorSetAllocateInfo allocInfo = {};
@@ -649,16 +655,23 @@ void Engine::RemoveUIPanel(UI::Panel *panel) {
 }
 
 void Engine::AddUILabel(UI::Label *label) {
+    EngineSharedContext sharedContext = GetSharedContext();
+
     RenderUILabel renderUILabel{};
 
     renderUILabel.label = label;
 
-    for (auto &glyph : label->glyphBuffers) {
+    for (auto &glyph : label->GlyphBuffers) {
         VkImageView textureView = CreateImageView(glyph.second.first, glyph.second.first.format, VK_IMAGE_ASPECT_COLOR_BIT, false);
         VkSampler textureSampler = CreateSampler(1.0f, false);
 
         renderUILabel.textureShaderData.push_back(std::make_pair(glyph.first, std::make_pair(textureView, textureSampler)));
     }
+
+    renderUILabel.ubo.PositionOffset = label->Position;
+
+    AllocateBuffer(sharedContext, sizeof(renderUILabel.ubo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, renderUILabel.uboBuffer.buffer, renderUILabel.uboBuffer.memory);
+    vkMapMemory(m_EngineDevice, renderUILabel.uboBuffer.memory, 0, sizeof(renderUILabel.ubo), 0, &(renderUILabel.uboBuffer.mappedData));
 
     m_UILabels.push_back(renderUILabel);
 }
@@ -676,9 +689,9 @@ void Engine::RemoveUILabel(UI::Label *label) {
         vkDeviceWaitIdle(m_EngineDevice);
 
         for (size_t i = 0; i < renderUILabel.textureShaderData.size(); i++) {
-            auto shaderData = renderUILabel.textureShaderData[i];
+            auto shaderData = renderUILabel.textureShaderData[0];
 
-            renderUILabel.textureShaderData.erase(renderUILabel.textureShaderData.begin() + i);
+            renderUILabel.textureShaderData.erase(renderUILabel.textureShaderData.begin());
 
             vkDestroyImageView(m_EngineDevice, shaderData.second.first, NULL);
             vkDestroySampler(m_EngineDevice, shaderData.second.second, NULL);
@@ -1427,6 +1440,33 @@ void Engine::Init() {
             throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
     }
 
+    {
+        VkDescriptorSetLayoutBinding samplerDescriptorSetLayoutBinding{};
+        samplerDescriptorSetLayoutBinding.binding = 1;
+        samplerDescriptorSetLayoutBinding.descriptorCount = 1;
+        samplerDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        samplerDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        samplerDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+        VkDescriptorSetLayoutBinding uboDescriptorSetLayoutBinding{};
+        uboDescriptorSetLayoutBinding.binding = 0;
+        uboDescriptorSetLayoutBinding.descriptorCount = 1;
+        uboDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        uboDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboDescriptorSetLayoutBinding, samplerDescriptorSetLayoutBinding};
+
+        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        descriptorSetLayoutCreateInfo.flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT;
+        descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
+        descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+
+        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_UILabelDescriptorSetLayout) != VK_SUCCESS)
+            throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
+    }
+
     // Render
     m_RenderViewport.x = 0.0f;
     m_RenderViewport.y = 0.0f;
@@ -1454,7 +1494,7 @@ void Engine::Init() {
     m_ParticleGraphicsPipeline = CreateGraphicsPipeline("particle", m_MainRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_ParticleDescriptorSetLayout}, true);
     m_RescaleGraphicsPipeline = CreateGraphicsPipeline("rescale", m_RescaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_RescaleDescriptorSetLayout}, true);
     m_UIPanelGraphicsPipeline = CreateGraphicsPipeline("uipanel", m_RescaleRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UIPanelDescriptorSetLayout}, true);
-    m_UILabelGraphicsPipeline = CreateGraphicsPipeline("uilabel", m_RescaleRenderPass, 2, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UIPanelDescriptorSetLayout}, true);
+    m_UILabelGraphicsPipeline = CreateGraphicsPipeline("uilabel", m_RescaleRenderPass, 2, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UILabelDescriptorSetLayout}, true);
 
     /* RENDER DESCRIPTOR POOL INITIALIZATION */
     {
@@ -1752,7 +1792,7 @@ void Engine::Start() {
                 renderModel.matricesUBO.viewMatrix = viewMatrix;
                 renderModel.matricesUBO.projectionMatrix = projectionMatrix;
 
-                SDL_memcpy(renderModel.matricesUBOMappedMemory, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
+                SDL_memcpy(renderModel.matricesUBOBuffer.mappedData, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
 
                 // vertex buffer binding!!
                 VkDeviceSize mainOffsets[] = {0};
@@ -1812,7 +1852,7 @@ void Engine::Start() {
                 renderParticle.matricesUBO.viewMatrix = viewMatrix;
                 renderParticle.matricesUBO.projectionMatrix = projectionMatrix;
 
-                SDL_memcpy(renderParticle.matricesUBOMappedMemory, &renderParticle.matricesUBO, sizeof(renderParticle.matricesUBO));
+                SDL_memcpy(renderParticle.matricesUBOBuffer.mappedData, &renderParticle.matricesUBO, sizeof(renderParticle.matricesUBO));
 
                 std::array<glm::vec3, 2> particleBoundingBox = renderParticle.particle->GetBoundingBox();
 
@@ -1820,7 +1860,7 @@ void Engine::Start() {
                 renderParticle.particleUBO.HigherCorner = particleBoundingBox[0];
                 renderParticle.particleUBO.LowerCorner = particleBoundingBox[1];
 
-                SDL_memcpy(renderParticle.particleUBOMappedMemory, &renderParticle.particleUBO, sizeof(renderParticle.particleUBO));
+                SDL_memcpy(renderParticle.particleUBOBuffer.mappedData, &renderParticle.particleUBO, sizeof(renderParticle.particleUBO));
 
                 // vertex buffer binding!!
                 VkDeviceSize particleVertexOffsets[] = {0};
@@ -1921,7 +1961,12 @@ void Engine::Start() {
 
                 size_t i = 0;
                 for (auto &shaderData : renderUILabel.textureShaderData) {
-                    vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(renderUILabel.label->glyphBuffers[i++].second.second.buffer), labelVertexOffsets);
+                    vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(renderUILabel.label->GlyphBuffers[i++].second.second.buffer), labelVertexOffsets);
+
+                    renderUILabel.ubo.PositionOffset = renderUILabel.label->Position;
+                    renderUILabel.ubo.PositionOffset.x *= 2;
+
+                    SDL_memcpy(renderUILabel.uboBuffer.mappedData, &(renderUILabel.ubo), sizeof(renderUILabel.ubo));
 
                     // update descriptor set with image
                     VkDescriptorImageInfo imageInfo{};
@@ -1929,15 +1974,29 @@ void Engine::Start() {
                     imageInfo.imageView = shaderData.second.first;
                     imageInfo.sampler = shaderData.second.second;
 
-                    std::array<VkWriteDescriptorSet, 1> descriptorWrites;
+                    // update descriptor set with UBO
+                    VkDescriptorBufferInfo bufferInfo{};
+                    bufferInfo.offset = 0;
+                    bufferInfo.range = sizeof(renderUILabel.ubo);
+                    bufferInfo.buffer = renderUILabel.uboBuffer.buffer;
+
+                    std::array<VkWriteDescriptorSet, 2> descriptorWrites;
                     descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                     descriptorWrites[0].pNext = nullptr;
-                    descriptorWrites[0].dstSet = m_RescaleDescriptorSet; // Ignored
+                    descriptorWrites[0].dstSet = m_RenderDescriptorSet; // Ignored
                     descriptorWrites[0].dstBinding = 0;
                     descriptorWrites[0].dstArrayElement = 0;
-                    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                     descriptorWrites[0].descriptorCount = 1;
-                    descriptorWrites[0].pImageInfo = &imageInfo;
+                    descriptorWrites[0].pBufferInfo = &bufferInfo;
+                    descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    descriptorWrites[1].pNext = nullptr;
+                    descriptorWrites[1].dstSet = m_RenderDescriptorSet; // Ignored
+                    descriptorWrites[1].dstBinding = 1;
+                    descriptorWrites[1].dstArrayElement = 0;
+                    descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    descriptorWrites[1].descriptorCount = 1;
+                    descriptorWrites[1].pImageInfo = &imageInfo;
 
                     vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UILabelGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
                     vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);

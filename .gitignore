@@ -4,3 +4,5 @@ build
 
 src/*.o
 main
+
+settings.toml

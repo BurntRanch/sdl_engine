@@ -5,24 +5,21 @@
 #include <map>
 #include FT_FREETYPE_H
 
-struct Character {
-    glm::vec2 Size;
-    glm::vec2 Bearing;
-    Uint32 Advance;
-};
-
 namespace UI {
 class Label {
 public:
     // An array of textures for each character in use, not all ASCII characters.
-    std::vector<std::pair<char, std::pair<TextureImageAndMemory, BufferAndMemory>>> glyphBuffers;
-    std::map<char, Character> chars;
+    std::vector<std::pair<char, std::pair<TextureImageAndMemory, BufferAndMemory>>> GlyphBuffers;
+
+    glm::vec2 Position;
 
     ~Label();
 
-    Label(EngineSharedContext &sharedContext, std::string text);
+    Label(EngineSharedContext &sharedContext, std::string text, std::filesystem::path fontPath, glm::vec2 position = glm::vec2(0.0f, 0.0f));
 
-    std::pair<TextureImageAndMemory, BufferAndMemory> GenerateGlyph(char c, float &x, float &y);
+    std::optional<std::pair<TextureImageAndMemory, BufferAndMemory>> GenerateGlyph(char c, float &x, float &y);
+
+    inline float GetWidth() { return m_StringWidth; };
 
     void DestroyBuffers();
 private:
@@ -30,6 +27,8 @@ private:
 
     FT_Library m_FTLibrary;
     FT_Face m_FTFace;
+
+    float m_StringWidth;
 
     EngineSharedContext m_SharedContext;
 };
