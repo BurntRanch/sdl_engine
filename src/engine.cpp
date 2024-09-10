@@ -1968,6 +1968,7 @@ void Engine::Start() {
 
                     renderUILabel.ubo.PositionOffset = renderUILabel.label->Position;
                     renderUILabel.ubo.PositionOffset.x *= 2;
+                    renderUILabel.ubo.PositionOffset.y *= 2;
 
                     SDL_memcpy(renderUILabel.uboBuffer.mappedData, &(renderUILabel.ubo), sizeof(renderUILabel.ubo));
 
