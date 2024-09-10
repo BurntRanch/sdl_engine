@@ -5,6 +5,11 @@
 #include <map>
 #include FT_FREETYPE_H
 
+#define PIXEL_HEIGHT 64
+#define PIXEL_HEIGHT_FLOAT 64.0f
+
+#define CALC_RELATIVE_PIXEL_HEIGHT(settings) (PIXEL_HEIGHT_FLOAT/static_cast<float>(settings.DisplayHeight))
+
 namespace UI {
 class Label {
 public:
@@ -19,16 +24,12 @@ public:
 
     std::optional<std::pair<TextureImageAndMemory, BufferAndMemory>> GenerateGlyph(char c, float &x, float &y);
 
-    inline float GetWidth() { return m_StringWidth; };
-
     void DestroyBuffers();
 private:
     std::string m_Text;
 
     FT_Library m_FTLibrary;
     FT_Face m_FTFace;
-
-    float m_StringWidth;
 
     EngineSharedContext m_SharedContext;
 };

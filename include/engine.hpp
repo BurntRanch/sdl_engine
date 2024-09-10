@@ -214,7 +214,7 @@ private:
 
     /* Cameras, high-level stuff. */
     Camera *m_PrimaryCamera;
-    Settings m_Settings;
+    Settings &m_Settings;
 
     std::vector<RenderUIWaypoint> m_RenderUIWaypoints;
     std::vector<RenderUIPanel> m_UIPanels;

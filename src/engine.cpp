@@ -1107,7 +1107,7 @@ VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentSto
         subpasses.push_back(subpass);
     }
 
-    std::array<VkSubpassDependency, 2> subpassDependencies{};
+    std::vector<VkSubpassDependency> subpassDependencies(1);
     subpassDependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
     subpassDependencies[0].dstSubpass = 0;
     subpassDependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
@@ -1115,12 +1115,20 @@ VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentSto
     subpassDependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     subpassDependencies[0].srcAccessMask = 0;
 
-    subpassDependencies[1].srcSubpass = 0;
-    subpassDependencies[1].dstSubpass = subpassCount-1;
-    subpassDependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    subpassDependencies[1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    subpassDependencies[1].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    subpassDependencies[1].srcAccessMask = 0;
+    for (size_t i = 1; i < subpassCount; i++) {
+        VkSubpassDependency subpassDependency{};
+
+        for (size_t j = 0; j < i; j++) {
+            subpassDependency.srcSubpass = j;
+            subpassDependency.dstSubpass = i;
+            subpassDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+            subpassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            subpassDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+            subpassDependency.srcAccessMask = 0;
+
+            subpassDependencies.push_back(subpassDependency);
+        }
+    }
 
     std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
 
@@ -1131,11 +1139,7 @@ VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentSto
     renderPassInfo.subpassCount = subpassCount;
     renderPassInfo.pSubpasses = subpasses.data();
 
-    if (subpassCount > 1) {
-        renderPassInfo.dependencyCount = 2;
-    } else {
-        renderPassInfo.dependencyCount = 1;
-    }
+    renderPassInfo.dependencyCount = subpassDependencies.size();
     renderPassInfo.pDependencies = subpassDependencies.data();
 
     VkRenderPass renderPass;
@@ -1493,8 +1497,8 @@ void Engine::Init() {
     m_DisplayScissor.offset = {0, 0};
     m_DisplayScissor.extent = {m_Settings.DisplayWidth, m_Settings.DisplayHeight};
 
-    m_MainGraphicsPipeline = CreateGraphicsPipeline("lighting", m_MainRenderPass, 0, VK_FRONT_FACE_COUNTER_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_RenderDescriptorSetLayout});
-    m_UIWaypointGraphicsPipeline = CreateGraphicsPipeline("uiwaypoint", m_MainRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_DisplayScissor, {m_UIWaypointDescriptorSetLayout}, true);
+    m_MainGraphicsPipeline = CreateGraphicsPipeline("lighting", m_MainRenderPass, 0, VK_FRONT_FACE_COUNTER_CLOCKWISE, m_RenderViewport, m_RenderScissor, {m_RenderDescriptorSetLayout});
+    m_UIWaypointGraphicsPipeline = CreateGraphicsPipeline("uiwaypoint", m_MainRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_RenderScissor, {m_UIWaypointDescriptorSetLayout}, true);
     m_RescaleGraphicsPipeline = CreateGraphicsPipeline("rescale", m_RescaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_RescaleDescriptorSetLayout}, true);
     m_UIPanelGraphicsPipeline = CreateGraphicsPipeline("uipanel", m_RescaleRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UIPanelDescriptorSetLayout}, true);
     m_UILabelGraphicsPipeline = CreateGraphicsPipeline("uilabel", m_RescaleRenderPass, 2, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UILabelDescriptorSetLayout}, true);

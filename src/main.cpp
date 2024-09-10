@@ -14,6 +14,7 @@
 #include "camera.hpp"
 #include "common.hpp"
 #include "model.hpp"
+#include "ui/label.hpp"
 #include "ui/panel.hpp"
 #include "util.hpp"
 #include "rapidxml.hpp"
@@ -378,7 +379,7 @@ int main() {
 
         UI::Panel *panel = new UI::Panel(sharedContext, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec4(0.5f, 0.5f, 0.2f, 0.2f));
 
-        UI::Label *label = new UI::Label(sharedContext, "sdl_engine demo", "NotoSans-Black.ttf", glm::vec2(0.0f, 0.0f));
+        UI::Label *label = new UI::Label(sharedContext, "The quick brown fox jumps over the lazy dog", "NotoSans-Black.ttf", glm::vec2(0.0f, 0.0f));
 
         engine->AddUIPanel(panel);
         engine->AddUILabel(label);

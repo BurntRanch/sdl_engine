@@ -53,7 +53,7 @@ Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesyst
         throw std::runtime_error(fmt::format("Failed to locate the requested font ({}) in your system!", fontPath.string()));
     }
 
-    FT_Set_Pixel_Sizes(m_FTFace, 0, 64);
+    FT_Set_Pixel_Sizes(m_FTFace, 0, PIXEL_HEIGHT);
 
     float x = 0.5f;
 
@@ -78,17 +78,22 @@ Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesyst
 }
 
 std::optional<std::pair<TextureImageAndMemory, BufferAndMemory>> Label::GenerateGlyph(char c, float &x, float &y) {
+    if (FT_Load_Char(m_FTFace, c, FT_LOAD_RENDER)) {
+        throw std::runtime_error(fmt::format("Failed to load the glyph for '{}' with FreeType", c));
+    }
+
     if (c == ' ') {
         x += m_FTFace->glyph->advance.x >> 6;
 
         return {};
     }
 
-    if (FT_Load_Char(m_FTFace, c, FT_LOAD_RENDER)) {
-        throw std::runtime_error(fmt::format("Failed to load the glyph for '{}' with FreeType", c));
-    }
+    if (c == '\n') {
+        x = 0;
+        y += PIXEL_HEIGHT;
 
-    m_StringWidth += ((m_FTFace->glyph->advance.x >> 6)/1920.0f);
+        return {};
+    }
 
     VkDeviceSize glyphBufferSize = m_FTFace->glyph->bitmap.width * m_FTFace->glyph->bitmap.rows;
 
@@ -123,7 +128,7 @@ std::optional<std::pair<TextureImageAndMemory, BufferAndMemory>> Label::Generate
     float h = (m_FTFace->glyph->bitmap.rows)/static_cast<float>(m_SharedContext.settings.DisplayHeight);
 
     xpos -= 1.0f;
-    ypos -= 1.0f - (64.0f / static_cast<float>(m_SharedContext.settings.DisplayHeight));
+    ypos -= 1.0f - (PIXEL_HEIGHT_FLOAT / static_cast<float>(m_SharedContext.settings.DisplayHeight));
 
     BufferAndMemory bufferAndMemory = CreateVertex2DBuffer(m_SharedContext, {
                                                             {glm::vec2(xpos, ypos), glm::vec2(0.0f, 0.0f)},
@@ -136,8 +141,6 @@ std::optional<std::pair<TextureImageAndMemory, BufferAndMemory>> Label::Generate
 
     // The bitshift by 6 is required because Advance is 1/64th of a pixel.
     x += m_FTFace->glyph->advance.x >> 6;
-
-    m_StringWidth += w;
 
     return std::make_pair(textureImageAndMemory, bufferAndMemory);
 }
