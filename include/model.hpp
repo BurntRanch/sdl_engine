@@ -5,6 +5,7 @@
 #include <complex>
 #include <filesystem>
 #include <fmt/core.h>
+#include <glm/ext/vector_float2.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <assimp/Importer.hpp>
@@ -31,7 +32,7 @@ struct Vertex {
     glm::vec2 TexCoord;
 };
 
-struct Vertex2D {
+struct SimpleVertex {
     glm::vec2 Position;
     //glm::vec3 Color;  // might add later
     glm::vec2 TexCoord;
@@ -67,27 +68,27 @@ inline struct array<VkVertexInputAttributeDescription, 3> getVertexAttributeDesc
     return attributeDescriptions;
 }
 
-inline struct VkVertexInputBindingDescription getVertex2DBindingDescription() {
+inline struct VkVertexInputBindingDescription getSimpleVertexBindingDescription() {
     VkVertexInputBindingDescription bindingDescrption{};
     bindingDescrption.binding = 0;
-    bindingDescrption.stride = sizeof(Vertex2D);
+    bindingDescrption.stride = sizeof(SimpleVertex);
     bindingDescrption.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
     return bindingDescrption;
 }
 
-inline struct array<VkVertexInputAttributeDescription, 2> getVertex2DAttributeDescriptions() {
+inline struct array<VkVertexInputAttributeDescription, 2> getSimpleVertexAttributeDescriptions() {
     array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
 
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
     attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
-    attributeDescriptions[0].offset = offsetof(Vertex2D, Position);
+    attributeDescriptions[0].offset = offsetof(SimpleVertex, Position);
 
     attributeDescriptions[1].binding = 0;
     attributeDescriptions[1].location = 1;
     attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(Vertex2D, TexCoord);
+    attributeDescriptions[1].offset = offsetof(SimpleVertex, TexCoord);
 
     return attributeDescriptions;
 }
@@ -131,7 +132,7 @@ public:
 
     Model() = default;
 
-    Model(const string &path, glm::vec3 position = glm::vec3(0, 0, 0), glm::vec3 rotation = glm::vec3(0, 0, 0));
+    Model(const string_view path, glm::vec3 position = glm::vec3(0, 0, 0), glm::vec3 rotation = glm::vec3(0, 0, 0));
 
     constexpr void SetPosition(glm::vec3 pos) { m_Position = pos; m_NeedsUpdate = true; };
     constexpr void SetRotation(glm::vec3 rot) { m_Rotation = rot; m_NeedsUpdate = true; };
@@ -150,7 +151,7 @@ private:
     glm::mat4 m_ModelMatrix;
     bool m_NeedsUpdate = false;   // flag, set to true when Position and Rotation are updated, set to false when GetModelMatrix is called.
 
-    void loadModel(string path);
+    void loadModel(string_view path);
 
     void processNode(aiNode *node, const aiScene *scene);
 

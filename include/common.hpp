@@ -51,6 +51,24 @@ struct EngineSharedContext {
     std::mutex &singleTimeCommandMutex;
 };
 
+
+namespace UI {
+    class GenericElement {
+    public:
+        virtual void SetPosition(glm::vec2 position);
+        virtual glm::vec2 GetPosition();
+
+        virtual void SetDepth(float depth);
+        virtual float GetDepth();
+
+        virtual void DestroyBuffers();
+    protected:
+        glm::vec2 m_Position;
+
+        float m_Depth;
+    };
+}
+
 static Uint8 getChannelsFromFormats(VkFormat format) {
     switch (format) {
         case VK_FORMAT_R8_SRGB:
@@ -264,7 +282,7 @@ inline void CopyHostBufferToDeviceBuffer(EngineSharedContext &sharedContext, VkB
     EndSingleTimeCommands(sharedContext, commandBuffer);
 }
 
-inline BufferAndMemory CreateVertex2DBuffer(EngineSharedContext &sharedContext, const std::vector<Vertex2D> &vert2Ds, bool returnStaging = false) {
+inline BufferAndMemory CreateSimpleVertexBuffer(EngineSharedContext &sharedContext, const std::vector<SimpleVertex> &simpleVerts, bool returnStaging = false) {
     //if (m_VertexBuffer || m_VertexBufferMemory)
     //    throw std::runtime_error(engineError::VERTEX_BUFFER_ALREADY_EXISTS);
 
@@ -272,14 +290,14 @@ inline BufferAndMemory CreateVertex2DBuffer(EngineSharedContext &sharedContext, 
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
 
-    VkDeviceSize stagingBufferSize = sizeof(Vertex2D) * vert2Ds.size();
+    VkDeviceSize stagingBufferSize = sizeof(SimpleVertex) * simpleVerts.size();
 
     AllocateBuffer(sharedContext, stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
     // copy the vertex data into the buffer
     void *data;
     vkMapMemory(sharedContext.engineDevice, stagingBufferMemory, 0, stagingBufferSize, 0, &data);
-    SDL_memcpy(data, (void *)vert2Ds.data(), stagingBufferSize);
+    SDL_memcpy(data, (void *)simpleVerts.data(), stagingBufferSize);
 
     if (returnStaging) {
         return {stagingBuffer, stagingBufferMemory, data};

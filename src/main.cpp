@@ -122,7 +122,7 @@ Input:
 Output:
     - True if the scene was sucessfully imported.
 */
-bool importScene(const std::string &fileName) {
+bool importScene(const std::string_view fileName) {
     for (Model *model : State::Models) {
         engine->UnloadModel(model);
     }
@@ -137,7 +137,7 @@ bool importScene(const std::string &fileName) {
 
     using namespace rapidxml;
 
-    std::ifstream sceneFile(fileName, std::ios::binary | std::ios::ate);
+    std::ifstream sceneFile(fileName.data(), std::ios::binary | std::ios::ate);
 
     if (!sceneFile.good())
         return false;
@@ -292,7 +292,7 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
                 fmt::println("Left mouse button pressed on a model!");
                 State::CurrentlySelectedObject = &model;
 
-                State::CurrentlySelectedObjectWaypoint = new UI::Waypoint(model->GetPosition(), model->boundingBox[0]);
+                State::CurrentlySelectedObjectWaypoint = new UI::Waypoint(model->GetPosition(), 1.0f, model->boundingBox[0]);
                 engine->AddUIWaypoint(State::CurrentlySelectedObjectWaypoint);
 
                 break;
@@ -338,14 +338,13 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
         if (!path)
             return;
 
-        std::string pathView(path);
+        std::string_view pathView(path);
 
         if (endsWith(pathView, ".obj")) {
             Model *model = new Model(pathView);
             engine->LoadModel(model);
             State::Models.push_back(model);
         } else if (endsWith(pathView, ".xml")) {
-
             try {
                 importScene(pathView);
             } catch (const std::runtime_error &e) {
@@ -376,13 +375,6 @@ int main() {
         engine->Init();
 
         EngineSharedContext sharedContext = engine->GetSharedContext();
-
-        UI::Panel *panel = new UI::Panel(sharedContext, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec4(0.5f, 0.5f, 0.2f, 0.2f));
-
-        UI::Label *label = new UI::Label(sharedContext, "The quick brown fox jumps over the lazy dog", "NotoSans-Black.ttf", glm::vec2(0.5f, 0.5f));
-
-        engine->AddUIPanel(panel);
-        engine->AddUILabel(label);
 
         engine->RegisterUpdateFunction(Update);
         engine->RegisterFixedUpdateFunction(FixedUpdate);

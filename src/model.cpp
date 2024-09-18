@@ -6,7 +6,7 @@
 #include <stdexcept>
 
 
-Model::Model(const string &path, glm::vec3 position, glm::vec3 rotation)
+Model::Model(const string_view path, glm::vec3 position, glm::vec3 rotation)
 {
     loadModel(path);
     
@@ -14,10 +14,10 @@ Model::Model(const string &path, glm::vec3 position, glm::vec3 rotation)
     SetRotation(rotation);
 }
 
-void Model::loadModel(string path)
+void Model::loadModel(string_view path)
 {
     Assimp::Importer import;
-    const aiScene *scene = import.ReadFile(path, aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_ForceGenNormals | /*aiProcess_GenSmoothNormals |*/ aiProcess_FlipUVs/* | aiProcess_CalcTangentSpace*/);	
+    const aiScene *scene = import.ReadFile(path.data(), aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_ForceGenNormals | /*aiProcess_GenSmoothNormals |*/ aiProcess_FlipUVs/* | aiProcess_CalcTangentSpace*/);	
     
     if(!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) 
         throw std::runtime_error(fmt::format("Couldn't load models from assimp: {}", import.GetErrorString()));

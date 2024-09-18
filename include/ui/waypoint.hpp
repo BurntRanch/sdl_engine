@@ -1,19 +1,23 @@
 #ifndef PARTICLES_HPP
 #define PARTICLES_HPP
 
+#include "common.hpp"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <array>
+#include <stdexcept>
 
 namespace UI {
-class Waypoint {
+class Waypoint : public GenericElement {
 public:
     Waypoint() = default;
-    Waypoint(glm::vec3 position, glm::vec3 scale) : m_Position(position) {};
+    Waypoint(glm::vec3 position, float zDepth, glm::vec3 scale) : m_Position(position) { SetDepth(zDepth); };
 
-    constexpr void SetPosition(glm::vec3 position) { m_Position = position; };
+    inline void SetPosition(glm::vec3 position) { m_Position = position; };
 
-    constexpr glm::vec3 GetPosition() { return m_Position; };
+    inline glm::vec3 GetWorldSpacePosition() { return m_Position; };
+
+    inline glm::vec2 GetPosition() { throw std::runtime_error("Use GetWorldSpacePosition() for UI::Waypoint objects!"); };
 private:
     glm::vec3 m_Position;
 };

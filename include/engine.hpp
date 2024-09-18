@@ -83,12 +83,16 @@ struct MatricesUBO {
 
 struct UIWaypointUBO {
     glm::vec3 Position;
-    glm::vec3 HigherCorner;
-    glm::vec3 LowerCorner;
+};
+
+struct UIPanelUBO {
+    glm::vec4 Dimensions;
+    float Depth;
 };
 
 struct UILabelPositionUBO {
     glm::vec2 PositionOffset;
+    float Depth;
 };
 
 struct RenderModel {
@@ -129,6 +133,9 @@ struct RenderUIPanel {
 
     VkImageView textureView;
     VkSampler textureSampler;
+
+    UIPanelUBO ubo;
+    BufferAndMemory uboBuffer;
 };
 
 struct RenderUILabel {
@@ -184,7 +191,7 @@ private:
     void InitSwapchain();
     void InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageView);
     VkImageView CreateDepthImage();
-    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {}, bool is2D = false);
+    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {}, bool isSimple = false);
     VkRenderPass CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, bool shouldContainDepthImage = true);
     VkFramebuffer CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkExtent2D resolution, VkImageView depthImageView = nullptr);
     bool QuitEventCheck(SDL_Event &event);

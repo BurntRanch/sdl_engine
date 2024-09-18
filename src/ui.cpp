@@ -14,37 +14,57 @@ Panel::~Panel() {
     DestroyBuffers();
 };
 
-Panel::Panel(EngineSharedContext &sharedContext, glm::vec3 color, glm::vec4 dimensions) : m_SharedContext(sharedContext) {
+Panel::Panel(EngineSharedContext &sharedContext, glm::vec3 color, glm::vec2 position, glm::vec2 scales, float zDepth)
+    : m_SharedContext(sharedContext) {
+        
     texture = CreateSinglePixelImage(sharedContext, color);
-
-    vertex2DBuffer = CreateVertex2DBuffer(sharedContext, {
-                                                            {glm::vec2(dimensions.x, dimensions.y), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec2(dimensions.x + dimensions.z, dimensions.y + dimensions.w), glm::vec2(1.0f, 1.0f)},
-                                                            {glm::vec2(dimensions.x, dimensions.y + dimensions.w), glm::vec2(0.0f, 1.0f)},
-                                                            {glm::vec2(dimensions.x, dimensions.y), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec2(dimensions.x + dimensions.z, dimensions.y), glm::vec2(1.0f, 0.0f)},
-                                                            {glm::vec2(dimensions.x + dimensions.z, dimensions.y + dimensions.w), glm::vec2(1.0f, 1.0f)}
-                                                        });
+    
+    SetDimensions(glm::vec4(position, scales));
+    SetDepth(zDepth);
 }
 
-void Panel::DestroyBuffers() {
-    vkDeviceWaitIdle(m_SharedContext.engineDevice);
+inline void Panel::SetPosition(glm::vec2 position) {
+    // if (position.x == m_Dimensions.x && position.y == m_Dimensions.y) {
+    //     return;
+    // }
 
-    vkDestroyBuffer(m_SharedContext.engineDevice, vertex2DBuffer.buffer, NULL);
-    vkFreeMemory(m_SharedContext.engineDevice, vertex2DBuffer.memory, NULL);
-
-    vkDestroyImage(m_SharedContext.engineDevice, texture.imageAndMemory.image, NULL);
-    vkFreeMemory(m_SharedContext.engineDevice, texture.imageAndMemory.memory, NULL);
+    m_Position = position;
+    m_Dimensions.x = position.x;
+    m_Dimensions.y = position.y;
 }
 
+inline void Panel::SetScales(glm::vec2 scales) {
+    if (scales.x == m_Dimensions.z && scales.y == m_Dimensions.w) {
+        return;
+    }
 
+    m_Dimensions.z = scales.x;
+    m_Dimensions.w = scales.y;
+}
+
+inline void Panel::SetDimensions(glm::vec4 dimensions) {
+    if (dimensions == m_Dimensions) {
+        return;
+    }
+
+    m_Dimensions = dimensions;
+}
+
+glm::vec4 Panel::GetDimensions() {
+    return m_Dimensions;
+}
 
 
 Label::~Label() {
     DestroyBuffers();
 }
 
-Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesystem::path fontPath, glm::vec2 position) : Position(position), m_SharedContext(sharedContext) {
+Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesystem::path fontPath, glm::vec2 position, float zDepth)
+    : m_SharedContext(sharedContext) {
+    
+    SetPosition(position);
+    SetDepth(m_Depth);
+
     if (FT_Init_FreeType(&m_FTLibrary)) {
         throw std::runtime_error("Failed to initialize FreeType!");
     }
@@ -130,13 +150,13 @@ std::optional<std::pair<TextureImageAndMemory, BufferAndMemory>> Label::Generate
     xpos -= 1.0f;
     ypos -= 1.0f - (PIXEL_HEIGHT_FLOAT / static_cast<float>(m_SharedContext.settings.DisplayHeight));
 
-    BufferAndMemory bufferAndMemory = CreateVertex2DBuffer(m_SharedContext, {
-                                                            {glm::vec2(xpos, ypos), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec2(xpos + w, ypos + h), glm::vec2(1.0f, 1.0f)},
-                                                            {glm::vec2(xpos, ypos + h), glm::vec2(0.0f, 1.0f)},
-                                                            {glm::vec2(xpos, ypos), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec2(xpos + w, ypos), glm::vec2(1.0f, 0.0f)},
-                                                            {glm::vec2(xpos + w, ypos + h), glm::vec2(1.0f, 1.0f)}
+    BufferAndMemory bufferAndMemory = CreateSimpleVertexBuffer(m_SharedContext, {
+                                                            {glm::vec3(xpos, ypos, m_Depth), glm::vec2(0.0f, 0.0f)},
+                                                            {glm::vec3(xpos + w, ypos + h, m_Depth), glm::vec2(1.0f, 1.0f)},
+                                                            {glm::vec3(xpos, ypos + h, m_Depth), glm::vec2(0.0f, 1.0f)},
+                                                            {glm::vec3(xpos, ypos, m_Depth), glm::vec2(0.0f, 0.0f)},
+                                                            {glm::vec3(xpos + w, ypos, m_Depth), glm::vec2(1.0f, 0.0f)},
+                                                            {glm::vec3(xpos + w, ypos + h, m_Depth), glm::vec2(1.0f, 1.0f)}
                                                         }, false);
 
     // The bitshift by 6 is required because Advance is 1/64th of a pixel.
@@ -159,4 +179,24 @@ void Label::DestroyBuffers() {
     }
 
     GlyphBuffers.clear();
+}
+
+inline glm::vec2 GenericElement::GetPosition() {
+    return m_Position;
+}
+
+inline void GenericElement::SetPosition(glm::vec2 Position) {
+    m_Position = Position;
+}
+
+inline float GenericElement::GetDepth() {
+    return m_Depth;
+}
+
+inline void GenericElement::SetDepth(float depth) {
+    m_Depth = depth;
+}
+
+inline void GenericElement::DestroyBuffers() {
+    throw std::runtime_error("You're calling DestroyBuffers on a GenericElement, this is wrong.");
 }

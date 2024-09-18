@@ -546,7 +546,7 @@ void Engine::AddUIWaypoint(UI::Waypoint *waypoint) {
     // waypoint UBO
     VkDeviceSize waypointUniformBufferSize = sizeof(UIWaypointUBO);
 
-    renderUIWaypoint.waypointUBO = {waypoint->GetPosition()};
+    renderUIWaypoint.waypointUBO = {waypoint->GetWorldSpacePosition()};
 
     AllocateBuffer(sharedContext, waypointUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderUIWaypoint.waypointUBOBuffer.buffer, renderUIWaypoint.waypointUBOBuffer.memory);
 
@@ -634,6 +634,14 @@ void Engine::AddUIPanel(UI::Panel *panel) {
     renderUIPanel.textureView = CreateImageView(panel->texture, panel->texture.format, VK_IMAGE_ASPECT_COLOR_BIT, false);
     renderUIPanel.textureSampler = CreateSampler(1.0f, false);
 
+    renderUIPanel.ubo.Dimensions = panel->GetDimensions();
+    renderUIPanel.ubo.Depth = panel->GetDepth();
+
+    EngineSharedContext sharedContext = GetSharedContext();
+
+    AllocateBuffer(sharedContext, sizeof(renderUIPanel.ubo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, renderUIPanel.uboBuffer.buffer, renderUIPanel.uboBuffer.memory);
+    vkMapMemory(m_EngineDevice, renderUIPanel.uboBuffer.memory, 0, sizeof(renderUIPanel.ubo), 0, &(renderUIPanel.uboBuffer.mappedData));
+
     m_UIPanels.push_back(renderUIPanel);
 }
 
@@ -670,7 +678,8 @@ void Engine::AddUILabel(UI::Label *label) {
         renderUILabel.textureShaderData.push_back(std::make_pair(glyph.first, std::make_pair(textureView, textureSampler)));
     }
 
-    renderUILabel.ubo.PositionOffset = label->Position;
+    renderUILabel.ubo.PositionOffset = label->GetPosition();
+    renderUILabel.ubo.Depth = label->GetDepth();
 
     AllocateBuffer(sharedContext, sizeof(renderUILabel.ubo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, renderUILabel.uboBuffer.buffer, renderUILabel.uboBuffer.memory);
     vkMapMemory(m_EngineDevice, renderUILabel.uboBuffer.memory, 0, sizeof(renderUILabel.ubo), 0, &(renderUILabel.uboBuffer.mappedData));
@@ -949,15 +958,15 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
     vertexInputInfo.vertexBindingDescriptionCount = 1;
 
 
-    auto bindingDescription2D = getVertex2DBindingDescription();
-    auto attributeDescriptions2D = getVertex2DAttributeDescriptions();
+    auto bindingDescriptionSimple = getSimpleVertexBindingDescription();
+    auto attributeDescriptionsSimple = getSimpleVertexAttributeDescriptions();
     auto bindingDescription = getVertexBindingDescription();
     auto attributeDescriptions = getVertexAttributeDescriptions();
 
     if (is2D) {
-        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription2D;
-        vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptions2D.size();
-        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions2D.data();
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDescriptionSimple;
+        vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptionsSimple.size();
+        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptionsSimple.data();
     } else {
         vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
         vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptions.size();
@@ -1023,7 +1032,7 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencil.depthTestEnable = VK_TRUE;
     depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.minDepthBounds = 0.0f;
     depthStencil.maxDepthBounds = 1.0f;
@@ -1311,9 +1320,10 @@ void Engine::Init() {
     m_RenderImageFormat = getBestFormatFromChannels(4);
 
     m_MainRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 2, m_RenderImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    m_RescaleRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 3, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
+    m_RescaleRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 3, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VkImageView depthImageView = CreateDepthImage();
+    VkImageView rescaleDepthImageView = CreateDepthImage();
 
     EngineSharedContext sharedContext = GetSharedContext();
     TextureImageAndMemory renderImage = CreateImage(sharedContext, m_Settings.RenderWidth, m_Settings.RenderHeight, m_RenderImageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -1339,7 +1349,7 @@ void Engine::Init() {
     m_RenderImageAndMemory = renderImage.imageAndMemory;
 
     m_RenderFramebuffer = CreateFramebuffer(m_MainRenderPass, renderImageView, {m_Settings.RenderWidth, m_Settings.RenderHeight}, depthImageView);
-    InitFramebuffers(m_RescaleRenderPass, nullptr);
+    InitFramebuffers(m_RescaleRenderPass, rescaleDepthImageView);
 
     // VkPhysicalDeviceProperties properties{};
     // vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
@@ -1429,13 +1439,20 @@ void Engine::Init() {
 
     {
         VkDescriptorSetLayoutBinding samplerDescriptorSetLayoutBinding{};
-        samplerDescriptorSetLayoutBinding.binding = 0;
+        samplerDescriptorSetLayoutBinding.binding = 1;
         samplerDescriptorSetLayoutBinding.descriptorCount = 1;
         samplerDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         samplerDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         samplerDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
 
-        std::array<VkDescriptorSetLayoutBinding, 1> bindings = {samplerDescriptorSetLayoutBinding};
+        VkDescriptorSetLayoutBinding uboDescriptorSetLayoutBinding{};
+        uboDescriptorSetLayoutBinding.binding = 0;
+        uboDescriptorSetLayoutBinding.descriptorCount = 1;
+        uboDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        uboDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {samplerDescriptorSetLayoutBinding, uboDescriptorSetLayoutBinding};
 
         VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
         descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1587,13 +1604,13 @@ void Engine::Init() {
         EngineSharedContext sharedContext = GetSharedContext();
         
         // Fullscreen Quad initialization
-        m_FullscreenQuadVertexBuffer = CreateVertex2DBuffer(sharedContext, {
-                                                            {glm::vec2(-1.0f, -1.0f), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec2(1.0f, 1.0f), glm::vec2(1.0f, 1.0f)},
-                                                            {glm::vec2(-1.0f, 1.0f), glm::vec2(0.0f, 1.0f)},
-                                                            {glm::vec2(-1.0f, -1.0f), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec2(1.0f, -1.0f), glm::vec2(1.0f, 0.0f)},
-                                                            {glm::vec2(1.0f, 1.0f), glm::vec2(1.0f, 1.0f)}
+        m_FullscreenQuadVertexBuffer = CreateSimpleVertexBuffer(sharedContext, {
+                                                            {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
+                                                            {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, 1.0f)},
+                                                            {glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec2(0.0f, 1.0f)},
+                                                            {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
+                                                            {glm::vec3(1.0f, -1.0f, 0.0f), glm::vec2(1.0f, 0.0f)},
+                                                            {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, 1.0f)}
                                                         });
     }
 
@@ -1861,7 +1878,7 @@ void Engine::Start() {
 
                 SDL_memcpy(renderUIWaypoint.matricesUBOBuffer.mappedData, &renderUIWaypoint.matricesUBO, sizeof(renderUIWaypoint.matricesUBO));
 
-                renderUIWaypoint.waypointUBO.Position = renderUIWaypoint.waypoint->GetPosition();
+                renderUIWaypoint.waypointUBO.Position = renderUIWaypoint.waypoint->GetWorldSpacePosition();
 
                 SDL_memcpy(renderUIWaypoint.waypointUBOBuffer.mappedData, &renderUIWaypoint.waypointUBO, sizeof(renderUIWaypoint.waypointUBO));
 
@@ -1927,7 +1944,20 @@ void Engine::Start() {
             for (RenderUIPanel &renderUIPanel : m_UIPanels) {
                 // vertex buffer binding!!
                 VkDeviceSize panelVertexOffsets[] = {0};
-                vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(renderUIPanel.panel->vertex2DBuffer.buffer), panelVertexOffsets);
+                vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), panelVertexOffsets);
+
+                renderUIPanel.ubo.Dimensions = renderUIPanel.panel->GetDimensions();
+
+                /* Convert [0, 1] to [-1, 1] */
+                renderUIPanel.ubo.Dimensions.x *= 2;
+                renderUIPanel.ubo.Dimensions.x -= 1;
+
+                renderUIPanel.ubo.Dimensions.y *= 2;
+                renderUIPanel.ubo.Dimensions.y -= 1;
+
+                renderUIPanel.ubo.Depth = renderUIPanel.panel->GetDepth();
+
+                SDL_memcpy(renderUIPanel.uboBuffer.mappedData, &(renderUIPanel.ubo), sizeof(renderUIPanel.ubo));
 
                 // update descriptor set with image
                 VkDescriptorImageInfo imageInfo{};
@@ -1935,15 +1965,29 @@ void Engine::Start() {
                 imageInfo.imageView = renderUIPanel.textureView;
                 imageInfo.sampler = renderUIPanel.textureSampler;
 
-                std::array<VkWriteDescriptorSet, 1> descriptorWrites;
+                // update descriptor set with UBO
+                VkDescriptorBufferInfo bufferInfo{};
+                bufferInfo.buffer = renderUIPanel.uboBuffer.buffer;
+                bufferInfo.offset = 0;
+                bufferInfo.range = sizeof(renderUIPanel.ubo);
+
+                std::array<VkWriteDescriptorSet, 2> descriptorWrites;
                 descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 descriptorWrites[0].pNext = nullptr;
                 descriptorWrites[0].dstSet = m_RescaleDescriptorSet; // Ignored
                 descriptorWrites[0].dstBinding = 0;
                 descriptorWrites[0].dstArrayElement = 0;
-                descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                 descriptorWrites[0].descriptorCount = 1;
-                descriptorWrites[0].pImageInfo = &imageInfo;
+                descriptorWrites[0].pBufferInfo = &bufferInfo;
+                descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                descriptorWrites[1].pNext = nullptr;
+                descriptorWrites[1].dstSet = m_RescaleDescriptorSet; // Ignored
+                descriptorWrites[1].dstBinding = 1;
+                descriptorWrites[1].dstArrayElement = 0;
+                descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                descriptorWrites[1].descriptorCount = 1;
+                descriptorWrites[1].pImageInfo = &imageInfo;
 
                 vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIPanelGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
                 vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
@@ -1966,9 +2010,11 @@ void Engine::Start() {
                 for (auto &shaderData : renderUILabel.textureShaderData) {
                     vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(renderUILabel.label->GlyphBuffers[i++].second.second.buffer), labelVertexOffsets);
 
-                    renderUILabel.ubo.PositionOffset = renderUILabel.label->Position;
+                    renderUILabel.ubo.PositionOffset = renderUILabel.label->GetPosition();
                     renderUILabel.ubo.PositionOffset.x *= 2;
                     renderUILabel.ubo.PositionOffset.y *= 2;
+
+                    renderUILabel.ubo.Depth = renderUILabel.label->GetDepth();
 
                     SDL_memcpy(renderUILabel.uboBuffer.mappedData, &(renderUILabel.ubo), sizeof(renderUILabel.ubo));
 
