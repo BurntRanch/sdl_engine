@@ -24,29 +24,17 @@ Panel::Panel(EngineSharedContext &sharedContext, glm::vec3 color, glm::vec2 posi
 }
 
 inline void Panel::SetPosition(glm::vec2 position) {
-    // if (position.x == m_Dimensions.x && position.y == m_Dimensions.y) {
-    //     return;
-    // }
-
     m_Position = position;
     m_Dimensions.x = position.x;
     m_Dimensions.y = position.y;
 }
 
 inline void Panel::SetScales(glm::vec2 scales) {
-    if (scales.x == m_Dimensions.z && scales.y == m_Dimensions.w) {
-        return;
-    }
-
     m_Dimensions.z = scales.x;
     m_Dimensions.w = scales.y;
 }
 
 inline void Panel::SetDimensions(glm::vec4 dimensions) {
-    if (dimensions == m_Dimensions) {
-        return;
-    }
-
     m_Dimensions = dimensions;
 }
 
@@ -54,6 +42,10 @@ glm::vec4 Panel::GetDimensions() {
     return m_Dimensions;
 }
 
+void Panel::DestroyBuffers() {
+    vkDestroyImage(m_SharedContext.engineDevice, texture.imageAndMemory.image, NULL);
+    vkFreeMemory(m_SharedContext.engineDevice, texture.imageAndMemory.memory, NULL);
+}
 
 Label::~Label() {
     DestroyBuffers();

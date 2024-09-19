@@ -125,8 +125,9 @@ Engine::~Engine() {
         renderLabel.label->DestroyBuffers();
     }
 
-    for (RenderUIWaypoint &renderUIWaypoint : m_RenderUIWaypoints)
+    for (RenderUIWaypoint &renderUIWaypoint : m_RenderUIWaypoints) {
         this->RemoveUIWaypoint(renderUIWaypoint.waypoint);
+    }
 
     for (PipelineAndLayout pipelineAndLayout : m_PipelineAndLayouts) {
         vkDestroyPipeline(m_EngineDevice, pipelineAndLayout.pipeline, NULL);
@@ -660,6 +661,9 @@ void Engine::RemoveUIPanel(UI::Panel *panel) {
         vkDestroySampler(m_EngineDevice, renderUIPanel.textureSampler, NULL);
         vkDestroyImageView(m_EngineDevice, renderUIPanel.textureView, NULL);
 
+        vkDestroyBuffer(m_EngineDevice, renderUIPanel.uboBuffer.buffer, NULL);
+        vkFreeMemory(m_EngineDevice, renderUIPanel.uboBuffer.memory, NULL);
+
         break;
     }
 }
@@ -679,6 +683,8 @@ void Engine::AddUILabel(UI::Label *label) {
     }
 
     renderUILabel.ubo.PositionOffset = label->GetPosition();
+    renderUILabel.ubo.PositionOffset *= 2;
+
     renderUILabel.ubo.Depth = label->GetDepth();
 
     AllocateBuffer(sharedContext, sizeof(renderUILabel.ubo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, renderUILabel.uboBuffer.buffer, renderUILabel.uboBuffer.memory);
@@ -837,12 +843,12 @@ void Engine::InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageVie
         m_SwapchainFramebuffers[i] = CreateFramebuffer(renderPass, m_SwapchainImageViews[i], {m_Settings.DisplayWidth, m_Settings.DisplayHeight}, depthImageView);
 }
 
-VkImageView Engine::CreateDepthImage() {
+VkImageView Engine::CreateDepthImage(Uint32 width, Uint32 height) {
     EngineSharedContext sharedContext = GetSharedContext();
 
     VkFormat depthFormat = FindDepthFormat();
 
-    TextureImageAndMemory depthImageAndMemory = CreateImage(sharedContext, m_Settings.RenderWidth, m_Settings.RenderHeight, 
+    TextureImageAndMemory depthImageAndMemory = CreateImage(sharedContext, width, height, 
                         depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkImageView depthImageView = CreateImageView(depthImageAndMemory, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -1322,8 +1328,8 @@ void Engine::Init() {
     m_MainRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 2, m_RenderImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     m_RescaleRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 3, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-    VkImageView depthImageView = CreateDepthImage();
-    VkImageView rescaleDepthImageView = CreateDepthImage();
+    VkImageView depthImageView = CreateDepthImage(m_Settings.RenderWidth, m_Settings.RenderHeight);
+    VkImageView rescaleDepthImageView = CreateDepthImage(m_Settings.DisplayWidth, m_Settings.DisplayHeight);
 
     EngineSharedContext sharedContext = GetSharedContext();
     TextureImageAndMemory renderImage = CreateImage(sharedContext, m_Settings.RenderWidth, m_Settings.RenderHeight, m_RenderImageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);

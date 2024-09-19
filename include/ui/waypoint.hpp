@@ -10,7 +10,8 @@
 namespace UI {
 class Waypoint : public GenericElement {
 public:
-    Waypoint() = default;
+    virtual ~Waypoint() = default;
+
     Waypoint(glm::vec3 position, float zDepth, glm::vec3 scale) : m_Position(position) { SetDepth(zDepth); };
 
     inline void SetPosition(glm::vec3 position) { m_Position = position; };

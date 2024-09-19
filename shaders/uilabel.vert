@@ -11,8 +11,6 @@ layout(binding = 0) uniform UniformBufferObject {
 layout(location = 0) out vec2 fragCoord;
 
 void main() {
-    ubo.PositionOffset *= 2;
-
     gl_Position = vec4(vt_pos.xy + ubo.PositionOffset, ubo.Depth, 1.0);
     fragCoord = vt_txcoord;
 }

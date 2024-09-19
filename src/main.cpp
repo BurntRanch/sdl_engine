@@ -273,7 +273,6 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
         /* Sort by which model is closest to the camera, to enforce the fact that.. */
         /* When the pointer is clicking on an object that has another one behind, The player intends.. */
         /* to click the one closest to them, Because they can't see the one behind. */
-        /* Maybe this should be cached, until Models actually gets appended to. */
         std::sort(State::Models.begin(), State::Models.end(), [] (Model *modelOne, Model *modelTwo) { return (glm::distance(cam.Position, modelOne->GetPosition()) > glm::distance(cam.Position, modelTwo->GetPosition())); });
         
         // Deselect last selected object.
@@ -378,6 +377,9 @@ int main() {
 
         engine->RegisterUpdateFunction(Update);
         engine->RegisterFixedUpdateFunction(FixedUpdate);
+
+        UI::Panel *panel = new UI::Panel(sharedContext, glm::vec3(0.0f, 0.5f, 1.0f), glm::vec2(0.0f, 0.0f), glm::vec2(0.15f, 0.15f), 0.0f);
+        engine->AddUIPanel(panel);
 
         engine->Start();
 

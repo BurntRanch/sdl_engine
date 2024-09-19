@@ -19,6 +19,8 @@ public:
     void SetDimensions(glm::vec4 dimensions);
 
     glm::vec4 GetDimensions();
+
+    void DestroyBuffers();
 private:
     struct EngineSharedContext m_SharedContext;
 
