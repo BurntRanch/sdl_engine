@@ -26,10 +26,10 @@ public:
     bool InvertVertical;
     bool InvertHorizontal;
 
-    Settings(const string_view &fileName);
+    Settings(const string_view fileName);
 
     template<typename T>
-    T GetValue(const string_view &name, T def) {
+    T GetValue(const string_view name, T def) {
         std::optional<T> ret = m_SettingsTable.at_path(name).value<T>();
 
         return ret.value_or(def);
