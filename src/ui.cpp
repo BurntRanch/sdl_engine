@@ -1,9 +1,11 @@
 #include "ui.hpp"
 #include "common.hpp"
+#include "ui/arrows.hpp"
 #include "ui/label.hpp"
 #include <SDL3/SDL_stdinc.h>
 #include <filesystem>
 #include <freetype/freetype.h>
+#include <glm/ext/matrix_transform.hpp>
 #include <stdexcept>
 #include <utility>
 #include <vulkan/vulkan_core.h>
@@ -171,6 +173,20 @@ void Label::DestroyBuffers() {
     }
 
     GlyphBuffers.clear();
+}
+
+Arrows::Arrows(glm::vec3 position) : m_Position(position) {
+    model = new Model("models/arrows.obj");
+}
+
+inline glm::mat4 Arrows::GetModelMatrix() {
+    if (m_NeedsUpdate) {
+        m_ModelMatrix = glm::translate(m_ModelMatrix, m_Position);
+
+        m_NeedsUpdate = false;
+    }
+
+    return m_ModelMatrix;
 }
 
 inline glm::vec2 GenericElement::GetPosition() {

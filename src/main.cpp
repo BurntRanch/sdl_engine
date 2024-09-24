@@ -14,6 +14,7 @@
 #include "camera.hpp"
 #include "common.hpp"
 #include "model.hpp"
+#include "ui/arrows.hpp"
 #include "ui/label.hpp"
 #include "ui/panel.hpp"
 #include "util.hpp"
@@ -29,7 +30,7 @@ std::unique_ptr<Engine> engine;
 
 namespace State {
     Model **CurrentlySelectedObject = nullptr;
-    UI::Waypoint *CurrentlySelectedObjectWaypoint = nullptr;
+    UI::Arrows *CurrentlySelectedObjectArrows = nullptr;
 
     std::vector<Model *> Models;
 
@@ -130,10 +131,10 @@ bool importScene(const std::string_view fileName) {
 
     State::CurrentlySelectedObject = nullptr;
 
-    if (State::CurrentlySelectedObjectWaypoint) {
-        engine->RemoveUIWaypoint(State::CurrentlySelectedObjectWaypoint);
+    if (State::CurrentlySelectedObjectArrows) {
+        engine->RemoveUIArrows(State::CurrentlySelectedObjectArrows);
     }
-    State::CurrentlySelectedObjectWaypoint = nullptr;
+    State::CurrentlySelectedObjectArrows = nullptr;
 
     using namespace rapidxml;
 
@@ -279,11 +280,11 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
 
         State::CurrentlySelectedObject = nullptr;
 
-        if (State::CurrentlySelectedObjectWaypoint) {
-            engine->RemoveUIWaypoint(State::CurrentlySelectedObjectWaypoint);
-            delete State::CurrentlySelectedObjectWaypoint;
+        if (State::CurrentlySelectedObjectArrows) {
+            engine->RemoveUIArrows(State::CurrentlySelectedObjectArrows);
+            delete State::CurrentlySelectedObjectArrows;
 
-            State::CurrentlySelectedObjectWaypoint = nullptr;
+            State::CurrentlySelectedObjectArrows = nullptr;
         }
 
         for (Model *&model : State::Models) {
@@ -291,8 +292,8 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
                 fmt::println("Left mouse button pressed on a model!");
                 State::CurrentlySelectedObject = &model;
 
-                State::CurrentlySelectedObjectWaypoint = new UI::Waypoint(model->GetPosition(), 1.0f, model->boundingBox[0]);
-                engine->AddUIWaypoint(State::CurrentlySelectedObjectWaypoint);
+                State::CurrentlySelectedObjectArrows = new UI::Arrows(model->GetPosition());
+                engine->AddUIArrows(State::CurrentlySelectedObjectArrows);
 
                 break;
             }
@@ -313,11 +314,11 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
         *State::CurrentlySelectedObject = nullptr;
         State::CurrentlySelectedObject = nullptr;
 
-        if (State::CurrentlySelectedObjectWaypoint) {
-            engine->RemoveUIWaypoint(State::CurrentlySelectedObjectWaypoint);
-            delete State::CurrentlySelectedObjectWaypoint;
+        if (State::CurrentlySelectedObjectArrows) {
+            engine->RemoveUIArrows(State::CurrentlySelectedObjectArrows);
+            delete State::CurrentlySelectedObjectArrows;
 
-            State::CurrentlySelectedObjectWaypoint = nullptr;
+            State::CurrentlySelectedObjectArrows = nullptr;
         }
     }
 
@@ -380,6 +381,9 @@ int main() {
 
         UI::Panel *panel = new UI::Panel(sharedContext, glm::vec3(0.0f, 0.5f, 1.0f), glm::vec2(0.0f, 0.0f), glm::vec2(0.15f, 0.15f), 0.0f);
         engine->AddUIPanel(panel);
+
+        // UI::Arrows *arrows = new UI::Arrows(glm::vec3(0.0f, 0.0f, 0.0f));
+        // engine->AddUIArrows(arrows);
 
         engine->Start();
 

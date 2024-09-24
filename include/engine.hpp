@@ -85,6 +85,10 @@ struct UIWaypointUBO {
     glm::vec3 Position;
 };
 
+struct UIArrowsUBO {
+    glm::vec3 Color;
+};
+
 struct UIPanelUBO {
     glm::vec4 Dimensions;
     float Depth;
@@ -107,6 +111,8 @@ struct RenderModel {
     VkImageView diffTextureImageView;
     VkSampler diffTextureSampler;
 
+    glm::vec3 diffColor;
+
     MatricesUBO matricesUBO;
     BufferAndMemory matricesUBOBuffer;
 };
@@ -126,6 +132,20 @@ struct RenderUIWaypoint {
     BufferAndMemory waypointUBOBuffer;
 
     VkDescriptorSet descriptorSet;
+};
+
+struct RenderUIArrows {
+    UI::Arrows *arrows;
+
+    // might want this later
+    // TextureImageAndMemory diffTexture;
+    // VkImageView diffTextureImageView;
+    // VkSampler diffTextureSampler;
+
+    /* 3*2, 3 arrows, 2 objects per arrow. */
+    std::array<RenderModel, 3*2> arrowRenderModels;
+
+    std::array<std::pair<std::pair<MatricesUBO, UIArrowsUBO>, std::pair<BufferAndMemory, BufferAndMemory>>, 3> arrowBuffers;
 };
 
 struct RenderUIPanel {
@@ -166,6 +186,9 @@ public:
     void AddUIWaypoint(UI::Waypoint *waypoint);
     void RemoveUIWaypoint(UI::Waypoint *waypoint);
 
+    void AddUIArrows(UI::Arrows *arrows);
+    void RemoveUIArrows(UI::Arrows *arrows);
+
     void AddUIPanel(UI::Panel *panel);
     void RemoveUIPanel(UI::Panel *panel);
 
@@ -191,7 +214,7 @@ private:
     void InitSwapchain();
     void InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageView);
     VkImageView CreateDepthImage(Uint32 width, Uint32 height);
-    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {}, bool isSimple = false);
+    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {}, bool isSimple = false, bool enableDepth = VK_TRUE);
     VkRenderPass CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, bool shouldContainDepthImage = true);
     VkFramebuffer CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkExtent2D resolution, VkImageView depthImageView = nullptr);
     bool QuitEventCheck(SDL_Event &event);
@@ -202,7 +225,7 @@ private:
 
     void CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size);
 
-    void LoadMesh(Mesh &mesh, Model *model);
+    RenderModel LoadMesh(Mesh &mesh, Model *model, bool loadTextures = true);
     std::array<TextureImageAndMemory, 1> LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations = true);
 
     TextureBufferAndMemory LoadTextureFromFile(const std::string &name);
@@ -224,6 +247,7 @@ private:
     Settings &m_Settings;
 
     std::vector<RenderUIWaypoint> m_RenderUIWaypoints;
+    std::vector<RenderUIArrows> m_RenderUIArrows;
     std::vector<RenderUIPanel> m_UIPanels;
     std::vector<RenderUILabel> m_UILabels;
 
@@ -245,6 +269,7 @@ private:
 
     VkDescriptorSetLayout m_RenderDescriptorSetLayout = nullptr;
     VkDescriptorSetLayout m_UIWaypointDescriptorSetLayout = nullptr;
+    VkDescriptorSetLayout m_UIArrowsDescriptorSetLayout = nullptr;
 
     VkDescriptorPool m_RenderDescriptorPool = nullptr;
     VkDescriptorPool m_UIWaypointDescriptorPool = nullptr;
@@ -261,6 +286,7 @@ private:
 
     PipelineAndLayout m_MainGraphicsPipeline; // Used to render the 3D scene
     PipelineAndLayout m_UIWaypointGraphicsPipeline; // Used to add shiny waypoints
+    PipelineAndLayout m_UIArrowsGraphicsPipeline; // Used for UI arrows, commonly used in the Map Editor (WIP at the time of writing this comment).
     PipelineAndLayout m_RescaleGraphicsPipeline; // Used to rescale.
     PipelineAndLayout m_UIPanelGraphicsPipeline; // Used for UI Panels.
     PipelineAndLayout m_UILabelGraphicsPipeline; // Used for UI Labels.

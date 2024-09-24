@@ -1,7 +1,7 @@
 [video]
 VSyncEnabled = false
-RenderWidth = 960
-RenderHeight = 540
+RenderWidth = 3840
+RenderHeight = 2160
 DisplayWidth = 800
 DisplayHeight = 600
 Fullscreen = true

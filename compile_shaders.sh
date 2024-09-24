@@ -1,6 +1,9 @@
 glslc shaders/lighting.vert -o shaders/lighting.vert.spv
 glslc shaders/lighting.frag -o shaders/lighting.frag.spv
 
+glslc shaders/uiarrows.vert -o shaders/uiarrows.vert.spv
+glslc shaders/uiarrows.frag -o shaders/uiarrows.frag.spv
+
 glslc shaders/uiwaypoint.vert -o shaders/uiwaypoint.vert.spv
 glslc shaders/uiwaypoint.frag -o shaders/uiwaypoint.frag.spv
 

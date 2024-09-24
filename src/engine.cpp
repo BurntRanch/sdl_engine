@@ -1,5 +1,6 @@
 #include "common.hpp"
 #include "error.hpp"
+#include "ui/arrows.hpp"
 #include "ui/label.hpp"
 #include "ui/panel.hpp"
 #include "ui/waypoint.hpp"
@@ -423,7 +424,7 @@ VkFormat Engine::FindBestFormat(const std::vector<VkFormat>& candidates, VkImage
     throw std::runtime_error(engineError::CANT_FIND_ANY_FORMAT);
 }
 
-void Engine::LoadMesh(Mesh &mesh, Model *model) {
+RenderModel Engine::LoadMesh(Mesh &mesh, Model *model, bool loadTextures) {
     EngineSharedContext sharedContext = GetSharedContext();
 
     RenderModel renderModel{};
@@ -436,18 +437,22 @@ void Engine::LoadMesh(Mesh &mesh, Model *model) {
     renderModel.indexBufferSize = mesh.indices.size();
     renderModel.indexBuffer = CreateIndexBuffer(sharedContext, mesh.indices);
 
-    std::array<TextureImageAndMemory, 1> meshTextures = LoadTexturesFromMesh(mesh, false);
-    renderModel.diffTexture = meshTextures[0];
+    if (loadTextures) {
+        std::array<TextureImageAndMemory, 1> meshTextures = LoadTexturesFromMesh(mesh, false);
+        renderModel.diffTexture = meshTextures[0];
 
-    VkFormat textureFormat = getBestFormatFromChannels(renderModel.diffTexture.channels);
+        VkFormat textureFormat = getBestFormatFromChannels(renderModel.diffTexture.channels);
 
-    // Image view, for sampling.
-    renderModel.diffTextureImageView = CreateImageView(renderModel.diffTexture, textureFormat, VK_IMAGE_ASPECT_COLOR_BIT, false);
+        // Image view, for sampling.
+        renderModel.diffTextureImageView = CreateImageView(renderModel.diffTexture, textureFormat, VK_IMAGE_ASPECT_COLOR_BIT, false);
 
-    VkPhysicalDeviceProperties properties{};
-    vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
 
-    renderModel.diffTextureSampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
+        renderModel.diffTextureSampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
+    }
+
+    renderModel.diffColor = mesh.diffuse;
 
     // UBO
     VkDeviceSize uniformBufferSize = sizeof(MatricesUBO);
@@ -458,7 +463,7 @@ void Engine::LoadMesh(Mesh &mesh, Model *model) {
 
     vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOBuffer.mappedData);
 
-    m_RenderModels.push_back(renderModel);
+    return renderModel;
 }
 
 void Engine::SetMouseCaptureState(bool capturing) {
@@ -466,18 +471,15 @@ void Engine::SetMouseCaptureState(bool capturing) {
 }
 
 void Engine::LoadModel(Model *model) {
-    // create vertexBuffer
-    std::vector<TextureImageAndMemory> textures;
-
-    std::vector<std::future<void>> tasks;
+    std::vector<std::future<RenderModel>> tasks;
 
     for (Mesh &mesh : model->meshes) {
-        tasks.push_back(std::async(std::launch::async, &Engine::LoadMesh, this, std::ref(mesh), model));
+        tasks.push_back(std::async(std::launch::async, &Engine::LoadMesh, this, std::ref(mesh), model, true));
     }
 
     // Any exception here is going to just happen and get caught like a regular engine error.
-    for (std::future<void> &task : tasks) {
-        task.share().get();
+    for (std::future<RenderModel> &task : tasks) {
+        m_RenderModels.push_back(task.share().get());
     }
 
     return;
@@ -598,6 +600,66 @@ void Engine::AddUIWaypoint(UI::Waypoint *waypoint) {
     vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
 
     m_RenderUIWaypoints.push_back(renderUIWaypoint);
+}
+
+void Engine::AddUIArrows(UI::Arrows *arrows) {
+    EngineSharedContext sharedContext = GetSharedContext();
+
+    RenderUIArrows renderUIArrows{};
+
+    renderUIArrows.arrows = arrows;
+
+    renderUIArrows.arrowRenderModels[0] = LoadMesh(arrows->model->meshes[0], arrows->model, false);
+    renderUIArrows.arrowRenderModels[1] = LoadMesh(arrows->model->meshes[1], arrows->model, false);
+    renderUIArrows.arrowRenderModels[2] = LoadMesh(arrows->model->meshes[2], arrows->model, false);
+    renderUIArrows.arrowRenderModels[3] = LoadMesh(arrows->model->meshes[3], arrows->model, false);
+    renderUIArrows.arrowRenderModels[4] = LoadMesh(arrows->model->meshes[4], arrows->model, false);
+    renderUIArrows.arrowRenderModels[5] = LoadMesh(arrows->model->meshes[5], arrows->model, false);
+
+    for (auto &arrowBuffer : renderUIArrows.arrowBuffers) {
+        // matrices UBO
+        VkDeviceSize matricesUniformBufferSize = sizeof(MatricesUBO);
+
+        arrowBuffer.first.first = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
+
+        AllocateBuffer(sharedContext, matricesUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, arrowBuffer.second.first.buffer, arrowBuffer.second.first.memory);
+
+        vkMapMemory(m_EngineDevice, arrowBuffer.second.first.memory, 0, matricesUniformBufferSize, 0, &arrowBuffer.second.first.mappedData);
+
+        // waypoint UBO
+        VkDeviceSize arrowsUniformBufferSize = sizeof(UIArrowsUBO);
+
+        arrowBuffer.first.second = {glm::vec3(1.0f, 1.0f, 1.0f)};
+
+        AllocateBuffer(sharedContext, arrowsUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, arrowBuffer.second.second.buffer, arrowBuffer.second.second.memory);
+
+        vkMapMemory(m_EngineDevice, arrowBuffer.second.second.memory, 0, arrowsUniformBufferSize, 0, &arrowBuffer.second.second.mappedData);
+    }
+
+    m_RenderUIArrows.push_back(renderUIArrows);
+}
+
+void Engine::RemoveUIArrows(UI::Arrows *arrows) {
+    for (size_t i = 0; i < m_RenderUIArrows.size(); i++) {
+        if (m_RenderUIArrows[i].arrows != arrows)
+            continue;
+
+        RenderUIArrows renderUIArrows = m_RenderUIArrows[i];
+
+        m_RenderUIArrows.erase(m_RenderUIArrows.begin() + i);
+
+        // Before we start, wait for the device to be idle
+        // This is already called in ~Engine, but sometimes the user calls RemoveWaypoint manually.
+        vkDeviceWaitIdle(m_EngineDevice);
+
+        /* TODO: Implement */
+        
+        // vkDestroyBuffer(m_EngineDevice, renderUIArrows.matricesUBOBuffer.buffer, NULL);
+        // vkFreeMemory(m_EngineDevice, renderUIArrows.matricesUBOBuffer.memory, NULL);
+
+        // vkDestroyBuffer(m_EngineDevice, renderUIArrows.waypointUBOBuffer.buffer, NULL);
+        // vkFreeMemory(m_EngineDevice, renderUIArrows.waypointUBOBuffer.memory, NULL);
+    }
 }
 
 void Engine::RemoveUIWaypoint(UI::Waypoint *waypoint) {
@@ -916,7 +978,7 @@ void Engine::InitInstance() {
 /* Creates a Vulkan graphics pipeline, shaderName will be used as a part of the path.
  * Sanitization is the job of the caller.
  */
-PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts, bool is2D) {
+PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts, bool isSimple, bool enableDepth) {
     auto vertShader = readFile("shaders/" + shaderName + ".vert.spv");
     auto fragShader = readFile("shaders/" + shaderName + ".frag.spv");
 
@@ -969,7 +1031,7 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
     auto bindingDescription = getVertexBindingDescription();
     auto attributeDescriptions = getVertexAttributeDescriptions();
 
-    if (is2D) {
+    if (isSimple) {
         vertexInputInfo.pVertexBindingDescriptions = &bindingDescriptionSimple;
         vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptionsSimple.size();
         vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptionsSimple.data();
@@ -1036,7 +1098,7 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
 
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthTestEnable = enableDepth;
     depthStencil.depthWriteEnable = VK_TRUE;
     depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
@@ -1325,7 +1387,7 @@ void Engine::Init() {
 
     m_RenderImageFormat = getBestFormatFromChannels(4);
 
-    m_MainRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 2, m_RenderImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    m_MainRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 3, m_RenderImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     m_RescaleRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 3, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VkImageView depthImageView = CreateDepthImage(m_Settings.RenderWidth, m_Settings.RenderHeight);
@@ -1421,6 +1483,32 @@ void Engine::Init() {
         descriptorSetLayoutCreateInfo.pBindings = bindings.data();
 
         if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_UIWaypointDescriptorSetLayout) != VK_SUCCESS)
+            throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
+    }
+    {
+        VkDescriptorSetLayoutBinding arrowInfoDescriptorSetLayoutBinding{};
+        arrowInfoDescriptorSetLayoutBinding.binding = 1;
+        arrowInfoDescriptorSetLayoutBinding.descriptorCount = 1;
+        arrowInfoDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        arrowInfoDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        arrowInfoDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+        VkDescriptorSetLayoutBinding uboDescriptorSetLayoutBinding{};
+        uboDescriptorSetLayoutBinding.binding = 0;
+        uboDescriptorSetLayoutBinding.descriptorCount = 1;
+        uboDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        uboDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboDescriptorSetLayoutBinding, arrowInfoDescriptorSetLayoutBinding};
+
+        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        descriptorSetLayoutCreateInfo.flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT;
+        descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
+        descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+
+        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_UIArrowsDescriptorSetLayout) != VK_SUCCESS)
             throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
     }
 
@@ -1522,6 +1610,7 @@ void Engine::Init() {
 
     m_MainGraphicsPipeline = CreateGraphicsPipeline("lighting", m_MainRenderPass, 0, VK_FRONT_FACE_COUNTER_CLOCKWISE, m_RenderViewport, m_RenderScissor, {m_RenderDescriptorSetLayout});
     m_UIWaypointGraphicsPipeline = CreateGraphicsPipeline("uiwaypoint", m_MainRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_RenderScissor, {m_UIWaypointDescriptorSetLayout}, true);
+    m_UIArrowsGraphicsPipeline = CreateGraphicsPipeline("uiarrows", m_MainRenderPass, 2, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_RenderScissor, {m_UIArrowsDescriptorSetLayout}, false, VK_FALSE);
     m_RescaleGraphicsPipeline = CreateGraphicsPipeline("rescale", m_RescaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_RescaleDescriptorSetLayout}, true);
     m_UIPanelGraphicsPipeline = CreateGraphicsPipeline("uipanel", m_RescaleRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UIPanelDescriptorSetLayout}, true);
     m_UILabelGraphicsPipeline = CreateGraphicsPipeline("uilabel", m_RescaleRenderPass, 2, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UILabelDescriptorSetLayout}, true);
@@ -1894,6 +1983,79 @@ void Engine::Start() {
 
                 vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIWaypointGraphicsPipeline.layout, 0, 1, &renderUIWaypoint.descriptorSet, 0, nullptr);
                 vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
+            }
+
+            // ARROWS SHADER!
+            vkCmdNextSubpass(m_CommandBuffers[currentFrameIndex], VK_SUBPASS_CONTENTS_INLINE);
+
+            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIArrowsGraphicsPipeline.pipeline);
+
+            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderViewport);
+
+            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderScissor);
+
+            for (RenderUIArrows &renderUIArrows : m_RenderUIArrows) {
+                // index for arrowBuffers
+                int i = 0;
+
+                for (RenderModel &arrowRenderModel : renderUIArrows.arrowRenderModels) {
+                    MatricesUBO &matricesUBO = renderUIArrows.arrowBuffers[i/2].first.first;
+                    UIArrowsUBO &arrowsUBO = renderUIArrows.arrowBuffers[i/2].first.second;
+
+                    BufferAndMemory &matricesUBOBuffer = renderUIArrows.arrowBuffers[i/2].second.first;
+                    BufferAndMemory &arrowsUBOBuffer = renderUIArrows.arrowBuffers[i/2].second.second;
+
+                    matricesUBO.modelMatrix = arrowRenderModel.model->GetModelMatrix();
+                    matricesUBO.viewMatrix = viewMatrix;
+                    matricesUBO.projectionMatrix = projectionMatrix;
+
+                    SDL_memcpy(matricesUBOBuffer.mappedData, &matricesUBO, sizeof(matricesUBO));
+
+                    arrowsUBO.Color = arrowRenderModel.diffColor;
+
+                    SDL_memcpy(arrowsUBOBuffer.mappedData, &arrowsUBO, sizeof(arrowsUBO));
+
+                    // vertex buffer binding!!
+                    VkDeviceSize arrowsVertexOffsets[] = {0};
+                    vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(arrowRenderModel.vertexBuffer.buffer), arrowsVertexOffsets);
+
+                    vkCmdBindIndexBuffer(m_CommandBuffers[currentFrameIndex], arrowRenderModel.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+                    // update descriptor set with buffer
+                    VkDescriptorBufferInfo bufferInfo{};
+                    bufferInfo.buffer = matricesUBOBuffer.buffer;
+                    bufferInfo.offset = 0;
+                    bufferInfo.range = sizeof(matricesUBO);
+
+                    // update descriptor set with buffer
+                    VkDescriptorBufferInfo bufferInfo2{};
+                    bufferInfo2.buffer = arrowsUBOBuffer.buffer;
+                    bufferInfo2.offset = 0;
+                    bufferInfo2.range = sizeof(arrowsUBO);
+
+                    std::array<VkWriteDescriptorSet, 2> descriptorWrites;
+                    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    descriptorWrites[0].pNext = nullptr;
+                    descriptorWrites[0].dstSet = m_RenderDescriptorSet; // Ignored
+                    descriptorWrites[0].dstBinding = 0;
+                    descriptorWrites[0].dstArrayElement = 0;
+                    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                    descriptorWrites[0].descriptorCount = 1;
+                    descriptorWrites[0].pBufferInfo = &bufferInfo;
+                    descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    descriptorWrites[1].pNext = nullptr;
+                    descriptorWrites[1].dstSet = m_RenderDescriptorSet; // Ignored
+                    descriptorWrites[1].dstBinding = 1;
+                    descriptorWrites[1].dstArrayElement = 0;
+                    descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                    descriptorWrites[1].descriptorCount = 1;
+                    descriptorWrites[1].pBufferInfo = &bufferInfo2;
+
+                    vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIArrowsGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
+                    vkCmdDrawIndexed(m_CommandBuffers[currentFrameIndex], arrowRenderModel.indexBufferSize, 1, 0, 0, 0);
+
+                    i++;
+                }
             }
 
             vkCmdEndRenderPass(m_CommandBuffers[currentFrameIndex]);
