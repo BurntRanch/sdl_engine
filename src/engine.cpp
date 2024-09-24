@@ -653,7 +653,7 @@ void Engine::RemoveUIArrows(UI::Arrows *arrows) {
         vkDeviceWaitIdle(m_EngineDevice);
 
         /* TODO: Implement */
-        
+
         // vkDestroyBuffer(m_EngineDevice, renderUIArrows.matricesUBOBuffer.buffer, NULL);
         // vkFreeMemory(m_EngineDevice, renderUIArrows.matricesUBOBuffer.memory, NULL);
 
@@ -1256,7 +1256,7 @@ bool Engine::QuitEventCheck(SDL_Event &event) {
 
 void Engine::Init() {
     int SDL_INIT_STATUS = SDL_Init(SDL_INIT_VIDEO);
-    if (SDL_INIT_STATUS == SDL_FALSE)
+    if (!SDL_INIT_STATUS)
         throw std::runtime_error(fmt::format(engineError::FAILED_SDL_INIT, SDL_INIT_STATUS));
 
     m_EngineWindow = SDL_CreateWindow("Test!", m_Settings.DisplayWidth, m_Settings.DisplayHeight, SDL_WINDOW_VULKAN | (m_Settings.Fullscreen & SDL_WINDOW_FULLSCREEN));
@@ -1279,7 +1279,7 @@ void Engine::Init() {
     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER, "1");
 
     // lets prepare
-    if (SDL_Vulkan_LoadLibrary(NULL) == SDL_FALSE)
+    if (!SDL_Vulkan_LoadLibrary(NULL))
         throw std::runtime_error(engineError::FAILED_VULKAN_LOAD);
 
     // will throw an exception and everything for us
@@ -1291,7 +1291,7 @@ void Engine::Init() {
     if (physicalDeviceCount == 0)
         throw std::runtime_error(engineError::NO_VULKAN_DEVICES);
     
-    if (SDL_Vulkan_CreateSurface(m_EngineWindow, m_EngineVulkanInstance, NULL, &m_EngineSurface) == SDL_FALSE)
+    if (!SDL_Vulkan_CreateSurface(m_EngineWindow, m_EngineVulkanInstance, NULL, &m_EngineSurface))
         throw std::runtime_error(fmt::format(engineError::SURFACE_CREATION_FAILURE, SDL_GetError()));
 
     // now we can get a list of physical devices
