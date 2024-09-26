@@ -130,6 +130,10 @@ Engine::~Engine() {
         this->RemoveUIWaypoint(renderUIWaypoint.waypoint);
     }
 
+    for (RenderUIArrows &renderUIArrows : m_RenderUIArrows) {
+        this->RemoveUIArrows(renderUIArrows.arrows);
+    }
+
     for (PipelineAndLayout pipelineAndLayout : m_PipelineAndLayouts) {
         vkDestroyPipeline(m_EngineDevice, pipelineAndLayout.pipeline, NULL);
         vkDestroyPipelineLayout(m_EngineDevice, pipelineAndLayout.layout, NULL);
@@ -183,6 +187,9 @@ Engine::~Engine() {
 
     if (m_UIWaypointDescriptorSetLayout)
         vkDestroyDescriptorSetLayout(m_EngineDevice, m_UIWaypointDescriptorSetLayout, NULL);
+
+    if (m_UIArrowsDescriptorSetLayout)
+        vkDestroyDescriptorSetLayout(m_EngineDevice, m_UIArrowsDescriptorSetLayout, NULL);
 
     if (m_UILabelDescriptorSetLayout)
         vkDestroyDescriptorSetLayout(m_EngineDevice, m_UILabelDescriptorSetLayout, NULL);
@@ -485,48 +492,43 @@ void Engine::LoadModel(Model *model) {
     return;
 }
 
-void Engine::UnloadModel(Model *model) {
-    std::vector<size_t> removedRenderModels;
+void Engine::UnloadRenderModel(RenderModel &renderModel) {
+    vkDeviceWaitIdle(m_EngineDevice);
 
+    if (renderModel.diffTextureImageView)
+        vkDestroyImageView(m_EngineDevice, renderModel.diffTextureImageView, NULL);
+
+    if (renderModel.diffTexture.imageAndMemory.image) {
+        vkDestroyImage(m_EngineDevice, renderModel.diffTexture.imageAndMemory.image, NULL);
+        vkFreeMemory(m_EngineDevice, renderModel.diffTexture.imageAndMemory.memory, NULL);
+    }
+
+    if (renderModel.diffTextureSampler)
+        vkDestroySampler(m_EngineDevice, renderModel.diffTextureSampler, NULL);
+    
+    vkDestroyBuffer(m_EngineDevice, renderModel.indexBuffer.buffer, NULL);
+    vkFreeMemory(m_EngineDevice, renderModel.indexBuffer.memory, NULL);
+
+    vkDestroyBuffer(m_EngineDevice, renderModel.vertexBuffer.buffer, NULL);
+    vkFreeMemory(m_EngineDevice, renderModel.vertexBuffer.memory, NULL);
+
+    vkDestroyBuffer(m_EngineDevice, renderModel.matricesUBOBuffer.buffer, NULL);
+    vkFreeMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, NULL);
+}
+
+void Engine::UnloadModel(Model *model) {
     for (size_t i = 0; i < m_RenderModels.size(); i++) {
         if (m_RenderModels[i].model != model)
             continue;
 
         RenderModel renderModel = m_RenderModels[i];
 
-        // m_RenderModels.erase(m_RenderModels.begin() + i);
-        removedRenderModels.push_back(i);
+        m_RenderModels.erase(m_RenderModels.begin() + (i--));
 
-        vkDeviceWaitIdle(m_EngineDevice);
-
-        if (renderModel.diffTextureImageView)
-            vkDestroyImageView(m_EngineDevice, renderModel.diffTextureImageView, NULL);
-
-        if (renderModel.diffTexture.imageAndMemory.image) {
-            vkDestroyImage(m_EngineDevice, renderModel.diffTexture.imageAndMemory.image, NULL);
-            vkFreeMemory(m_EngineDevice, renderModel.diffTexture.imageAndMemory.memory, NULL);
-        }
-
-        if (renderModel.diffTextureSampler)
-            vkDestroySampler(m_EngineDevice, renderModel.diffTextureSampler, NULL);
-        
-        vkDestroyBuffer(m_EngineDevice, renderModel.indexBuffer.buffer, NULL);
-        vkFreeMemory(m_EngineDevice, renderModel.indexBuffer.memory, NULL);
-
-        vkDestroyBuffer(m_EngineDevice, renderModel.vertexBuffer.buffer, NULL);
-        vkFreeMemory(m_EngineDevice, renderModel.vertexBuffer.memory, NULL);
-
-        vkDestroyBuffer(m_EngineDevice, renderModel.matricesUBOBuffer.buffer, NULL);
-        vkFreeMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, NULL);
-
+        UnloadRenderModel(renderModel);
 
         // Since now, the Model object is now owned by the caller.
         // delete model; // delete the pointer to the Model object
-    }
-
-    auto renderModelsBegin = m_RenderModels.begin();
-    for (size_t i : removedRenderModels) {
-        m_RenderModels.erase(renderModelsBegin + i);
     }
 }
 
@@ -612,9 +614,6 @@ void Engine::AddUIArrows(UI::Arrows *arrows) {
     renderUIArrows.arrowRenderModels[0] = LoadMesh(arrows->model->meshes[0], arrows->model, false);
     renderUIArrows.arrowRenderModels[1] = LoadMesh(arrows->model->meshes[1], arrows->model, false);
     renderUIArrows.arrowRenderModels[2] = LoadMesh(arrows->model->meshes[2], arrows->model, false);
-    renderUIArrows.arrowRenderModels[3] = LoadMesh(arrows->model->meshes[3], arrows->model, false);
-    renderUIArrows.arrowRenderModels[4] = LoadMesh(arrows->model->meshes[4], arrows->model, false);
-    renderUIArrows.arrowRenderModels[5] = LoadMesh(arrows->model->meshes[5], arrows->model, false);
 
     for (auto &arrowBuffer : renderUIArrows.arrowBuffers) {
         // matrices UBO
@@ -646,7 +645,7 @@ void Engine::RemoveUIArrows(UI::Arrows *arrows) {
 
         RenderUIArrows renderUIArrows = m_RenderUIArrows[i];
 
-        m_RenderUIArrows.erase(m_RenderUIArrows.begin() + i);
+        m_RenderUIArrows.erase(m_RenderUIArrows.begin() + (i--));
 
         // Before we start, wait for the device to be idle
         // This is already called in ~Engine, but sometimes the user calls RemoveWaypoint manually.
@@ -654,11 +653,17 @@ void Engine::RemoveUIArrows(UI::Arrows *arrows) {
 
         /* TODO: Implement */
 
-        // vkDestroyBuffer(m_EngineDevice, renderUIArrows.matricesUBOBuffer.buffer, NULL);
-        // vkFreeMemory(m_EngineDevice, renderUIArrows.matricesUBOBuffer.memory, NULL);
+        for (auto &arrowBuffer : renderUIArrows.arrowBuffers) {
+            vkDestroyBuffer(m_EngineDevice, arrowBuffer.second.first.buffer, NULL);
+            vkFreeMemory(m_EngineDevice, arrowBuffer.second.first.memory, NULL);
 
-        // vkDestroyBuffer(m_EngineDevice, renderUIArrows.waypointUBOBuffer.buffer, NULL);
-        // vkFreeMemory(m_EngineDevice, renderUIArrows.waypointUBOBuffer.memory, NULL);
+            vkDestroyBuffer(m_EngineDevice, arrowBuffer.second.second.buffer, NULL);
+            vkFreeMemory(m_EngineDevice, arrowBuffer.second.second.memory, NULL);
+        }
+
+        for (RenderModel &renderModel : renderUIArrows.arrowRenderModels) {
+            UnloadRenderModel(renderModel);
+        }
     }
 }
 
@@ -1999,11 +2004,11 @@ void Engine::Start() {
                 int i = 0;
 
                 for (RenderModel &arrowRenderModel : renderUIArrows.arrowRenderModels) {
-                    MatricesUBO &matricesUBO = renderUIArrows.arrowBuffers[i/2].first.first;
-                    UIArrowsUBO &arrowsUBO = renderUIArrows.arrowBuffers[i/2].first.second;
+                    MatricesUBO &matricesUBO = renderUIArrows.arrowBuffers[i].first.first;
+                    UIArrowsUBO &arrowsUBO = renderUIArrows.arrowBuffers[i].first.second;
 
-                    BufferAndMemory &matricesUBOBuffer = renderUIArrows.arrowBuffers[i/2].second.first;
-                    BufferAndMemory &arrowsUBOBuffer = renderUIArrows.arrowBuffers[i/2].second.second;
+                    BufferAndMemory &matricesUBOBuffer = renderUIArrows.arrowBuffers[i].second.first;
+                    BufferAndMemory &arrowsUBOBuffer = renderUIArrows.arrowBuffers[i].second.second;
 
                     matricesUBO.modelMatrix = arrowRenderModel.model->GetModelMatrix();
                     matricesUBO.viewMatrix = viewMatrix;

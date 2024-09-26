@@ -132,13 +132,16 @@ public:
 
     Model() = default;
 
-    Model(const string_view path, glm::vec3 position = glm::vec3(0, 0, 0), glm::vec3 rotation = glm::vec3(0, 0, 0));
+    Model(const string_view path, glm::vec3 position = glm::vec3(0, 0, 0), glm::vec3 rotation = glm::vec3(0, 0, 0), glm::vec3 scale = glm::vec3(1, 1, 1));
 
     constexpr void SetPosition(glm::vec3 pos) { m_Position = pos; m_NeedsUpdate = true; };
     constexpr void SetRotation(glm::vec3 rot) { m_Rotation = rot; m_NeedsUpdate = true; };
+    constexpr void SetScale(glm::vec3 scale)  { boundingBox[0] *= (1.0f / m_Scale) * scale; boundingBox[1] *= (1.0f / m_Scale) * scale; m_Scale = scale; m_NeedsUpdate = true; };
 
     constexpr glm::vec3 GetPosition() { return m_Position; };
     constexpr glm::vec3 GetRotation() { return m_Rotation; };
+    constexpr glm::vec3 GetScale()    { return m_Scale; };
+
     glm::mat4 GetModelMatrix();
 private:
     // model data
@@ -147,6 +150,7 @@ private:
 
     glm::vec3 m_Position;
     glm::vec3 m_Rotation;
+    glm::vec3 m_Scale;
 
     glm::mat4 m_ModelMatrix;
     bool m_NeedsUpdate = false;   // flag, set to true when Position and Rotation are updated, set to false when GetModelMatrix is called.

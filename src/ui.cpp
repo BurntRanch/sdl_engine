@@ -177,6 +177,7 @@ void Label::DestroyBuffers() {
 
 Arrows::Arrows(glm::vec3 position) : m_Position(position) {
     model = new Model("models/arrows.obj");
+    model->SetScale(glm::vec3(0.5f, 0.5f, 0.5f));
 }
 
 inline glm::mat4 Arrows::GetModelMatrix() {

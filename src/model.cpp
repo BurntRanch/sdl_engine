@@ -6,12 +6,13 @@
 #include <stdexcept>
 
 
-Model::Model(const string_view path, glm::vec3 position, glm::vec3 rotation)
+Model::Model(const string_view path, glm::vec3 position, glm::vec3 rotation, glm::vec3 scale)
 {
     loadModel(path);
     
     SetPosition(position);
     SetRotation(rotation);
+    SetScale(scale);
 }
 
 void Model::loadModel(string_view path)
@@ -169,6 +170,7 @@ glm::mat4 Model::GetModelMatrix() {
 
     // Update the model matrix with the position/rotation.
     m_ModelMatrix = glm::translate(glm::mat4(1.0f), m_Position);
+    m_ModelMatrix *= glm::scale(glm::mat4(1.0f), m_Scale);
     m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(m_Rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
     m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(m_Rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
     m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(m_Rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));

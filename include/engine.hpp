@@ -142,8 +142,7 @@ struct RenderUIArrows {
     // VkImageView diffTextureImageView;
     // VkSampler diffTextureSampler;
 
-    /* 3*2, 3 arrows, 2 objects per arrow. */
-    std::array<RenderModel, 3*2> arrowRenderModels;
+    std::array<RenderModel, 3> arrowRenderModels;
 
     std::array<std::pair<std::pair<MatricesUBO, UIArrowsUBO>, std::pair<BufferAndMemory, BufferAndMemory>>, 3> arrowBuffers;
 };
@@ -218,6 +217,8 @@ private:
     VkRenderPass CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, bool shouldContainDepthImage = true);
     VkFramebuffer CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkExtent2D resolution, VkImageView depthImageView = nullptr);
     bool QuitEventCheck(SDL_Event &event);
+
+    void UnloadRenderModel(RenderModel &renderModel);
 
     SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface);
     VkShaderModule CreateShaderModule(VkDevice device, const std::vector<char> &code);

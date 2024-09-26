@@ -65,6 +65,7 @@ void exportScene(const std::vector<Model *> &models, const std::string &path) {
 
         glm::vec3 position = model->GetPosition();
         glm::vec3 rotation = model->GetRotation();
+        glm::vec3 scale = model->GetScale();
 
         std::string positionStr = fmt::format("{} {} {}", position.x, position.y, position.z);
         xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(positionStr.c_str()));
@@ -73,6 +74,10 @@ void exportScene(const std::vector<Model *> &models, const std::string &path) {
         std::string rotationStr = fmt::format("{} {} {}", rotation.x, rotation.y, rotation.z);
         xml_node<char> *rotationNode = sceneXML.allocate_node(node_type::node_element, "Rotation", sceneXML.allocate_string(rotationStr.c_str()));
         modelNode->append_node(rotationNode);
+
+        std::string scaleStr = fmt::format("{} {} {}", scale.x, scale.y, scale.z);
+        xml_node<char> *scaleNode = sceneXML.allocate_node(node_type::node_element, "Scale", sceneXML.allocate_string(scaleStr.c_str()));
+        modelNode->append_node(scaleNode);
 
         for (Mesh &mesh : model->meshes) {
             xml_node<char> *meshNode = sceneXML.allocate_node(node_type::node_element, "Mesh");
@@ -167,6 +172,12 @@ bool importScene(const std::string_view fileName) {
         std::string_view rotationStr(rotationNode->value());
         std::vector<std::string> rotationData = split(rotationStr, ' ');
         model->SetRotation(glm::vec3(std::stof(rotationData[0]), std::stof(rotationData[1]), std::stof(rotationData[2])));
+
+        xml_node<char> *scaleNode = modelNode->first_node("Scale");
+        NULLASSERT(scaleNode);
+        std::string_view scaleStr(scaleNode->value());
+        std::vector<std::string> scaleData = split(scaleStr, ' ');
+        model->SetScale(glm::vec3(std::stof(scaleData[0]), std::stof(scaleData[1]), std::stof(scaleData[2])));
 
         for (xml_node<char> *meshNode = modelNode->first_node("Mesh"); meshNode; meshNode = meshNode->next_sibling("Mesh")) {
             Mesh mesh;
@@ -271,6 +282,8 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
         cam.ProcessKeyboard(RIGHT, ENGINE_FIXED_UPDATE_DELTATIME);
 
     if ((mouseState ^ lastMouseState) & SDL_BUTTON_LMASK) {
+        /* TODO: Add functionality for arrows*/
+
         /* Sort by which model is closest to the camera, to enforce the fact that.. */
         /* When the pointer is clicking on an object that has another one behind, The player intends.. */
         /* to click the one closest to them, Because they can't see the one behind. */
