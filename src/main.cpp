@@ -4,6 +4,10 @@
 #include <SDL3/SDL_scancode.h>
 #include <chrono>
 #include <engine.hpp>
+#include <glm/ext/matrix_projection.hpp>
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/geometric.hpp>
+#include <glm/matrix.hpp>
 #include <memory>
 #include <new>
 #include <settings.hpp>
@@ -28,9 +32,18 @@ Camera cam(glm::vec3(1.0f, 1.0f, 1.0f));
 Settings settings("settings.toml");
 std::unique_ptr<Engine> engine;
 
+enum DraggingMode {
+    NOT_DRAGGING,
+    DRAGGING_X_AXIS,
+    DRAGGING_Y_AXIS,
+    DRAGGING_Z_AXIS,
+};
+
 namespace State {
     Model **CurrentlySelectedObject = nullptr;
     UI::Arrows *CurrentlySelectedObjectArrows = nullptr;
+    DraggingMode ObjectDraggingMode = NOT_DRAGGING;
+    glm::vec3 ObjectPositionPreDragging = glm::vec3(0);
 
     std::vector<Model *> Models;
 
@@ -226,12 +239,19 @@ bool importScene(const std::string_view fileName) {
                 std::vector<std::string> vertexTexCoordData = split(vertexTexCoordStr, ' ');
                 vertex.TexCoord = glm::vec2(std::stof(vertexTexCoordData[0]), std::stof(vertexTexCoordData[1]));
 
-                model->boundingBox[0].x = std::max(model->boundingBox[0].x, vertex.Position.x);
-                model->boundingBox[0].y = std::max(model->boundingBox[0].y, vertex.Position.y);
-                model->boundingBox[0].z = std::max(model->boundingBox[0].z, vertex.Position.z);
-                model->boundingBox[1].x = std::min(model->boundingBox[1].x, vertex.Position.x);
-                model->boundingBox[1].y = std::min(model->boundingBox[1].y, vertex.Position.y);
-                model->boundingBox[1].z = std::min(model->boundingBox[1].z, vertex.Position.z);
+                glm::vec3 boundingBoxMin;
+                glm::vec3 boundingBoxMax;
+
+                std::array<glm::vec3, 2> modelBoundingBox = model->GetRawBoundingBox();
+
+                boundingBoxMin.x = std::max(modelBoundingBox[0].x, vertex.Position.x);
+                boundingBoxMin.y = std::max(modelBoundingBox[0].y, vertex.Position.y);
+                boundingBoxMin.z = std::max(modelBoundingBox[0].z, vertex.Position.z);
+                boundingBoxMax.x = std::min(modelBoundingBox[1].x, vertex.Position.x);
+                boundingBoxMax.y = std::min(modelBoundingBox[1].y, vertex.Position.y);
+                boundingBoxMax.z = std::min(modelBoundingBox[1].z, vertex.Position.z);
+
+                model->SetBoundingBox({boundingBoxMin, boundingBoxMax});
 
                 mesh.vertices.push_back(vertex);
             }
@@ -246,9 +266,56 @@ bool importScene(const std::string_view fileName) {
     return true;
 }
 
+void checkAndSelectModel() {
+    /* Sort by which model is closest to the camera, to enforce the idea that.. */
+    /* When the pointer is clicking on an object that has another one behind, The player intends.. */
+    /* to click the one closest to them, Because they can't see the one behind. */
+    std::sort(State::Models.begin(), State::Models.end(), [] (Model *modelOne, Model *modelTwo) { return (glm::distance(cam.Position, modelOne->GetPosition()) > glm::distance(cam.Position, modelTwo->GetPosition())); });
+    
+    // Deselect last selected object.
+
+    State::CurrentlySelectedObject = nullptr;
+
+    if (State::CurrentlySelectedObjectArrows) {
+        engine->RemoveUIArrows(State::CurrentlySelectedObjectArrows);
+        delete State::CurrentlySelectedObjectArrows;
+
+        State::CurrentlySelectedObjectArrows = nullptr;
+    }
+
+    for (Model *&model : State::Models) {
+        if (intersects(cam.Position, cam.Front, model->GetBoundingBox())) {
+            fmt::println("Left mouse button pressed on a model!");
+            State::CurrentlySelectedObject = &model;
+
+            State::CurrentlySelectedObjectArrows = new UI::Arrows(*model);
+
+            engine->AddUIArrows(State::CurrentlySelectedObjectArrows);
+
+            break;
+        }
+    }
+}
+
+void handleCamera(float x, float y) {
+    if (settings.InvertHorizontal)
+        x *= -1;
+    if (settings.InvertVertical)
+        y *= -1;
+
+    cam.ProcessMouseMovement(x, y);
+}
+
 void FixedUpdate(const std::array<bool, 322> &keyMap) {
     float x, y;
-    Uint32 mouseState = SDL_GetRelativeMouseState(&x, &y);
+    Uint32 mouseState;
+
+    if (State::IsMouseCaptured) {
+        mouseState = SDL_GetRelativeMouseState(&x, &y);
+        State::ObjectDraggingMode = NOT_DRAGGING;
+    } else {
+        mouseState = SDL_GetMouseState(&x, &y);
+    }
 
     if (!(lastMouseState & SDL_BUTTON_MMASK) && (mouseState & SDL_BUTTON_MMASK) && !State::IsMouseSpamming) {
         engine->SetMouseCaptureState(!State::IsMouseCaptured);
@@ -261,15 +328,41 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
         State::IsMouseSpamming = false;
     }
 
-    mouseState &= State::IsMouseCaptured;   // Ignore all input if the mouse is not captured.
-
     if (State::IsMouseCaptured) {
-        if (settings.InvertHorizontal)
-            x *= -1;
-        if (settings.InvertVertical)
-            y *= -1;
+        handleCamera(x, y);
+    } else {
+        if (State::CurrentlySelectedObject && State::ObjectDraggingMode != NOT_DRAGGING) {
+            Model *selectedObject = *State::CurrentlySelectedObject;
+            glm::vec3 newPos;
 
-        cam.ProcessMouseMovement(x, y);
+            switch (State::ObjectDraggingMode) {
+            case DRAGGING_X_AXIS:
+                newPos = glm::vec3((2.0f * x / settings.RenderWidth) - 1, 0.0f, 0.0f) * cam.Right;
+                newPos.x += State::ObjectPositionPreDragging.x;
+                newPos.y = selectedObject->GetPosition().y;
+                newPos.z = selectedObject->GetPosition().z;
+
+                break;
+            case DRAGGING_Y_AXIS:
+                newPos = glm::vec3(0.0f, (2.0f * x / settings.RenderWidth) - 1, 0.0f) * cam.Right;
+                newPos.x = selectedObject->GetPosition().x;
+                newPos.y += State::ObjectPositionPreDragging.y;
+                newPos.z = selectedObject->GetPosition().z;
+
+                break;
+            case DRAGGING_Z_AXIS:
+                newPos = glm::vec3(0.0f, 0.0f, (2.0f * y / settings.RenderHeight) - 1) * -1.0f;
+                newPos.x = selectedObject->GetPosition().x;
+                newPos.y = selectedObject->GetPosition().y;
+                newPos.z += State::ObjectPositionPreDragging.z;
+
+                break;
+            };
+
+            selectedObject->SetPosition(newPos);
+        }
+        
+        fmt::println("{} {}", x, y);
     }
 
     if (keyMap[SDL_SCANCODE_W])
@@ -281,36 +374,49 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
     if (keyMap[SDL_SCANCODE_D])
         cam.ProcessKeyboard(RIGHT, ENGINE_FIXED_UPDATE_DELTATIME);
 
-    if ((mouseState ^ lastMouseState) & SDL_BUTTON_LMASK) {
-        /* TODO: Add functionality for arrows*/
+    if ((mouseState & SDL_BUTTON_LMASK) && !(lastMouseState & SDL_BUTTON_LMASK)) {
+        fmt::println("mouseState: {}, lastMouseState: {}, IsMouseSpamming: {}", mouseState & SDL_BUTTON_LMASK, lastMouseState & SDL_BUTTON_LMASK, State::IsMouseSpamming);
+        /* TODO: Add functionality for arrows */
 
-        /* Sort by which model is closest to the camera, to enforce the fact that.. */
-        /* When the pointer is clicking on an object that has another one behind, The player intends.. */
-        /* to click the one closest to them, Because they can't see the one behind. */
-        std::sort(State::Models.begin(), State::Models.end(), [] (Model *modelOne, Model *modelTwo) { return (glm::distance(cam.Position, modelOne->GetPosition()) > glm::distance(cam.Position, modelTwo->GetPosition())); });
+        float ndc_x = (2.0f * x) / settings.RenderWidth - 1.0f;
+        float ndc_y = 1.0f - (2.0f * y) / settings.RenderHeight;
+        float z = 1.0f;
+        glm::vec3 ray_nds = glm::vec3(ndc_x, ndc_y, z);
+        glm::vec4 ray_clip = glm::vec4(ray_nds.x, ray_nds.y, -1.0f, 1.0f);
+
+        glm::mat4 proj = glm::perspective(glm::radians(cam.FOV), settings.RenderWidth / (float) settings.RenderHeight, settings.CameraNear, CAMERA_FAR);
+
+        glm::vec4 ray_eye = glm::inverse(proj) * ray_clip;
+        ray_eye = glm::vec4(ray_eye.x, ray_eye.y, -1.0f, 0.0f);
+
+        glm::vec3 ray_world = (glm::inverse(cam.GetViewMatrix()) * ray_eye);
+        // ray_world = glm::normalize(ray_world);
+
+        // glm::vec3 frontVector = (State::IsMouseCaptured ? cam.Front : glm::vec3((2.0f - x / settings.DisplayWidth) - 1, -cam.Front.y, (2.0f - y / settings.DisplayHeight) - 1) * -1.0f);
+        glm::vec3 frontVector = ray_world;
+
+        //fmt::println("{} {} {}", frontVector.x, frontVector.y, frontVector.z);
+        //fmt::println("{} {} {}", cam.Front.x, cam.Front.y, cam.Front.z);
         
-        // Deselect last selected object.
+        checkAndSelectModel();
 
-        State::CurrentlySelectedObject = nullptr;
+        if (State::CurrentlySelectedObjectArrows && intersects(cam.Position, frontVector, State::CurrentlySelectedObjectArrows->arrowsModel->GetBoundingBox())) {
+            fmt::println("Lets goo!");
+            State::ObjectPositionPreDragging = (*(State::CurrentlySelectedObject))->GetPosition();
 
-        if (State::CurrentlySelectedObjectArrows) {
-            engine->RemoveUIArrows(State::CurrentlySelectedObjectArrows);
-            delete State::CurrentlySelectedObjectArrows;
-
-            State::CurrentlySelectedObjectArrows = nullptr;
-        }
-
-        for (Model *&model : State::Models) {
-            if (intersects(cam.Position, cam.Front, model->boundingBox)) {
-                fmt::println("Left mouse button pressed on a model!");
-                State::CurrentlySelectedObject = &model;
-
-                State::CurrentlySelectedObjectArrows = new UI::Arrows(model->GetPosition());
-                engine->AddUIArrows(State::CurrentlySelectedObjectArrows);
-
-                break;
+            if (intersects(cam.Position, frontVector, State::CurrentlySelectedObjectArrows->arrowsModel->meshes[0].GetBoundingBox())) {
+                State::ObjectDraggingMode = DRAGGING_Z_AXIS;
+                fmt::println("Green: {}", State::CurrentlySelectedObjectArrows->arrowsModel->meshes[0].diffuse.g);
+            } else if (intersects(cam.Position, frontVector, State::CurrentlySelectedObjectArrows->arrowsModel->meshes[1].GetBoundingBox())) {
+                State::ObjectDraggingMode = DRAGGING_Y_AXIS;
+                fmt::println("Blue: {}", State::CurrentlySelectedObjectArrows->arrowsModel->meshes[1].diffuse.b);
+            } else if (intersects(cam.Position, frontVector, State::CurrentlySelectedObjectArrows->arrowsModel->meshes[2].GetBoundingBox())) {
+                State::ObjectDraggingMode = DRAGGING_X_AXIS;
+                fmt::println("Red: {}", State::CurrentlySelectedObjectArrows->arrowsModel->meshes[2].diffuse.r);
             }
         }
+    } else if (!State::IsMouseSpamming && !(mouseState & SDL_BUTTON_LMASK)) {
+        State::ObjectDraggingMode = NOT_DRAGGING;
     }
 
     if (keyMap[SDL_SCANCODE_DELETE] && State::CurrentlySelectedObject != nullptr) {
@@ -392,8 +498,11 @@ int main() {
         engine->RegisterUpdateFunction(Update);
         engine->RegisterFixedUpdateFunction(FixedUpdate);
 
-        UI::Panel *panel = new UI::Panel(sharedContext, glm::vec3(0.0f, 0.5f, 1.0f), glm::vec2(0.0f, 0.0f), glm::vec2(0.15f, 0.15f), 0.0f);
+        UI::Panel *panel = new UI::Panel(sharedContext, glm::vec3(0.0f, 0.5f, 1.0f), glm::vec2(0.0f, 0.0f), glm::vec2(0.25f, 0.1f), 0.1f);
         engine->AddUIPanel(panel);
+
+        UI::Label *label = new UI::Label(sharedContext, "Hello, world!", "NotoSans-Black.ttf", glm::vec2(0.0f, 0.0f), 0.0f);
+        engine->AddUILabel(label);
 
         // UI::Arrows *arrows = new UI::Arrows(glm::vec3(0.0f, 0.0f, 0.0f));
         // engine->AddUIArrows(arrows);

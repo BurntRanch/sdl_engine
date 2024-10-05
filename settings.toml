@@ -4,8 +4,8 @@ RenderWidth = 3840
 RenderHeight = 2160
 DisplayWidth = 800
 DisplayHeight = 600
-Fullscreen = true
-IgnoreRenderResolution = false     # If IgnoreRenderResolution is true, it will ignore your RenderWidth and RenderHeight preferences, if false, it will enforce your RenderWidth and RenderHeight preferences (which may cause stretching).
+Fullscreen = false
+IgnoreRenderResolution = true     # If IgnoreRenderResolution is true, it will ignore your RenderWidth and RenderHeight preferences, if false, it will enforce your RenderWidth and RenderHeight preferences (which may cause stretching).
 FieldOfView = 90
 CameraNear = 0.0001
 

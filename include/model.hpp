@@ -2,6 +2,7 @@
 #define MODEL_HPP
 #include <SDL3/SDL_stdinc.h>
 #include <assimp/material.h>
+#include <cmath>
 #include <complex>
 #include <filesystem>
 #include <fmt/core.h>
@@ -93,60 +94,83 @@ inline struct array<VkVertexInputAttributeDescription, 2> getSimpleVertexAttribu
     return attributeDescriptions;
 }
 
-class Mesh {
-public:
-    // mesh data
-    vector<Vertex>       vertices;
-    vector<Uint32> indices;
-    path                 diffuseMapPath;
-    // glm::vec3            ambient;
-    // glm::vec3            specular;
-    glm::vec3            diffuse;
-    // float shininess;
-    // float roughness;
-    // float metallic;
-
-    Mesh() = default;
-
-    Mesh(vector<Vertex> vertices, vector<Uint32> indices, path diffuseMapPath, /*float shininess = 0.0, float roughness = 0.0, float metallic = 0.0, glm::vec3 ambient = glm::vec3(0.2f, 0.2f, 0.2f), glm::vec3 specular = glm::vec3(1.0f, 1.0f, 1.0f), */glm::vec3 diffuse = glm::vec3(1.0f, 1.0f, 1.0f)) {
-        this->vertices = vertices;
-        this->indices = indices;
-        this->diffuseMapPath = diffuseMapPath;
-        // this->ambient = ambient;
-        // this->specular = specular;
-        this->diffuse = diffuse;
-        // this->shininess = shininess;
-        // this->roughness = roughness;
-        // this->metallic = metallic;
-    };
-};
+class Mesh;
 
 class Model 
 {
 public:
     vector<Mesh> meshes;
 
-    // [0] = higher
-    // [1] = lower
-    std::array<glm::vec3, 2> boundingBox;
+    std::vector<Model *> children;
+
+    ~Model() {
+        if (m_Parent) {
+            auto iter = std::find(m_Parent->children.begin(), m_Parent->children.end(), this);
+
+            if (iter < m_Parent->children.end()) {
+                m_Parent->children.erase(iter);
+            }
+        }
+    }
 
     Model() = default;
 
     Model(const string_view path, glm::vec3 position = glm::vec3(0, 0, 0), glm::vec3 rotation = glm::vec3(0, 0, 0), glm::vec3 scale = glm::vec3(1, 1, 1));
 
-    constexpr void SetPosition(glm::vec3 pos) { m_Position = pos; m_NeedsUpdate = true; };
-    constexpr void SetRotation(glm::vec3 rot) { m_Rotation = rot; m_NeedsUpdate = true; };
-    constexpr void SetScale(glm::vec3 scale)  { boundingBox[0] *= (1.0f / m_Scale) * scale; boundingBox[1] *= (1.0f / m_Scale) * scale; m_Scale = scale; m_NeedsUpdate = true; };
+    void SetPosition(glm::vec3 pos) { 
+        m_Position = pos + (m_Parent != nullptr ? m_Parent->GetPosition() : glm::vec3(0));
+        m_NeedsUpdate = true; 
+
+        for (Model *model : children) {
+            model->SetPosition(pos);
+        }
+    };
+
+    void SetRotation(glm::vec3 rot) { 
+        m_Rotation = rot + (m_Parent != nullptr ? m_Parent->GetRotation() : glm::vec3(0));
+        m_NeedsUpdate = true; 
+
+
+        for (Model *model : children) {
+            model->SetRotation(rot);
+        }
+    };
+
+    void SetScale(glm::vec3 scale)  { 
+        m_Scale = scale * (m_Parent != nullptr ? m_Parent->GetScale() : glm::vec3(1));
+        m_NeedsUpdate = true;
+    
+        for (Model *model : children) {
+            model->SetScale(scale);
+        }    
+    };
+
+    void SetParent(Model *parent) { m_Parent = parent; parent->children.push_back(this); SetPosition(GetPosition()); SetRotation(GetRotation()); SetScale(GetScale()); };
 
     constexpr glm::vec3 GetPosition() { return m_Position; };
     constexpr glm::vec3 GetRotation() { return m_Rotation; };
     constexpr glm::vec3 GetScale()    { return m_Scale; };
+    constexpr Model *GetParent()      { return m_Parent; };
+
+    /* Return the models Bounding Box, also transforms the bounding box with the Model Matrix. */
+    std::array<glm::vec3, 2> GetBoundingBox() { return {glm::vec4(m_BoundingBox[0], 0.0f) * GetModelMatrix(), glm::vec4(m_BoundingBox[1], 0.0f) * GetModelMatrix()}; };
+
+    /* Return the models Bounding Box, with no transformations, This should not be used for ray checks and such. */
+    constexpr std::array<glm::vec3, 2> GetRawBoundingBox() { return m_BoundingBox; };
+
+    constexpr void SetBoundingBox(std::array<glm::vec3, 2> boundingBox) { m_BoundingBox = boundingBox; };
 
     glm::mat4 GetModelMatrix();
 private:
+    // [0] = higher
+    // [1] = lower
+    std::array<glm::vec3, 2> m_BoundingBox;
+
     // model data
     //vector<Texture> textures_loaded;
     string m_Directory;
+
+    Model *m_Parent = nullptr;
 
     glm::vec3 m_Position;
     glm::vec3 m_Rotation;
@@ -162,6 +186,62 @@ private:
     Mesh processMesh(aiMesh *mesh, const aiScene *scene);
 
     //Texture loadDefaultTexture(string typeName);
+};
+
+
+class Mesh {
+public:
+    // mesh data
+    vector<Vertex>       vertices;
+    vector<Uint32>       indices;
+    path                 diffuseMapPath;
+    // glm::vec3            ambient;
+    // glm::vec3            specular;
+    glm::vec3            diffuse;
+    // float shininess;
+    // float roughness;
+    // float metallic;
+
+    Mesh() = default;
+
+    Mesh(Model &parent, vector<Vertex> vertices, vector<Uint32> indices, path diffuseMapPath, /*float shininess = 0.0, float roughness = 0.0, float metallic = 0.0, glm::vec3 ambient = glm::vec3(0.2f, 0.2f, 0.2f), glm::vec3 specular = glm::vec3(1.0f, 1.0f, 1.0f), */glm::vec3 diffuse = glm::vec3(1.0f, 1.0f, 1.0f)) : m_Parent(&parent) {
+        this->vertices = vertices;
+        this->indices = indices;
+        this->diffuseMapPath = diffuseMapPath;
+        // this->ambient = ambient;
+        // this->specular = specular;
+        this->diffuse = diffuse;
+        // this->shininess = shininess;
+        // this->roughness = roughness;
+        // this->metallic = metallic;
+
+        for (Vertex &vertex : vertices) {
+            fmt::println("{} {} {}", vertex.Position.x, vertex.Position.y, vertex.Position.z);
+
+            m_BoundingBox[0].x = glm::max(vertex.Position.x, m_BoundingBox[0].x);
+            m_BoundingBox[1].x = glm::min(vertex.Position.x, m_BoundingBox[1].x);
+
+            m_BoundingBox[0].y = glm::max(vertex.Position.y, m_BoundingBox[0].y);
+            m_BoundingBox[1].y = glm::min(vertex.Position.y, m_BoundingBox[1].y);
+
+            m_BoundingBox[0].z = glm::max(vertex.Position.z, m_BoundingBox[0].z);
+            m_BoundingBox[1].z = glm::min(vertex.Position.z, m_BoundingBox[1].z);
+        }
+    };
+
+    std::array<glm::vec3, 2> GetBoundingBox() {
+        if (!m_Parent) {
+            throw std::runtime_error("Tried to get the bounding box of an orphaned Mesh! (a Model parent is required for this)");
+        }
+
+        return {m_BoundingBox[0] + m_Parent->GetPosition() * m_Parent->GetScale(), m_BoundingBox[1] * m_Parent->GetScale() + m_Parent->GetPosition() * m_Parent->GetScale()};
+    }
+private:
+    Model *m_Parent = nullptr;
+
+    // [0] = higher
+    // [1] = lower
+    std::array<glm::vec3, 2> m_BoundingBox = {glm::vec3(-INFINITY), glm::vec3(INFINITY)};
 };
 
 #endif

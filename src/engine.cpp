@@ -611,9 +611,9 @@ void Engine::AddUIArrows(UI::Arrows *arrows) {
 
     renderUIArrows.arrows = arrows;
 
-    renderUIArrows.arrowRenderModels[0] = LoadMesh(arrows->model->meshes[0], arrows->model, false);
-    renderUIArrows.arrowRenderModels[1] = LoadMesh(arrows->model->meshes[1], arrows->model, false);
-    renderUIArrows.arrowRenderModels[2] = LoadMesh(arrows->model->meshes[2], arrows->model, false);
+    renderUIArrows.arrowRenderModels[0] = LoadMesh(arrows->arrowsModel->meshes[0], arrows->arrowsModel, false);
+    renderUIArrows.arrowRenderModels[1] = LoadMesh(arrows->arrowsModel->meshes[1], arrows->arrowsModel, false);
+    renderUIArrows.arrowRenderModels[2] = LoadMesh(arrows->arrowsModel->meshes[2], arrows->arrowsModel, false);
 
     for (auto &arrowBuffer : renderUIArrows.arrowBuffers) {
         // matrices UBO
@@ -650,8 +650,6 @@ void Engine::RemoveUIArrows(UI::Arrows *arrows) {
         // Before we start, wait for the device to be idle
         // This is already called in ~Engine, but sometimes the user calls RemoveWaypoint manually.
         vkDeviceWaitIdle(m_EngineDevice);
-
-        /* TODO: Implement */
 
         for (auto &arrowBuffer : renderUIArrows.arrowBuffers) {
             vkDestroyBuffer(m_EngineDevice, arrowBuffer.second.first.buffer, NULL);

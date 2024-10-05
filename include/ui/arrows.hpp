@@ -9,24 +9,15 @@
 namespace UI {
 class Arrows : public GenericElement {
 public:
-    Model *model;
+    Model *arrowsModel;
+    Model *highlightedModel;
 
     virtual ~Arrows() = default;
 
-    Arrows(glm::vec3 position);
+    Arrows(Model &highlightedModel);
 
-    inline void SetPosition(glm::vec3 position) { m_NeedsUpdate = true; m_Position = position; };
+    inline void SetPosition(glm::vec3 position) { throw std::runtime_error("SetPosition is not to be called on UI::Arrows objects, Modify the model that it highlights directly and the Arrow will follow it!"); };
 
-    inline glm::vec3 GetWorldSpacePosition() { return m_Position; };
-
-    inline glm::vec2 GetPosition() { throw std::runtime_error("Use GetWorldSpacePosition() for UI::Arrows objects!"); };
-
-    glm::mat4 GetModelMatrix();
-private:
-    bool m_NeedsUpdate = true;
-
-    glm::vec3 m_Position;
-
-    glm::mat4 m_ModelMatrix;
+    inline glm::vec2 GetPosition() { throw std::runtime_error("GetPosition is not to be called on UI::Arrows objects, Read the position from the model that it highlights directly."); };
 };
 }

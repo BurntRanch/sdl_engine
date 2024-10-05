@@ -175,19 +175,11 @@ void Label::DestroyBuffers() {
     GlyphBuffers.clear();
 }
 
-Arrows::Arrows(glm::vec3 position) : m_Position(position) {
-    model = new Model("models/arrows.obj");
-    model->SetScale(glm::vec3(0.5f, 0.5f, 0.5f));
-}
+Arrows::Arrows(Model &highlightedModel) {
+    arrowsModel = new Model("models/arrows.obj");
+    arrowsModel->SetParent(&highlightedModel);
 
-inline glm::mat4 Arrows::GetModelMatrix() {
-    if (m_NeedsUpdate) {
-        m_ModelMatrix = glm::translate(m_ModelMatrix, m_Position);
-
-        m_NeedsUpdate = false;
-    }
-
-    return m_ModelMatrix;
+    arrowsModel->SetScale(glm::vec3(0.5f, 0.5f, 0.5f));
 }
 
 inline glm::vec2 GenericElement::GetPosition() {
