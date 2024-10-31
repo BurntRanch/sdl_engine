@@ -7,6 +7,8 @@ layout(binding = 1) uniform sampler2D tex;
 layout(location = 0) out vec4 outColor;
 
 void main() {
+    // https://github.com/GameMakerDiscord/blur-shaders
+
     float sampled = (texture(tex, fragCoord).r
         + texture(tex, fragCoord*0.99+0.5*0.01).r
         + texture(tex, fragCoord*0.98+0.5*0.02).r
