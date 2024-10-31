@@ -452,7 +452,7 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
     }
 
     if ((keyMap[SDL_SCANCODE_LCTRL] || keyMap[SDL_SCANCODE_RCTRL]) && keyMap[SDL_SCANCODE_O]) {
-        std::array<const char *, 2> filterPatterns = {static_cast<const char *>("*.xml"), static_cast<const char *>("*.obj")};
+        std::array<const char *, 3> filterPatterns = {static_cast<const char *>("*.xml"), static_cast<const char *>("*.obj"), static_cast<const char *>("*.fbx")};
         char *path = tinyfd_openFileDialog("Select the scene to import.", NULL, filterPatterns.size(), filterPatterns.data(), NULL, false);
         if (!path)
             return;
