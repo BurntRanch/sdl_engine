@@ -459,16 +459,16 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
 
         std::string_view pathView(path);
 
-        if (endsWith(pathView, ".obj")) {
-            Model *model = new Model(pathView);
-            engine->LoadModel(model);
-            State::Models.push_back(model);
-        } else if (endsWith(pathView, ".xml")) {
+        if (endsWith(pathView, ".xml")) {
             try {
                 importScene(pathView);
             } catch (const std::runtime_error &e) {
                 tinyfd_messageBox("Scene Importer", ("The scene failed to import, Reason: " + std::string(e.what())).c_str(), "ok", "error", 1);
             }
+        } else {
+            Model *model = new Model(pathView);
+            engine->LoadModel(model);
+            State::Models.push_back(model);
         }
     }
     lastMouseState = mouseState;
@@ -498,11 +498,10 @@ int main() {
         engine->RegisterUpdateFunction(Update);
         engine->RegisterFixedUpdateFunction(FixedUpdate);
 
-        UI::Panel *panel = new UI::Panel(sharedContext, glm::vec3(0.0f, 0.5f, 1.0f), glm::vec2(0.0f, 0.0f), glm::vec2(0.25f, 0.1f), 0.1f);
-        engine->AddUIPanel(panel);
-
-        UI::Label *label = new UI::Label(sharedContext, "Hello, world!", "NotoSans-Black.ttf", glm::vec2(0.0f, 0.0f), 0.0f);
-        engine->AddUILabel(label);
+        std::vector<UI::GenericElement *> UIElements = UI::LoadUIFile(sharedContext, "ui.xml");
+        for (UI::GenericElement *element : UIElements) {
+            engine->AddUIGenericElement(element);
+        }
 
         // UI::Arrows *arrows = new UI::Arrows(glm::vec3(0.0f, 0.0f, 0.0f));
         // engine->AddUIArrows(arrows);

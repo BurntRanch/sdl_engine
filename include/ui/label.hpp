@@ -14,7 +14,7 @@ namespace UI {
 class Label : public GenericElement {
 public:
     // An array of textures for each character in use, not all ASCII characters.
-    std::vector<std::pair<char, std::pair<TextureImageAndMemory, BufferAndMemory>>> GlyphBuffers;
+    std::vector<Glyph> Glyphs;
 
     ~Label();
 

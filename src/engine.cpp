@@ -532,6 +532,21 @@ void Engine::UnloadModel(Model *model) {
     }
 }
 
+void Engine::AddUIGenericElement(UI::GenericElement *element) {
+    switch (element->type) {
+        case UI::PANEL:
+            AddUIPanel(reinterpret_cast<UI::Panel *>(element));
+            break;
+        case UI::LABEL:
+            AddUILabel(reinterpret_cast<UI::Label *>(element));
+            break;
+        case UI::UNKNOWN:
+        case UI::ARROWS:
+        case UI::WAYPOINT:
+          break;
+    }
+}
+
 void Engine::AddUIWaypoint(UI::Waypoint *waypoint) {
     EngineSharedContext sharedContext = GetSharedContext();
 
@@ -740,11 +755,13 @@ void Engine::AddUILabel(UI::Label *label) {
 
     renderUILabel.label = label;
 
-    for (auto &glyph : label->GlyphBuffers) {
-        VkImageView textureView = CreateImageView(glyph.second.first, glyph.second.first.format, VK_IMAGE_ASPECT_COLOR_BIT, false);
+    for (auto &glyph : label->Glyphs) {
+        auto glyphBuffer = glyph.glyphBuffer.value();
+
+        VkImageView textureView = CreateImageView(glyphBuffer.first, glyphBuffer.first.format, VK_IMAGE_ASPECT_COLOR_BIT, false);
         VkSampler textureSampler = CreateSampler(1.0f, false);
 
-        renderUILabel.textureShaderData.push_back(std::make_pair(glyph.first, std::make_pair(textureView, textureSampler)));
+        renderUILabel.textureShaderData.push_back(std::make_pair(glyph.character, std::make_pair(textureView, textureSampler)));
     }
 
     renderUILabel.ubo.PositionOffset = label->GetPosition();
@@ -790,6 +807,116 @@ void Engine::RegisterUpdateFunction(const std::function<void()> &func) {
 
 void Engine::RegisterFixedUpdateFunction(const std::function<void(std::array<bool, 322>)> &func) {
     m_FixedUpdateFunctions.push_back(func);
+}
+
+Glyph Engine::GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, char c, float &x, float &y, float depth) {
+    Glyph glyph{};
+    
+    glyph.character = c;
+
+    glyph.fontIdentifier = fmt::format("{} {} {}", ftFace->family_name, ftFace->style_name, ftFace->height);
+
+    if (FT_Load_Char(ftFace, c, FT_LOAD_RENDER)) {
+        throw std::runtime_error(fmt::format("Failed to load the glyph for '{}' with FreeType", c));
+    }
+
+    if (c == ' ') {
+        x += ftFace->glyph->advance.x >> 6;
+
+        return glyph;
+    }
+
+    if (c == '\n') {
+        x = 0;
+        y += PIXEL_HEIGHT;
+
+        return glyph;
+    }
+
+    for (Glyph &cachedGlyph : m_GlyphCache) {
+        if (glyph.character == cachedGlyph.character && 
+            glyph.fontIdentifier == cachedGlyph.fontIdentifier) {
+                fmt::println("Found an identical glyph in the Glyph Cache!");
+                fmt::println("({} from {})", glyph.character, glyph.fontIdentifier);
+
+                glyph = cachedGlyph;
+
+                float xpos = (x + ftFace->glyph->bitmap_left)/static_cast<float>(m_Settings.DisplayWidth);
+                float ypos = (y - ftFace->glyph->bitmap_top)/static_cast<float>(m_Settings.DisplayHeight);
+
+                xpos -= 1.0f;
+                ypos -= 1.0f - (PIXEL_HEIGHT_FLOAT / static_cast<float>(m_Settings.DisplayHeight));
+
+                glyph.offset.x = xpos;
+                glyph.offset.y = ypos;
+
+                x += ftFace->glyph->advance.x >> 6;
+
+                AllocateBuffer(sharedContext, sizeof(glyph.glyphUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyph.glyphUBOBuffer.buffer, glyph.glyphUBOBuffer.memory);
+                vkMapMemory(m_EngineDevice, glyph.glyphUBOBuffer.memory, 0, sizeof(glyph.glyphUBO), 0, &(glyph.glyphUBOBuffer.mappedData));
+
+                return glyph;
+            }
+    }
+
+    VkDeviceSize glyphBufferSize = ftFace->glyph->bitmap.width * ftFace->glyph->bitmap.rows;
+
+    TextureBufferAndMemory glyphBuffer{};
+    AllocateBuffer(sharedContext, glyphBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyphBuffer.bufferAndMemory.buffer, glyphBuffer.bufferAndMemory.memory);
+    glyphBuffer.width = ftFace->glyph->bitmap.width;
+    glyphBuffer.height = ftFace->glyph->bitmap.rows;
+    glyphBuffer.channels = 1;
+
+    vkMapMemory(m_EngineDevice, glyphBuffer.bufferAndMemory.memory, 0, glyphBufferSize, 0, &(glyphBuffer.bufferAndMemory.mappedData));
+    SDL_memcpy(glyphBuffer.bufferAndMemory.mappedData, ftFace->glyph->bitmap.buffer, glyphBufferSize);
+
+    TextureImageAndMemory textureImageAndMemory = CreateImage(sharedContext, ftFace->glyph->bitmap.width, ftFace->glyph->bitmap.rows, VK_FORMAT_R8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    ChangeImageLayout(sharedContext, textureImageAndMemory.imageAndMemory.image, 
+                VK_FORMAT_R8_SRGB, 
+                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+            );
+    CopyBufferToImage(sharedContext, glyphBuffer, textureImageAndMemory.imageAndMemory.image);
+    ChangeImageLayout(sharedContext, textureImageAndMemory.imageAndMemory.image, 
+                VK_FORMAT_R8_SRGB, 
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            );
+
+    vkDestroyBuffer(m_EngineDevice, glyphBuffer.bufferAndMemory.buffer, NULL);
+    vkFreeMemory(m_EngineDevice, glyphBuffer.bufferAndMemory.memory, NULL);
+
+    float xpos = (x + ftFace->glyph->bitmap_left)/static_cast<float>(m_Settings.DisplayWidth);
+    float ypos = (y - ftFace->glyph->bitmap_top)/static_cast<float>(m_Settings.DisplayHeight);
+
+    float w = (ftFace->glyph->bitmap.width)/static_cast<float>(m_Settings.DisplayWidth);
+    float h = (ftFace->glyph->bitmap.rows)/static_cast<float>(m_Settings.DisplayHeight);
+
+    xpos -= 1.0f;
+    ypos -= 1.0f - (PIXEL_HEIGHT_FLOAT / static_cast<float>(m_Settings.DisplayHeight));
+
+    BufferAndMemory bufferAndMemory = CreateSimpleVertexBuffer(sharedContext, {
+                                                            {glm::vec3(0.0f, 0.0f, depth), glm::vec2(0.0f, 0.0f)},
+                                                            {glm::vec3(w, h, depth), glm::vec2(1.0f, 1.0f)},
+                                                            {glm::vec3(0.0f, h, depth), glm::vec2(0.0f, 1.0f)},
+                                                            {glm::vec3(0.0f, 0.0f, depth), glm::vec2(0.0f, 0.0f)},
+                                                            {glm::vec3(w, 0.0f, depth), glm::vec2(1.0f, 0.0f)},
+                                                            {glm::vec3(w, h, depth), glm::vec2(1.0f, 1.0f)}
+                                                        }, false);
+    
+    glyph.offset.x = xpos;
+    glyph.offset.y = ypos;
+
+    // The bitshift by 6 is required because Advance is 1/64th of a pixel.
+    x += ftFace->glyph->advance.x >> 6;
+
+    glyph.glyphBuffer = std::make_pair(textureImageAndMemory, bufferAndMemory);
+
+    AllocateBuffer(sharedContext, sizeof(glyph.glyphUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyph.glyphUBOBuffer.buffer, glyph.glyphUBOBuffer.memory);
+    vkMapMemory(m_EngineDevice, glyph.glyphUBOBuffer.memory, 0, sizeof(glyph.glyphUBO), 0, &(glyph.glyphUBOBuffer.mappedData));
+
+    m_GlyphCache.push_back(glyph);
+
+    return glyph;
 }
 
 void Engine::InitSwapchain() {
@@ -1569,14 +1696,21 @@ void Engine::Init() {
         samplerDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         samplerDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
 
-        VkDescriptorSetLayoutBinding uboDescriptorSetLayoutBinding{};
-        uboDescriptorSetLayoutBinding.binding = 0;
-        uboDescriptorSetLayoutBinding.descriptorCount = 1;
-        uboDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uboDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        uboDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+        VkDescriptorSetLayoutBinding labelUBODescriptorSetLayoutBinding{};
+        labelUBODescriptorSetLayoutBinding.binding = 0;
+        labelUBODescriptorSetLayoutBinding.descriptorCount = 1;
+        labelUBODescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        labelUBODescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        labelUBODescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
 
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboDescriptorSetLayoutBinding, samplerDescriptorSetLayoutBinding};
+        VkDescriptorSetLayoutBinding glyphUBODescriptorSetLayoutBinding{};
+        glyphUBODescriptorSetLayoutBinding.binding = 2;
+        glyphUBODescriptorSetLayoutBinding.descriptorCount = 1;
+        glyphUBODescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        glyphUBODescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        glyphUBODescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+        std::array<VkDescriptorSetLayoutBinding, 3> bindings = {labelUBODescriptorSetLayoutBinding, samplerDescriptorSetLayoutBinding, glyphUBODescriptorSetLayoutBinding};
 
         VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
         descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1826,13 +1960,16 @@ void Engine::Start() {
         if (acquireNextImageResult == VK_ERROR_OUT_OF_DATE_KHR) {
             InitSwapchain();
 
+
+            VkImageView rescaleDepthImageView = CreateDepthImage(m_Settings.DisplayWidth, m_Settings.DisplayHeight);
+
             // VkImageView depthImageView = CreateDepthImage();
 
             // TextureImageAndMemory renderImage = CreateImage(m_Settings.RenderWidth, m_Settings.RenderHeight, m_RenderImageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
             // VkImageView renderImageView = CreateImageView(renderImage, m_RenderImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 
             // m_RenderFramebuffer = CreateFramebuffer(m_MainRenderPass, renderImageView, {m_Settings.RenderWidth, m_Settings.RenderHeight}, depthImageView);
-            InitFramebuffers(m_RescaleRenderPass, nullptr);
+            InitFramebuffers(m_RescaleRenderPass, rescaleDepthImageView);
 
             continue;
         } else if (acquireNextImageResult != VK_SUCCESS)
@@ -2118,11 +2255,15 @@ void Engine::Start() {
                 vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), panelVertexOffsets);
 
                 renderUIPanel.ubo.Dimensions = renderUIPanel.panel->GetDimensions();
+                
+                /* Double the scales for some odd reason.. */
+                renderUIPanel.ubo.Dimensions.z *= 2;
+                renderUIPanel.ubo.Dimensions.w *= 2;
 
                 /* Convert [0, 1] to [-1, 1] */
                 renderUIPanel.ubo.Dimensions.x *= 2;
                 renderUIPanel.ubo.Dimensions.x -= 1;
-
+                
                 renderUIPanel.ubo.Dimensions.y *= 2;
                 renderUIPanel.ubo.Dimensions.y -= 1;
 
@@ -2177,17 +2318,23 @@ void Engine::Start() {
                 // vertex buffer binding!!
                 VkDeviceSize labelVertexOffsets[] = {0};
 
+                renderUILabel.ubo.PositionOffset = renderUILabel.label->GetPosition();
+                renderUILabel.ubo.PositionOffset.x *= 2;
+                renderUILabel.ubo.PositionOffset.y *= 2;
+
+                renderUILabel.ubo.Depth = renderUILabel.label->GetDepth();
+
+                SDL_memcpy(renderUILabel.uboBuffer.mappedData, &(renderUILabel.ubo), sizeof(renderUILabel.ubo));
+
                 size_t i = 0;
                 for (auto &shaderData : renderUILabel.textureShaderData) {
-                    vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(renderUILabel.label->GlyphBuffers[i++].second.second.buffer), labelVertexOffsets);
+                    auto &glyph = renderUILabel.label->Glyphs[i++];
 
-                    renderUILabel.ubo.PositionOffset = renderUILabel.label->GetPosition();
-                    renderUILabel.ubo.PositionOffset.x *= 2;
-                    renderUILabel.ubo.PositionOffset.y *= 2;
+                    vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(glyph.glyphBuffer.value().second.buffer), labelVertexOffsets);
 
-                    renderUILabel.ubo.Depth = renderUILabel.label->GetDepth();
-
-                    SDL_memcpy(renderUILabel.uboBuffer.mappedData, &(renderUILabel.ubo), sizeof(renderUILabel.ubo));
+                    glyph.glyphUBO.Offset = glyph.offset;
+                    
+                    SDL_memcpy(glyph.glyphUBOBuffer.mappedData, &(glyph.glyphUBO), sizeof(glyph.glyphUBO));
 
                     // update descriptor set with image
                     VkDescriptorImageInfo imageInfo{};
@@ -2196,12 +2343,18 @@ void Engine::Start() {
                     imageInfo.sampler = shaderData.second.second;
 
                     // update descriptor set with UBO
-                    VkDescriptorBufferInfo bufferInfo{};
-                    bufferInfo.offset = 0;
-                    bufferInfo.range = sizeof(renderUILabel.ubo);
-                    bufferInfo.buffer = renderUILabel.uboBuffer.buffer;
+                    VkDescriptorBufferInfo labelBufferInfo{};
+                    labelBufferInfo.offset = 0;
+                    labelBufferInfo.range = sizeof(renderUILabel.ubo);
+                    labelBufferInfo.buffer = renderUILabel.uboBuffer.buffer;
 
-                    std::array<VkWriteDescriptorSet, 2> descriptorWrites;
+                    // update descriptor set with UBO
+                    VkDescriptorBufferInfo glyphBufferInfo{};
+                    glyphBufferInfo.offset = 0;
+                    glyphBufferInfo.range = sizeof(glyph.glyphUBO);
+                    glyphBufferInfo.buffer = glyph.glyphUBOBuffer.buffer;
+
+                    std::array<VkWriteDescriptorSet, 3> descriptorWrites;
                     descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                     descriptorWrites[0].pNext = nullptr;
                     descriptorWrites[0].dstSet = m_RenderDescriptorSet; // Ignored
@@ -2209,7 +2362,7 @@ void Engine::Start() {
                     descriptorWrites[0].dstArrayElement = 0;
                     descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                     descriptorWrites[0].descriptorCount = 1;
-                    descriptorWrites[0].pBufferInfo = &bufferInfo;
+                    descriptorWrites[0].pBufferInfo = &labelBufferInfo;
                     descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                     descriptorWrites[1].pNext = nullptr;
                     descriptorWrites[1].dstSet = m_RenderDescriptorSet; // Ignored
@@ -2218,6 +2371,14 @@ void Engine::Start() {
                     descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                     descriptorWrites[1].descriptorCount = 1;
                     descriptorWrites[1].pImageInfo = &imageInfo;
+                    descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    descriptorWrites[2].pNext = nullptr;
+                    descriptorWrites[2].dstSet = m_RenderDescriptorSet; // Ignored
+                    descriptorWrites[2].dstBinding = 2;
+                    descriptorWrites[2].dstArrayElement = 0;
+                    descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                    descriptorWrites[2].descriptorCount = 1;
+                    descriptorWrites[2].pBufferInfo = &glyphBufferInfo;
 
                     vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UILabelGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
                     vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);

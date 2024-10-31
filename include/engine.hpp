@@ -179,8 +179,10 @@ public:
     void SetMouseCaptureState(bool capturing);
 
     void LoadModel(Model *model);   // this is the first function created to be used by main.cpp
-    /* Do not set waitForFences to false, unless you know what you're doing. */
     void UnloadModel(Model *model);
+
+    // Find out the type through the "type" member variable and call the appropriate function for you!
+    void AddUIGenericElement(UI::GenericElement *element);
 
     void AddUIWaypoint(UI::Waypoint *waypoint);
     void RemoveUIWaypoint(UI::Waypoint *waypoint);
@@ -199,6 +201,8 @@ public:
     void RegisterFixedUpdateFunction(const std::function<void(std::array<bool, 322>)> &func);
 
     void SetPrimaryCamera(Camera &cam);
+
+    Glyph GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, char c, float &x, float &y, float depth);
 
     inline EngineSharedContext GetSharedContext() { return {this, m_EngineDevice, m_EnginePhysicalDevice, m_CommandPool, m_GraphicsQueue, m_Settings, m_SingleTimeCommandMutex}; };
 
@@ -246,6 +250,8 @@ private:
     /* Cameras, high-level stuff. */
     Camera *m_PrimaryCamera;
     Settings &m_Settings;
+
+    std::vector<Glyph> m_GlyphCache;
 
     std::vector<RenderUIWaypoint> m_RenderUIWaypoints;
     std::vector<RenderUIArrows> m_RenderUIArrows;

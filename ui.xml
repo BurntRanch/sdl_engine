@@ -1,0 +1,47 @@
+<UIScene>
+
+<Panel>
+    <Color>
+        <R>1</R>
+        <G>0.5</G>
+        <B>1</B>
+    </Color>
+
+    <Position>
+        <X>0.0</X>
+        <Y>0.0</Y>
+    </Position>
+
+    <Scale>
+        <X>1</X>
+        <Y>0.1</Y>
+    </Scale>
+</Panel>
+
+<Label>
+    <Text>What?</Text>
+
+    <Position>
+        <X>0.0</X>
+        <Y>0.0</Y>
+    </Position>
+
+    <Font>NotoSans-Black.ttf</Font>
+
+    <ZDepth>0.9</ZDepth>
+</Label>
+
+<Label>
+    <Text>What?</Text>
+
+    <Position>
+        <X>0.0</X>
+        <Y>0.5</Y>
+    </Position>
+
+    <Font>NotoSans-Black.ttf</Font>
+
+    <ZDepth>0.9</ZDepth>
+</Label>
+
+</UIScene>

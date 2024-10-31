@@ -234,7 +234,7 @@ public:
             throw std::runtime_error("Tried to get the bounding box of an orphaned Mesh! (a Model parent is required for this)");
         }
 
-        return {m_BoundingBox[0] + m_Parent->GetPosition() * m_Parent->GetScale(), m_BoundingBox[1] * m_Parent->GetScale() + m_Parent->GetPosition() * m_Parent->GetScale()};
+        return {glm::vec4(m_BoundingBox[0], 0.0f) * m_Parent->GetModelMatrix(), glm::vec4(m_BoundingBox[1], 0.0f) * m_Parent->GetModelMatrix()};
     }
 private:
     Model *m_Parent = nullptr;

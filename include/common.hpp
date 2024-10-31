@@ -51,10 +51,34 @@ struct EngineSharedContext {
     std::mutex &singleTimeCommandMutex;
 };
 
+struct GlyphUBO {
+    glm::vec2 Offset;
+};
+
+struct Glyph {
+    glm::vec2 offset;   // offset from the start of the string
+    char character;
+    std::string fontIdentifier;   // Identifies the font by family name, style name, and height.
+    std::optional<std::pair<TextureImageAndMemory, BufferAndMemory>> glyphBuffer;  // If it's a space or a newline, there won't be any glyph.
+
+    GlyphUBO glyphUBO;
+    BufferAndMemory glyphUBOBuffer;
+};
+
 
 namespace UI {
+    enum ElementType {
+        UNKNOWN,
+        PANEL,
+        LABEL,
+        ARROWS,
+        WAYPOINT
+    };
+
     class GenericElement {
     public:
+        ElementType type;
+
         virtual void SetPosition(glm::vec2 position);
         virtual glm::vec2 GetPosition();
 

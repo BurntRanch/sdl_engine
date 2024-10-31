@@ -2,6 +2,7 @@
 #include "common.hpp"
 #include "ui/arrows.hpp"
 #include "ui/label.hpp"
+#include "util.hpp"
 #include <SDL3/SDL_stdinc.h>
 #include <filesystem>
 #include <freetype/freetype.h>
@@ -9,6 +10,8 @@
 #include <stdexcept>
 #include <utility>
 #include <vulkan/vulkan_core.h>
+#include <rapidxml.hpp>
+#include "engine.hpp"
 
 using namespace UI;
 
@@ -18,6 +21,8 @@ Panel::~Panel() {
 
 Panel::Panel(EngineSharedContext &sharedContext, glm::vec3 color, glm::vec2 position, glm::vec2 scales, float zDepth)
     : m_SharedContext(sharedContext) {
+
+    type = PANEL;
         
     texture = CreateSinglePixelImage(sharedContext, color);
     
@@ -55,6 +60,8 @@ Label::~Label() {
 
 Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesystem::path fontPath, glm::vec2 position, float zDepth)
     : m_SharedContext(sharedContext) {
+
+    type = LABEL;
     
     SetPosition(position);
     SetDepth(m_Depth);
@@ -81,13 +88,13 @@ Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesyst
     float y = -1.5f;
 
     for (char c : text) {
-        auto glyph = GenerateGlyph(c, x, y);
+        Glyph glyph = m_SharedContext.engine->GenerateGlyph(m_SharedContext, m_FTFace, c, x, y, m_Depth);
 
-        if (!glyph.has_value()) {
+        if (!glyph.glyphBuffer.has_value()) {
             continue;
         }
 
-        GlyphBuffers.push_back(std::make_pair(c, glyph.value()));
+        Glyphs.push_back(glyph);
     }
 }
 
@@ -160,22 +167,25 @@ std::optional<std::pair<TextureImageAndMemory, BufferAndMemory>> Label::Generate
 }
 
 void Label::DestroyBuffers() {
-    vkDeviceWaitIdle(m_SharedContext.engineDevice);
+    // vkDeviceWaitIdle(m_SharedContext.engineDevice);
 
-    for (size_t i = 0; i < GlyphBuffers.size(); i++) {
-        auto glyphBuffer = GlyphBuffers[i];
+    /* As of now, Glyph Buffers are now owned by the engine. */
+    // for (size_t i = 0; i < Glyphs.size(); i++) {
+    //     auto glyphBuffer = Glyphs[i].glyphBuffers.value();
 
-        vkDestroyImage(m_SharedContext.engineDevice, glyphBuffer.second.first.imageAndMemory.image, NULL);
-        vkFreeMemory(m_SharedContext.engineDevice, glyphBuffer.second.first.imageAndMemory.memory, NULL);
+    //     vkDestroyImage(m_SharedContext.engineDevice, glyphBuffer.first.imageAndMemory.image, NULL);
+    //     vkFreeMemory(m_SharedContext.engineDevice, glyphBuffer.first.imageAndMemory.memory, NULL);
 
-        vkDestroyBuffer(m_SharedContext.engineDevice, glyphBuffer.second.second.buffer, NULL);
-        vkFreeMemory(m_SharedContext.engineDevice, glyphBuffer.second.second.memory, NULL);
-    }
+    //     vkDestroyBuffer(m_SharedContext.engineDevice, glyphBuffer.second.buffer, NULL);
+    //     vkFreeMemory(m_SharedContext.engineDevice, glyphBuffer.second.memory, NULL);
+    // }
 
-    GlyphBuffers.clear();
+    Glyphs.clear();
 }
 
 Arrows::Arrows(Model &highlightedModel) {
+    type = ARROWS;
+
     arrowsModel = new Model("models/arrows.obj");
     arrowsModel->SetParent(&highlightedModel);
 
@@ -200,4 +210,121 @@ inline void GenericElement::SetDepth(float depth) {
 
 inline void GenericElement::DestroyBuffers() {
     throw std::runtime_error("You're calling DestroyBuffers on a GenericElement, this is wrong.");
+}
+
+GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxml::xml_node<char> *node) {
+    using namespace rapidxml;
+    std::string nodeName = node->name();
+
+    GenericElement *element;
+
+    if (nodeName == "Panel") {
+        xml_node<char> *colorNode = node->first_node("Color");
+        NULLASSERT(colorNode);
+
+        xml_node<char> *colorRNode = colorNode->first_node("R");
+        NULLASSERT(colorRNode);
+        float colorR = std::stof(colorRNode->value());
+
+        xml_node<char> *colorGNode = colorNode->first_node("G");
+        NULLASSERT(colorGNode);
+        float colorG = std::stof(colorGNode->value());
+
+        xml_node<char> *colorBNode = colorNode->first_node("B");
+        NULLASSERT(colorBNode);
+        float colorB = std::stof(colorBNode->value());
+
+
+        xml_node<char> *positionNode = node->first_node("Position");
+        NULLASSERT(positionNode);
+
+        xml_node<char> *positionXNode = positionNode->first_node("X");
+        NULLASSERT(positionXNode);
+        float positionX = std::stof(positionXNode->value());
+
+        xml_node<char> *positionYNode = positionNode->first_node("Y");
+        NULLASSERT(positionYNode);
+        float positionY = std::stof(positionYNode->value());
+
+
+        xml_node<char> *scaleNode = node->first_node("Scale");
+        NULLASSERT(scaleNode);
+
+        xml_node<char> *scaleXNode = scaleNode->first_node("X");
+        NULLASSERT(scaleXNode);
+        float scaleX = std::stof(scaleXNode->value());
+
+        xml_node<char> *scaleYNode = scaleNode->first_node("Y");
+        NULLASSERT(scaleYNode);
+        float scaleY = std::stof(scaleYNode->value());
+
+        xml_node<char> *zDepthNode = node->first_node("ZDepth");
+        float zDepth = 1.0f;
+
+        if (zDepthNode) {
+            zDepth = std::stof(zDepthNode->value());
+        }
+
+        element = new UI::Panel(sharedContext, glm::vec3(colorR, colorG, colorB), glm::vec2(positionX, positionY), glm::vec2(scaleX, scaleY), zDepth);
+    } else if (nodeName == "Label") {
+        xml_node<char> *textNode = node->first_node("Text");
+        NULLASSERT(textNode);
+        std::string text = textNode->value();
+
+        xml_node<char> *positionNode = node->first_node("Position");
+        NULLASSERT(positionNode);
+
+        xml_node<char> *positionXNode = positionNode->first_node("X");
+        NULLASSERT(positionXNode);
+        float positionX = std::stof(positionXNode->value());
+
+        xml_node<char> *positionYNode = positionNode->first_node("Y");
+        NULLASSERT(positionYNode);
+        float positionY = std::stof(positionYNode->value());
+
+
+        xml_node<char> *fontNode = node->first_node("Font");
+        NULLASSERT(fontNode);
+        std::string fontPath = fontNode->value();
+
+        xml_node<char> *zDepthNode = node->first_node("ZDepth");
+        float zDepth = 1.0f;
+
+        if (zDepthNode) {
+            zDepth = std::stof(zDepthNode->value());
+        }
+
+        element = new UI::Label(sharedContext, text, fontPath, glm::vec2(positionX, positionY), zDepth);
+    } else {
+        throw std::runtime_error(fmt::format("Unknown UI Serialized Object Type: {}", nodeName));
+    }
+
+    return element;
+}
+
+std::vector<GenericElement *> UI::LoadUIFile(EngineSharedContext &sharedContext, std::string_view fileName) {
+    using namespace rapidxml;
+
+    std::ifstream fileStream(fileName.data(), std::ios::binary | std::ios::ate);
+
+    if (!fileStream.good())
+        return {};
+
+    std::vector<char> uiSceneRawXML(static_cast<int>(fileStream.tellg()) + 1);
+    
+    fileStream.seekg(0);
+    fileStream.read(uiSceneRawXML.data(), uiSceneRawXML.size());
+
+    xml_document<char> uiSceneXML;
+
+    uiSceneXML.parse<0>(uiSceneRawXML.data());
+
+    std::vector<GenericElement *> elements;
+
+    xml_node<char> *uiSceneNode = uiSceneXML.first_node("UIScene");
+    for (xml_node<char> *uiElement = uiSceneNode->first_node(); uiElement; uiElement = uiElement->next_sibling()) {
+        elements.push_back(DeserializeUIElement(sharedContext, uiElement));
+    }
+
+    return elements;
 }

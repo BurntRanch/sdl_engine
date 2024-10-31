@@ -3,7 +3,7 @@
 #include "common.hpp"
 
 namespace UI {
-    std::vector<GenericElement *> ImportUIFile();
+    std::vector<GenericElement *> LoadUIFile(EngineSharedContext &sharedContext, std::string_view fileName);
 }
 
 #include <ui/panel.hpp>
