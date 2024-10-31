@@ -11,6 +11,7 @@ CameraNear = 0.0001
 
 [profile]
 ReportFPS = false
+Verbose = false
 
 [input]
 MouseSensitivity = 0.1

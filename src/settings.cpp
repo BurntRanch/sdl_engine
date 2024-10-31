@@ -20,6 +20,7 @@ Settings::Settings(const string_view fileName) {
     CameraNear = GetValue("video.CameraNear", CAMERA_NEAR);
 
     ReportFPS = GetValue("profile.ReportFPS", true);
+    Verbose = GetValue("profile.Verbose", true);
 
     MouseSensitivity = GetValue("input.MouseSensitivity", 0.1f);
     Velocity = GetValue("input.Velocity", 5.0f);

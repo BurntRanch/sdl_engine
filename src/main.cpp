@@ -357,12 +357,16 @@ void FixedUpdate(const std::array<bool, 322> &keyMap) {
                 newPos.z += State::ObjectPositionPreDragging.z;
 
                 break;
-            };
+            case NOT_DRAGGING:
+            default:
+                break;
+            }
 
             selectedObject->SetPosition(newPos);
         }
         
-        fmt::println("{} {}", x, y);
+        if (settings.Verbose)
+            fmt::println("{} {}", x, y);
     }
 
     if (keyMap[SDL_SCANCODE_W])

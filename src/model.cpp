@@ -2,6 +2,7 @@
 #include <assimp/material.h>
 #include <assimp/mesh.h>
 #include <assimp/postprocess.h>
+#include <fmt/format.h>
 #include <model.hpp>
 #include <stdexcept>
 
@@ -133,7 +134,6 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
     }
         
     // process material
-    if(mesh->mMaterialIndex >= 0)
     {
         aiMaterial *material = scene->mMaterials[mesh->mMaterialIndex];
         // material->Get(AI_MATKEY_SHININESS, shininess);
@@ -157,8 +157,6 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
         // vector<Texture> normalMaps = loadMaterialTextures(material, 
         //                                     aiTextureType_HEIGHT, "texture_normal");
         // textures.insert(textures.end(), normalMaps.begin(), normalMaps.end());
-    } else {
-        throw std::runtime_error(engineError::NO_MATERIALS);
     }
 
     return Mesh(*this, vertices, indices, diffuseMap/*, shininess, roughness, metallic*/, diffuse);
@@ -168,7 +166,7 @@ glm::mat4 Model::GetModelMatrix() {
     if (!m_NeedsUpdate)
         return m_ModelMatrix;
 
-    fmt::println("Updating model matrix for object {}!", (void *)this);
+    fmt::println("Updating model matrix for object {}!", fmt::ptr(this));
 
     // Update the model matrix with the position/rotation.
     m_ModelMatrix = glm::scale(glm::mat4(1.0f), m_Scale);
