@@ -20,7 +20,8 @@ public:
 
     Label(EngineSharedContext &sharedContext, std::string text, std::filesystem::path fontPath, glm::vec2 position = glm::vec2(0.0f, 0.0f), float zDepth = 0.0f);
 
-    std::optional<std::pair<TextureImageAndMemory, BufferAndMemory>> GenerateGlyph(char c, float &x, float &y);
+    /* Calculates the minimum scale required to fit this entire label. */
+    glm::vec2 CalculateMinimumScaleToFit();
 
     void DestroyBuffers();
 private:

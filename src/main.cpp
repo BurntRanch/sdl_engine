@@ -19,6 +19,7 @@
 #include "common.hpp"
 #include "model.hpp"
 #include "ui/arrows.hpp"
+#include "ui/button.hpp"
 #include "ui/label.hpp"
 #include "ui/panel.hpp"
 #include "util.hpp"
@@ -175,19 +176,19 @@ bool importScene(const std::string_view fileName) {
         Model *model = new Model();
 
         xml_node<char> *positionNode = modelNode->first_node("Position");
-        NULLASSERT(positionNode);
+        UTILASSERT(positionNode);
         std::string_view positionStr(positionNode->value());
         std::vector<std::string> positionData = split(positionStr, ' ');
         model->SetPosition(glm::vec3(std::stof(positionData[0]), std::stof(positionData[1]), std::stof(positionData[2])));
 
         xml_node<char> *rotationNode = modelNode->first_node("Rotation");
-        NULLASSERT(rotationNode);
+        UTILASSERT(rotationNode);
         std::string_view rotationStr(rotationNode->value());
         std::vector<std::string> rotationData = split(rotationStr, ' ');
         model->SetRotation(glm::vec3(std::stof(rotationData[0]), std::stof(rotationData[1]), std::stof(rotationData[2])));
 
         xml_node<char> *scaleNode = modelNode->first_node("Scale");
-        NULLASSERT(scaleNode);
+        UTILASSERT(scaleNode);
         std::string_view scaleStr(scaleNode->value());
         std::vector<std::string> scaleData = split(scaleStr, ' ');
         model->SetScale(glm::vec3(std::stof(scaleData[0]), std::stof(scaleData[1]), std::stof(scaleData[2])));
@@ -196,13 +197,13 @@ bool importScene(const std::string_view fileName) {
             Mesh mesh;
 
             xml_node<char> *diffuseNode = meshNode->first_node("Diffuse");
-            NULLASSERT(diffuseNode);
+            UTILASSERT(diffuseNode);
             std::string_view diffuseStr(diffuseNode->value());
             std::vector<std::string> diffuseData = split(diffuseStr, ' ');
             mesh.diffuse = glm::vec3(std::stof(diffuseData[0]), std::stof(diffuseData[1]), std::stof(diffuseData[2]));
 
             xml_node<char> *indicesNode = meshNode->first_node("Indices");
-            NULLASSERT(indicesNode);
+            UTILASSERT(indicesNode);
             std::string_view indicesStr(indicesNode->value());
             std::vector<std::string> indicesData = split(indicesStr, ',');
             mesh.indices.resize(indicesData.size());
@@ -214,7 +215,7 @@ bool importScene(const std::string_view fileName) {
             }
 
             xml_node<char> *diffuseMapPathNode = meshNode->first_node("DiffuseMap");
-            NULLASSERT(diffuseMapPathNode);
+            UTILASSERT(diffuseMapPathNode);
             std::string_view diffuseMapPathStr(diffuseMapPathNode->value());
             mesh.diffuseMapPath = diffuseMapPathStr;
 
@@ -222,19 +223,19 @@ bool importScene(const std::string_view fileName) {
                 Vertex vertex;
 
                 xml_node<char> *vertexPositionNode = vertexNode->first_node("Position");
-                NULLASSERT(vertexPositionNode);
+                UTILASSERT(vertexPositionNode);
                 std::string_view vertexPositionStr(vertexPositionNode->value());
                 std::vector<std::string> vertexPositionData = split(vertexPositionStr, ' ');
                 vertex.Position = glm::vec3(std::stof(vertexPositionData[0]), std::stof(vertexPositionData[1]), std::stof(vertexPositionData[2]));
 
                 xml_node<char> *vertexNormalNode = vertexNode->first_node("Normal");
-                NULLASSERT(vertexNormalNode);
+                UTILASSERT(vertexNormalNode);
                 std::string_view vertexNormalStr(vertexNormalNode->value());
                 std::vector<std::string> vertexNormalData = split(vertexNormalStr, ' ');
                 vertex.Normal = glm::vec3(std::stof(vertexNormalData[0]), std::stof(vertexNormalData[1]), std::stof(vertexNormalData[2]));
 
                 xml_node<char> *vertexTexCoordNode = vertexNode->first_node("TexCoord");
-                NULLASSERT(vertexTexCoordNode);
+                UTILASSERT(vertexTexCoordNode);
                 std::string_view vertexTexCoordStr(vertexTexCoordNode->value());
                 std::vector<std::string> vertexTexCoordData = split(vertexTexCoordStr, ' ');
                 vertex.TexCoord = glm::vec2(std::stof(vertexTexCoordData[0]), std::stof(vertexTexCoordData[1]));
@@ -506,6 +507,9 @@ int main() {
         for (UI::GenericElement *element : UIElements) {
             engine->AddUIGenericElement(element);
         }
+
+        // UI::Button *button = new UI::Button(glm::vec2(0.62f, 0.62f), glm::vec2(0.05f, 0.01f), new UI::Panel(sharedContext, glm::vec3(0.9f, 0.4f, 0.9f), glm::vec2(0.0f, 0.0f), glm::vec2(0.0f, 0.0f), 0.0f), new UI::Label(sharedContext, "Test", "NotoSans-Black.ttf"));
+        // engine->AddUIButton(button);
 
         // UI::Arrows *arrows = new UI::Arrows(glm::vec3(0.0f, 0.0f, 0.0f));
         // engine->AddUIArrows(arrows);

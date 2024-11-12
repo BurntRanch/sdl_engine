@@ -56,7 +56,8 @@ struct GlyphUBO {
 };
 
 struct Glyph {
-    glm::vec2 offset;   // offset from the start of the string
+    glm::vec2 offset;   // offset from the start of the string, from -1.0f to 1.0f
+    glm::vec2 scale;
     char character;
     std::string fontIdentifier;   // Identifies the font by family name, style name, and height.
     std::optional<std::pair<TextureImageAndMemory, BufferAndMemory>> glyphBuffer;  // If it's a space or a newline, there won't be any glyph.
@@ -69,14 +70,23 @@ struct Glyph {
 namespace UI {
     enum ElementType {
         UNKNOWN,
+        SCALABLE,   // Has the Scale property.
         PANEL,
         LABEL,
+        BUTTON,
         ARROWS,
         WAYPOINT
     };
 
+    enum FitType {
+        UNSET,  // If the scalable has a parent, check the parents fit type.
+        NONE,
+        FIT_CHILDREN,    // Scales the Scalable object to fit its children.
+    };
+
     class GenericElement {
     public:
+        ElementType genericType;
         ElementType type;
 
         virtual void SetPosition(glm::vec2 position);
@@ -85,11 +95,35 @@ namespace UI {
         virtual void SetDepth(float depth);
         virtual float GetDepth();
 
+        virtual void SetParent(GenericElement *parent);
+        virtual GenericElement *GetParent();
+
+        virtual void AddChild(GenericElement *element);
+        virtual void RemoveChild(GenericElement *child);
+        virtual std::vector<GenericElement *> GetChildren();
+
         virtual void DestroyBuffers();
     protected:
         glm::vec2 m_Position;
 
+        GenericElement *m_Parent = nullptr;
+        std::vector<GenericElement *> m_Children;
+
         float m_Depth;
+    };
+
+    class Scalable : public GenericElement {
+    public:
+        FitType fitType = UNSET;
+
+        virtual void SetScale(glm::vec2 scales);
+
+        virtual glm::vec2 GetScale();
+
+        /* Get the Scale without applying fitType effects. */
+        virtual glm::vec2 GetUnfitScale();
+    protected:
+        glm::vec2 m_Scale;
     };
 }
 

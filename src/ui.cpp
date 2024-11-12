@@ -1,6 +1,7 @@
 #include "ui.hpp"
 #include "common.hpp"
 #include "ui/arrows.hpp"
+#include "ui/button.hpp"
 #include "ui/label.hpp"
 #include "util.hpp"
 #include <SDL3/SDL_stdinc.h>
@@ -22,11 +23,13 @@ Panel::~Panel() {
 Panel::Panel(EngineSharedContext &sharedContext, glm::vec3 color, glm::vec2 position, glm::vec2 scales, float zDepth)
     : m_SharedContext(sharedContext) {
 
+    genericType = SCALABLE;
     type = PANEL;
         
     texture = CreateSinglePixelImage(sharedContext, color);
     
-    SetDimensions(glm::vec4(position, scales));
+    SetPosition(position);
+    SetScale(scales);
     SetDepth(zDepth);
 }
 
@@ -36,17 +39,40 @@ inline void Panel::SetPosition(glm::vec2 position) {
     m_Dimensions.y = position.y;
 }
 
-inline void Panel::SetScales(glm::vec2 scales) {
+inline void Panel::SetScale(glm::vec2 scales) {
     m_Dimensions.z = scales.x;
     m_Dimensions.w = scales.y;
 }
 
-inline void Panel::SetDimensions(glm::vec4 dimensions) {
-    m_Dimensions = dimensions;
+glm::vec4 Panel::GetDimensions() {
+    if (m_Parent) {
+        glm::vec2 parentPosition = m_Parent->GetPosition();
+        glm::vec2 parentScale = (m_Parent->genericType == SCALABLE ? reinterpret_cast<Scalable *>(m_Parent)->GetUnfitScale() : glm::vec4(0.0f));
+
+        glm::vec4 dimensions = m_Dimensions + glm::vec4(parentPosition, parentScale);
+        glm::vec2 scales = adjustScaleToFitType(this, glm::vec2(dimensions.z, dimensions.w));
+
+        dimensions.z = scales.x;
+        dimensions.w = scales.y;
+
+        return dimensions;
+    }
+
+    glm::vec2 scales = adjustScaleToFitType(this, glm::vec2(m_Dimensions.z, m_Dimensions.w));
+
+    return glm::vec4(m_Dimensions.x, m_Dimensions.y, scales);
 }
 
-glm::vec4 Panel::GetDimensions() {
-    return m_Dimensions;
+glm::vec2 Panel::GetPosition() {
+    glm::vec4 dimensions = GetDimensions();
+
+    return glm::vec2(dimensions.x, dimensions.y);
+}
+
+glm::vec2 Panel::GetScale() {
+    glm::vec4 dimensions = GetDimensions();
+
+    return glm::vec2(dimensions.z, dimensions.w);
 }
 
 void Panel::DestroyBuffers() {
@@ -61,6 +87,7 @@ Label::~Label() {
 Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesystem::path fontPath, glm::vec2 position, float zDepth)
     : m_SharedContext(sharedContext) {
 
+    genericType = LABEL;
     type = LABEL;
     
     SetPosition(position);
@@ -76,7 +103,7 @@ Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesyst
 
     FT_Set_Pixel_Sizes(m_FTFace, 0, PIXEL_HEIGHT);
 
-    float x = 0.5f;
+    float x = 0.0f;
 
     /* This value needs to be -1.5 for SOME reason. 
      *
@@ -85,7 +112,7 @@ Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesyst
      *
      * Tested against NotoSans-Black.ttf and LiberationMono-Bold.ttf
      */
-    float y = -1.5f;
+    float y = 0.0f;
 
     for (char c : text) {
         Glyph glyph = m_SharedContext.engine->GenerateGlyph(m_SharedContext, m_FTFace, c, x, y, m_Depth);
@@ -98,72 +125,15 @@ Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesyst
     }
 }
 
-std::optional<std::pair<TextureImageAndMemory, BufferAndMemory>> Label::GenerateGlyph(char c, float &x, float &y) {
-    if (FT_Load_Char(m_FTFace, c, FT_LOAD_RENDER)) {
-        throw std::runtime_error(fmt::format("Failed to load the glyph for '{}' with FreeType", c));
+glm::vec2 Label::CalculateMinimumScaleToFit() {
+    glm::vec2 result;
+
+    for (Glyph &glyph : Glyphs) {
+        result.x = std::max((glyph.offset.x + 1.0f)/2.0f + (glyph.scale.x)/2.0f, result.x);
+        result.y = std::max((glyph.offset.y + 1.0f)/2.0f + (glyph.scale.y)/2.0f, result.y);
     }
 
-    if (c == ' ') {
-        x += m_FTFace->glyph->advance.x >> 6;
-
-        return {};
-    }
-
-    if (c == '\n') {
-        x = 0;
-        y += PIXEL_HEIGHT;
-
-        return {};
-    }
-
-    VkDeviceSize glyphBufferSize = m_FTFace->glyph->bitmap.width * m_FTFace->glyph->bitmap.rows;
-
-    TextureBufferAndMemory glyphBuffer{};
-    AllocateBuffer(m_SharedContext, glyphBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyphBuffer.bufferAndMemory.buffer, glyphBuffer.bufferAndMemory.memory);
-    glyphBuffer.width = m_FTFace->glyph->bitmap.width;
-    glyphBuffer.height = m_FTFace->glyph->bitmap.rows;
-    glyphBuffer.channels = 1;
-
-    vkMapMemory(m_SharedContext.engineDevice, glyphBuffer.bufferAndMemory.memory, 0, glyphBufferSize, 0, &(glyphBuffer.bufferAndMemory.mappedData));
-    SDL_memcpy(glyphBuffer.bufferAndMemory.mappedData, m_FTFace->glyph->bitmap.buffer, glyphBufferSize);
-
-    TextureImageAndMemory textureImageAndMemory = CreateImage(m_SharedContext, m_FTFace->glyph->bitmap.width, m_FTFace->glyph->bitmap.rows, VK_FORMAT_R8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    ChangeImageLayout(m_SharedContext, textureImageAndMemory.imageAndMemory.image, 
-                VK_FORMAT_R8_SRGB, 
-                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-            );
-    CopyBufferToImage(m_SharedContext, glyphBuffer, textureImageAndMemory.imageAndMemory.image);
-    ChangeImageLayout(m_SharedContext, textureImageAndMemory.imageAndMemory.image, 
-                VK_FORMAT_R8_SRGB, 
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-            );
-
-    vkDestroyBuffer(m_SharedContext.engineDevice, glyphBuffer.bufferAndMemory.buffer, NULL);
-    vkFreeMemory(m_SharedContext.engineDevice, glyphBuffer.bufferAndMemory.memory, NULL);
-
-    float xpos = (x + m_FTFace->glyph->bitmap_left)/static_cast<float>(m_SharedContext.settings.DisplayWidth);
-    float ypos = (y - m_FTFace->glyph->bitmap_top)/static_cast<float>(m_SharedContext.settings.DisplayHeight);
-
-    float w = (m_FTFace->glyph->bitmap.width)/static_cast<float>(m_SharedContext.settings.DisplayWidth);
-    float h = (m_FTFace->glyph->bitmap.rows)/static_cast<float>(m_SharedContext.settings.DisplayHeight);
-
-    xpos -= 1.0f;
-    ypos -= 1.0f - (PIXEL_HEIGHT_FLOAT / static_cast<float>(m_SharedContext.settings.DisplayHeight));
-
-    BufferAndMemory bufferAndMemory = CreateSimpleVertexBuffer(m_SharedContext, {
-                                                            {glm::vec3(xpos, ypos, m_Depth), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec3(xpos + w, ypos + h, m_Depth), glm::vec2(1.0f, 1.0f)},
-                                                            {glm::vec3(xpos, ypos + h, m_Depth), glm::vec2(0.0f, 1.0f)},
-                                                            {glm::vec3(xpos, ypos, m_Depth), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec3(xpos + w, ypos, m_Depth), glm::vec2(1.0f, 0.0f)},
-                                                            {glm::vec3(xpos + w, ypos + h, m_Depth), glm::vec2(1.0f, 1.0f)}
-                                                        }, false);
-
-    // The bitshift by 6 is required because Advance is 1/64th of a pixel.
-    x += m_FTFace->glyph->advance.x >> 6;
-
-    return std::make_pair(textureImageAndMemory, bufferAndMemory);
+    return result;
 }
 
 void Label::DestroyBuffers() {
@@ -184,6 +154,7 @@ void Label::DestroyBuffers() {
 }
 
 Arrows::Arrows(Model &highlightedModel) {
+    genericType = ARROWS;
     type = ARROWS;
 
     arrowsModel = new Model("models/arrows.obj");
@@ -192,8 +163,19 @@ Arrows::Arrows(Model &highlightedModel) {
     arrowsModel->SetScale(glm::vec3(0.5f, 0.5f, 0.5f));
 }
 
+Button::Button(glm::vec2 position, glm::vec2 scale, Panel *panel, Label *label) : bgPanel(panel), fgLabel(label) {
+    genericType = SCALABLE;
+    type = BUTTON;
+
+    SetPosition(position);
+    SetScale(scale);
+
+    bgPanel->SetParent(this);
+    fgLabel->SetParent(panel); 
+}
+
 inline glm::vec2 GenericElement::GetPosition() {
-    return m_Position;
+    return m_Position + (m_Parent == nullptr ? glm::vec2(0.0f, 0.0f) : m_Parent->GetPosition());
 }
 
 inline void GenericElement::SetPosition(glm::vec2 Position) {
@@ -208,8 +190,62 @@ inline void GenericElement::SetDepth(float depth) {
     m_Depth = depth;
 }
 
+inline void GenericElement::SetParent(GenericElement *parent) {
+    m_Parent = parent;
+
+    if (parent == nullptr) {
+        return;
+    }
+
+    if (genericType == SCALABLE && parent->genericType == SCALABLE) {
+        reinterpret_cast<Scalable *>(this)->fitType = reinterpret_cast<Scalable *>(this)->fitType;
+    }
+
+    parent->AddChild(this);
+}
+
+inline GenericElement *GenericElement::GetParent() {
+    return m_Parent;
+}
+
+inline void GenericElement::AddChild(GenericElement *element) {
+    m_Children.push_back(element);
+}
+
+inline void GenericElement::RemoveChild(GenericElement *child) {
+    for (GenericElement *element : m_Children) {
+        if (element != child) {
+            continue;
+        }
+
+        m_Children.erase(std::find(m_Children.begin(), m_Children.end(), child));
+    }
+}
+
+inline std::vector<GenericElement *> GenericElement::GetChildren() {
+    return m_Children;
+}
+
 inline void GenericElement::DestroyBuffers() {
     throw std::runtime_error("You're calling DestroyBuffers on a GenericElement, this is wrong.");
+}
+
+inline void Scalable::SetScale(glm::vec2 scales) {
+    m_Scale = scales;
+}
+
+inline glm::vec2 Scalable::GetScale() {
+    glm::vec2 scale = m_Scale * (m_Parent != nullptr && m_Parent->genericType == SCALABLE ? reinterpret_cast<Scalable *>(m_Parent)->GetUnfitScale() : glm::vec3(1));
+
+    scale = adjustScaleToFitType(this, scale);
+
+    return scale;
+}
+
+inline glm::vec2 Scalable::GetUnfitScale() {
+    glm::vec2 scale = m_Scale * (m_Parent != nullptr && m_Parent->genericType == SCALABLE ? reinterpret_cast<Scalable *>(m_Parent)->GetUnfitScale() : glm::vec3(1));
+
+    return scale;
 }
 
 GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxml::xml_node<char> *node) {
@@ -219,43 +255,45 @@ GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxm
     GenericElement *element;
 
     if (nodeName == "Panel") {
+        xml_node<char> *fitTypeNode = node->first_node("FitType");
+        
         xml_node<char> *colorNode = node->first_node("Color");
-        NULLASSERT(colorNode);
+        UTILASSERT(colorNode);
 
         xml_node<char> *colorRNode = colorNode->first_node("R");
-        NULLASSERT(colorRNode);
+        UTILASSERT(colorRNode);
         float colorR = std::stof(colorRNode->value());
 
         xml_node<char> *colorGNode = colorNode->first_node("G");
-        NULLASSERT(colorGNode);
+        UTILASSERT(colorGNode);
         float colorG = std::stof(colorGNode->value());
 
         xml_node<char> *colorBNode = colorNode->first_node("B");
-        NULLASSERT(colorBNode);
+        UTILASSERT(colorBNode);
         float colorB = std::stof(colorBNode->value());
 
 
         xml_node<char> *positionNode = node->first_node("Position");
-        NULLASSERT(positionNode);
+        UTILASSERT(positionNode);
 
         xml_node<char> *positionXNode = positionNode->first_node("X");
-        NULLASSERT(positionXNode);
+        UTILASSERT(positionXNode);
         float positionX = std::stof(positionXNode->value());
 
         xml_node<char> *positionYNode = positionNode->first_node("Y");
-        NULLASSERT(positionYNode);
+        UTILASSERT(positionYNode);
         float positionY = std::stof(positionYNode->value());
 
 
         xml_node<char> *scaleNode = node->first_node("Scale");
-        NULLASSERT(scaleNode);
+        UTILASSERT(scaleNode);
 
         xml_node<char> *scaleXNode = scaleNode->first_node("X");
-        NULLASSERT(scaleXNode);
+        UTILASSERT(scaleXNode);
         float scaleX = std::stof(scaleXNode->value());
 
         xml_node<char> *scaleYNode = scaleNode->first_node("Y");
-        NULLASSERT(scaleYNode);
+        UTILASSERT(scaleYNode);
         float scaleY = std::stof(scaleYNode->value());
 
         xml_node<char> *zDepthNode = node->first_node("ZDepth");
@@ -266,25 +304,31 @@ GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxm
         }
 
         element = new UI::Panel(sharedContext, glm::vec3(colorR, colorG, colorB), glm::vec2(positionX, positionY), glm::vec2(scaleX, scaleY), zDepth);
+
+        if (fitTypeNode && std::string(fitTypeNode->value()) == "FIT_CHILDREN") {
+            reinterpret_cast<UI::Scalable *>(element)->fitType = UI::FIT_CHILDREN;
+        } else if (fitTypeNode && std::string(fitTypeNode->value()) == "NONE") {
+            reinterpret_cast<UI::Scalable *>(element)->fitType = UI::NONE;
+        }
     } else if (nodeName == "Label") {
         xml_node<char> *textNode = node->first_node("Text");
-        NULLASSERT(textNode);
+        UTILASSERT(textNode);
         std::string text = textNode->value();
 
         xml_node<char> *positionNode = node->first_node("Position");
-        NULLASSERT(positionNode);
+        UTILASSERT(positionNode);
 
         xml_node<char> *positionXNode = positionNode->first_node("X");
-        NULLASSERT(positionXNode);
+        UTILASSERT(positionXNode);
         float positionX = std::stof(positionXNode->value());
 
         xml_node<char> *positionYNode = positionNode->first_node("Y");
-        NULLASSERT(positionYNode);
+        UTILASSERT(positionYNode);
         float positionY = std::stof(positionYNode->value());
 
 
         xml_node<char> *fontNode = node->first_node("Font");
-        NULLASSERT(fontNode);
+        UTILASSERT(fontNode);
         std::string fontPath = fontNode->value();
 
         xml_node<char> *zDepthNode = node->first_node("ZDepth");
@@ -295,6 +339,56 @@ GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxm
         }
 
         element = new UI::Label(sharedContext, text, fontPath, glm::vec2(positionX, positionY), zDepth);
+    } else if (nodeName == "Button") {
+        xml_node<char> *fitTypeNode = node->first_node("FitType");
+
+        xml_node<char> *positionNode = node->first_node("Position");
+        UTILASSERT(positionNode);
+
+        xml_node<char> *positionXNode = positionNode->first_node("X");
+        UTILASSERT(positionXNode);
+        float positionX = std::stof(positionXNode->value());
+
+        xml_node<char> *positionYNode = positionNode->first_node("Y");
+        UTILASSERT(positionYNode);
+        float positionY = std::stof(positionYNode->value());
+
+
+        xml_node<char> *scaleNode = node->first_node("Scale");
+        UTILASSERT(scaleNode);
+
+        xml_node<char> *scaleXNode = scaleNode->first_node("X");
+        UTILASSERT(scaleXNode);
+        float scaleX = std::stof(scaleXNode->value());
+
+        xml_node<char> *scaleYNode = scaleNode->first_node("Y");
+        UTILASSERT(scaleYNode);
+        float scaleY = std::stof(scaleYNode->value());
+
+        /* bgPanel and fgLabel */
+        xml_node<char> *bgPanelNode = node->first_node("BgPanel");
+        UTILASSERT(bgPanelNode);
+        xml_node<char> *panelNode = bgPanelNode->first_node("Panel");
+
+        GenericElement *bgPanel = DeserializeUIElement(sharedContext, panelNode);
+        UTILASSERT(bgPanel->type == UI::PANEL);
+
+
+        xml_node<char> *fgLabelNode = node->first_node("FgLabel");
+        UTILASSERT(fgLabelNode);
+        xml_node<char> *labelNode = fgLabelNode->first_node("Label");
+
+        GenericElement *fgLabel = DeserializeUIElement(sharedContext, labelNode);
+        UTILASSERT(fgLabel->type == UI::LABEL);
+
+        element = new UI::Button(glm::vec2(positionX, positionY), glm::vec2(scaleX, scaleY), reinterpret_cast<UI::Panel *>(bgPanel), reinterpret_cast<UI::Label *>(fgLabel));
+
+        /* FIT_CHILDREN is the default for buttons. */
+        if (!fitTypeNode || std::string(fitTypeNode->value()) == "FIT_CHILDREN") {
+            reinterpret_cast<UI::Scalable *>(element)->fitType = UI::FIT_CHILDREN;
+        } else if (fitTypeNode && std::string(fitTypeNode->value()) == "NONE") {
+            reinterpret_cast<UI::Scalable *>(element)->fitType = UI::NONE;
+        }
     } else {
         throw std::runtime_error(fmt::format("Unknown UI Serialized Object Type: {}", nodeName));
     }

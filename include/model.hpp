@@ -118,38 +118,25 @@ public:
     Model(const string_view path, glm::vec3 position = glm::vec3(0, 0, 0), glm::vec3 rotation = glm::vec3(0, 0, 0), glm::vec3 scale = glm::vec3(1, 1, 1));
 
     void SetPosition(glm::vec3 pos) { 
-        m_Position = pos + (m_Parent != nullptr ? m_Parent->GetPosition() : glm::vec3(0));
-        m_NeedsUpdate = true; 
-
-        for (Model *model : children) {
-            model->SetPosition(pos);
-        }
+        m_Position = pos;
+        m_NeedsUpdate = true;
     };
 
     void SetRotation(glm::vec3 rot) { 
-        m_Rotation = rot + (m_Parent != nullptr ? m_Parent->GetRotation() : glm::vec3(0));
-        m_NeedsUpdate = true; 
-
-
-        for (Model *model : children) {
-            model->SetRotation(rot);
-        }
+        m_Rotation = rot;
+        m_NeedsUpdate = true;
     };
 
     void SetScale(glm::vec3 scale)  { 
-        m_Scale = scale * (m_Parent != nullptr ? m_Parent->GetScale() : glm::vec3(1));
+        m_Scale = scale;
         m_NeedsUpdate = true;
-    
-        for (Model *model : children) {
-            model->SetScale(scale);
-        }    
     };
 
     void SetParent(Model *parent) { m_Parent = parent; parent->children.push_back(this); SetPosition(GetPosition()); SetRotation(GetRotation()); SetScale(GetScale()); };
 
-    constexpr glm::vec3 GetPosition() { return m_Position; };
-    constexpr glm::vec3 GetRotation() { return m_Rotation; };
-    constexpr glm::vec3 GetScale()    { return m_Scale; };
+    constexpr glm::vec3 GetPosition() { return m_Position + (m_Parent != nullptr ? m_Parent->GetPosition() : glm::vec3(0)); };
+    constexpr glm::vec3 GetRotation() { return m_Rotation + (m_Parent != nullptr ? m_Parent->GetRotation() : glm::vec3(0)); };
+    constexpr glm::vec3 GetScale()    { return m_Scale * (m_Parent != nullptr ? m_Parent->GetScale() : glm::vec3(1)); };
     constexpr Model *GetParent()      { return m_Parent; };
 
     /* Return the models Bounding Box, also transforms the bounding box with the Model Matrix. */

@@ -4,6 +4,7 @@
 #include "camera.hpp"
 #include "common.hpp"
 #include "ui.hpp"
+#include "ui/button.hpp"
 #include <future>
 #include <mutex>
 #ifndef VK_EXT_DEBUG_REPORT_EXTENSION_NAME
@@ -195,6 +196,9 @@ public:
 
     void AddUILabel(UI::Label *label);
     void RemoveUILabel(UI::Label *label);
+
+    void AddUIButton(UI::Button *button);
+    void RemoveUIButton(UI::Button *button);
 
     void RegisterUpdateFunction(const std::function<void()> &func);
     // Fixed Updates are called 60 times a second.

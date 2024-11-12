@@ -1,6 +1,7 @@
 #include "common.hpp"
 #include "error.hpp"
 #include "ui/arrows.hpp"
+#include "ui/button.hpp"
 #include "ui/label.hpp"
 #include "ui/panel.hpp"
 #include "ui/waypoint.hpp"
@@ -540,11 +541,15 @@ void Engine::AddUIGenericElement(UI::GenericElement *element) {
         case UI::LABEL:
             AddUILabel(reinterpret_cast<UI::Label *>(element));
             break;
+        case UI::BUTTON:
+            AddUIButton(reinterpret_cast<UI::Button *>(element));
+            break;
         case UI::UNKNOWN:
         case UI::ARROWS:
+        case UI::SCALABLE:
         case UI::WAYPOINT:
           break;
-    }
+        }
 }
 
 void Engine::AddUIWaypoint(UI::Waypoint *waypoint) {
@@ -801,6 +806,16 @@ void Engine::RemoveUILabel(UI::Label *label) {
     }
 }
 
+void Engine::AddUIButton(UI::Button *button) {
+    AddUIPanel(button->bgPanel);
+    AddUILabel(button->fgLabel);
+}
+
+void Engine::RemoveUIButton(UI::Button *button) {
+    RemoveUIPanel(button->bgPanel);
+    RemoveUILabel(button->fgLabel);
+}
+
 void Engine::RegisterUpdateFunction(const std::function<void()> &func) {
     m_UpdateFunctions.push_back(func);
 }
@@ -844,6 +859,9 @@ Glyph Engine::GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, 
                 float xpos = (x + ftFace->glyph->bitmap_left)/static_cast<float>(m_Settings.DisplayWidth);
                 float ypos = (y - ftFace->glyph->bitmap_top)/static_cast<float>(m_Settings.DisplayHeight);
 
+                float w = (ftFace->glyph->bitmap.width)/static_cast<float>(m_Settings.DisplayWidth);
+                float h = (ftFace->glyph->bitmap.rows)/static_cast<float>(m_Settings.DisplayHeight);
+
                 xpos -= 1.0f;
                 ypos -= 1.0f - (PIXEL_HEIGHT_FLOAT / static_cast<float>(m_Settings.DisplayHeight));
 
@@ -851,6 +869,9 @@ Glyph Engine::GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, 
                 glyph.offset.y = ypos;
 
                 x += ftFace->glyph->advance.x >> 6;
+
+                glyph.scale.x = w;
+                glyph.scale.y = h;
 
                 AllocateBuffer(sharedContext, sizeof(glyph.glyphUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyph.glyphUBOBuffer.buffer, glyph.glyphUBOBuffer.memory);
                 vkMapMemory(m_EngineDevice, glyph.glyphUBOBuffer.memory, 0, sizeof(glyph.glyphUBO), 0, &(glyph.glyphUBOBuffer.mappedData));
@@ -905,6 +926,9 @@ Glyph Engine::GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, 
     
     glyph.offset.x = xpos;
     glyph.offset.y = ypos;
+
+    glyph.scale.x = w;
+    glyph.scale.y = h;
 
     // The bitshift by 6 is required because Advance is 1/64th of a pixel.
     x += ftFace->glyph->advance.x >> 6;

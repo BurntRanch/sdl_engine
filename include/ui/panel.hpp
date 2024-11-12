@@ -5,7 +5,7 @@
 namespace UI {
 class GenericElement;
 
-class Panel : public GenericElement {
+class Panel : public Scalable {
 public:
     TextureImageAndMemory texture;
     
@@ -15,8 +15,10 @@ public:
     Panel(EngineSharedContext &sharedContext, glm::vec3 color, glm::vec2 position, glm::vec2 scales, float zDepth);
 
     void SetPosition(glm::vec2 position);
-    void SetScales(glm::vec2 position);
-    void SetDimensions(glm::vec4 dimensions);
+    void SetScale(glm::vec2 position);
+
+    glm::vec2 GetPosition();
+    glm::vec2 GetScale();
 
     glm::vec4 GetDimensions();
 
