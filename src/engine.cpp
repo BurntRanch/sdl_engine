@@ -876,8 +876,6 @@ Glyph Engine::GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, 
                 AllocateBuffer(sharedContext, sizeof(glyph.glyphUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyph.glyphUBOBuffer.buffer, glyph.glyphUBOBuffer.memory);
                 vkMapMemory(m_EngineDevice, glyph.glyphUBOBuffer.memory, 0, sizeof(glyph.glyphUBO), 0, &(glyph.glyphUBOBuffer.mappedData));
 
-                fmt::println("{} {} {} {}", fmt::ptr(glyph.glyphBuffer->first.imageAndMemory.image), fmt::ptr(glyph.glyphBuffer->first.imageAndMemory.memory), fmt::ptr(glyph.glyphBuffer->second.buffer), fmt::ptr(glyph.glyphBuffer->second.memory));
-
                 return glyph;
             }
     }
