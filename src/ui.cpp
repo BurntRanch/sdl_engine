@@ -126,9 +126,9 @@ Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesyst
 }
 
 glm::vec2 Label::CalculateMinimumScaleToFit() {
-    glm::vec2 result;
+    glm::vec2 result = glm::vec2(0.0f, 0.0f);
 
-    for (Glyph &glyph : Glyphs) {
+    for (Glyph glyph : Glyphs) {
         result.x = std::max((glyph.offset.x + 1.0f)/2.0f + (glyph.scale.x)/2.0f, result.x);
         result.y = std::max((glyph.offset.y + 1.0f)/2.0f + (glyph.scale.y)/2.0f, result.y);
     }

@@ -61,7 +61,7 @@ const std::vector<const char *> requiredInstanceExtensions = {
 
 const std::vector<const char *> requiredLayerExtensions {
 #if DEBUG
-   "VK_LAYER_KHRONOS_validation",
+//   "VK_LAYER_KHRONOS_validation",
 #endif
 };
 
