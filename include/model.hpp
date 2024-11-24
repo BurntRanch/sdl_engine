@@ -1,11 +1,13 @@
 #ifndef MODEL_HPP
 #define MODEL_HPP
+
+#include "fmt/base.h"
+
 #include <SDL3/SDL_stdinc.h>
 #include <assimp/material.h>
 #include <cmath>
 #include <complex>
 #include <filesystem>
-#include <fmt/core.h>
 #include <glm/ext/vector_float2.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>

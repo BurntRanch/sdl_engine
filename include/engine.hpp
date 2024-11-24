@@ -35,11 +35,11 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include <fmt/core.h>
+#include "fmt/core.h"
 
-#include <error.hpp>
-#include <settings.hpp>
-#include <model.hpp>
+#include "error.hpp"
+#include "settings.hpp"
+#include "model.hpp"
 
 #include <vector>
 

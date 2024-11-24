@@ -3,7 +3,7 @@ PREFIX	  	?= /usr
 VARS  	  	?=
 
 DEBUG 		?= 1
-LOG_FRAME   ?= 0
+LOG_FRAME   	?= 0
 # https://stackoverflow.com/a/1079861
 # WAY easier way to build debug and release builds
 ifeq ($(DEBUG), 1)
@@ -16,22 +16,34 @@ else
 endif
 
 ifeq ($(LOG_FRAME), 1)
-		VARS += -DLOG_FRAME=1
+	VARS += -DLOG_FRAME=1
 endif
 
 NAME		 = BurntEngine
 TARGET		 = libengine.so.1
 SRC 	   	 = $(sort $(wildcard src/*.cpp))
 OBJ 	   	 = $(SRC:.cpp=.o)
-LDFLAGS   	+= -lassimp -lfmt -lSDL3 -lvulkan -lfreetype -shared -fno-PIE -Wl,-soname,libengine.so.1
+LDFLAGS   	+= -L$(BUILDDIR)/fmt -lassimp -lfmt -lSDL3 -lvulkan -lfreetype -shared -fno-PIE -Wl,-soname,$(TARGET)
 CXXFLAGS  	?= -mtune=generic -march=native
 CXXFLAGS        += -funroll-all-loops -Iinclude -isystem/usr/include/freetype2 -fPIC -std=c++17 $(VARS)
 
-all: $(TARGET)
+all: fmt toml $(TARGET)
 
-$(TARGET): $(OBJ)
+fmt:
+ifeq ($(wildcard $(BUILDDIR)/fmt/libfmt.a),)
+	mkdir -p $(BUILDDIR)/fmt
+	make -C src/fmt BUILDDIR=$(BUILDDIR)/fmt
+endif
+
+toml:
+ifeq ($(wildcard $(BUILDDIR)/toml++/toml.o),)
+	mkdir -p $(BUILDDIR)/toml++
+	make -C src/toml++ BUILDDIR=$(BUILDDIR)/toml++
+endif
+
+$(TARGET): fmt toml $(OBJ)
 	mkdir -p $(BUILDDIR)
-	$(CXX) $(OBJ) -o $(BUILDDIR)/$(TARGET) $(LDFLAGS)
+	$(CXX) $(OBJ) $(BUILDDIR)/toml++/toml.o -o $(BUILDDIR)/$(TARGET) $(LDFLAGS)
 
 dist: $(TARGET)
 	bsdtar -zcf $(NAME)-v$(VERSION).tar.gz LICENSE README.md -C $(BUILDDIR) $(TARGET)
@@ -42,4 +54,4 @@ clean:
 distclean:
 	rm -rf $(BUILDDIR) $(OBJ)
 
-.PHONY: $(TARGET) clean all
+.PHONY: $(TARGET) fmt toml clean all

@@ -1,8 +1,9 @@
 #include "error.hpp"
+#include "fmt/format.h"
+
 #include <assimp/material.h>
 #include <assimp/mesh.h>
 #include <assimp/postprocess.h>
-#include <fmt/format.h>
 #include <model.hpp>
 #include <stdexcept>
 

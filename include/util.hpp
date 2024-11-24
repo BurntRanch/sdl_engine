@@ -1,7 +1,7 @@
 #ifndef UTIL_HPP
 #define UTIL_HPP
 #include "common.hpp"
-#include <fmt/core.h>
+#include "fmt/base.h"
 #include <glm/ext/vector_float2.hpp>
 #include <glm/vec3.hpp>
 #include <array>

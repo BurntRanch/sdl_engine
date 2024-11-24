@@ -1,10 +1,14 @@
+#include "engine.hpp"
+
 #include "common.hpp"
+#include "fmt/base.h"
 #include "error.hpp"
 #include "ui/arrows.hpp"
 #include "ui/button.hpp"
 #include "ui/label.hpp"
 #include "ui/panel.hpp"
 #include "ui/waypoint.hpp"
+
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_mouse.h>
@@ -17,13 +21,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <engine.hpp>
-#include <exception>
 #include <filesystem>
-#include <fmt/core.h>
 #include <fstream>
 #include <future>
-#include <ratio>
 #include <set>
 #include <stdexcept>
 #include <algorithm>
@@ -34,7 +34,7 @@
 #include <vulkan/vk_enum_string_helper.h>
 
 #define STB_IMAGE_IMPLEMENTATION
-#include <stb/stb_image.h>
+#include "stb/stb_image.h"
 
 
 bool checkDeviceExtensionSupport(VkPhysicalDevice device) {

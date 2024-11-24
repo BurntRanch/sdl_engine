@@ -1,5 +1,5 @@
 #include "camera.hpp"
-#include <settings.hpp>
+#include "settings.hpp"
 
 Settings::Settings(const string_view fileName) {
     try {

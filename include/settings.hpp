@@ -1,9 +1,10 @@
 #ifndef SETTINGS_HPP
 #define SETTINGS_HPP
-#include <string_view>
-#include <toml++/toml.hpp>
-#include <fmt/core.h>
+#include "toml++/toml.hpp"
+#include "fmt/core.h"
+
 #include <SDL3/SDL_stdinc.h>
+#include <string_view>
 
 using std::string_view;
 

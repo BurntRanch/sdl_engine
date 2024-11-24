@@ -1,18 +1,19 @@
 #include "ui.hpp"
+
 #include "common.hpp"
 #include "ui/arrows.hpp"
 #include "ui/button.hpp"
 #include "ui/label.hpp"
+#include "engine.hpp"
 #include "util.hpp"
+
 #include <SDL3/SDL_stdinc.h>
 #include <filesystem>
 #include <freetype/freetype.h>
 #include <glm/ext/matrix_transform.hpp>
 #include <stdexcept>
-#include <utility>
 #include <vulkan/vulkan_core.h>
 #include <rapidxml.hpp>
-#include "engine.hpp"
 
 using namespace UI;
 
