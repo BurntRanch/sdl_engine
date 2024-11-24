@@ -92,9 +92,11 @@ misrepresented as being the original software.
 #else
  #include <limits.h>
  #include <unistd.h>
+ #include <fcntl.h>
  #include <dirent.h> /* on old systems try <sys/dir.h> instead */
  #include <termios.h>
  #include <sys/utsname.h>
+ #include <sys/stat.h>
  #include <signal.h> /* on old systems try <sys/signal.h> instead */
  #define TINYFD_SLASH "/"
 #endif /* _WIN32 */
@@ -393,19 +395,19 @@ static int fileExists( char const * aFilePathAndName )
 
 static void wipefile(char const * aFilename)
 {
-		int i;
+		int i, fd;
 		struct stat st;
 		FILE * lIn;
 
-		if (stat(aFilename, &st) == 0)
+		if ((fd = open(aFilename, O_WRONLY)) != -1)
 		{
-				if ((lIn = fopen(aFilename, "w")))
+				if (fstat(fd, &st) == 0)
 				{
 						for (i = 0; i < st.st_size; i++)
 						{
-								fputc('A', lIn);
+								write(fd, "A", 1);
 						}
-						fclose(lIn);
+						close(fd);
 				}
 		}
 }

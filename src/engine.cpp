@@ -335,7 +335,7 @@ TextureBufferAndMemory Engine::LoadTextureFromFile(const std::string &name) {
     
     fmt::println("Loading image {} ...", name);
     stbi_uc *imageData = stbi_load(name.data(), &texWidth, &texHeight, nullptr, STBI_rgb_alpha);
-    VkDeviceSize imageSize = texWidth * texHeight * 4;
+    VkDeviceSize imageSize = static_cast<VkDeviceSize>(texWidth * texHeight * 4);
 
     if (!imageData)
     {
@@ -923,7 +923,7 @@ Glyph Engine::GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, 
             }
     }
 
-    VkDeviceSize glyphBufferSize = ftFace->glyph->bitmap.width * ftFace->glyph->bitmap.rows;
+    VkDeviceSize glyphBufferSize = static_cast<VkDeviceSize>(ftFace->glyph->bitmap.width * ftFace->glyph->bitmap.rows);
 
     TextureBufferAndMemory glyphBuffer{};
     AllocateBuffer(sharedContext, glyphBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyphBuffer.bufferAndMemory.buffer, glyphBuffer.bufferAndMemory.memory);

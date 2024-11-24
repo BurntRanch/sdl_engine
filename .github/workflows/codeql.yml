@@ -90,7 +90,7 @@ jobs:
         -D SDL_RPATH=OFF
 
     - name: Build and Install SDL3
-      run: cmake --build build && sudo cmake --install build
+      run: cmake --build build && sudo cmake --install build && rm -rf SDL
 
     # If the analyze step fails for one of the languages you are analyzing with
     # "We were unable to automatically build your code", modify the matrix above
