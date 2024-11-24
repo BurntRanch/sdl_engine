@@ -73,7 +73,6 @@ jobs:
     - name: Install packages
       run: >
         sudo apt install ninja-build build-essential cmake libc6-dev-amd64-cross
-        libstb-dev libfmt-dev
         libglm-dev libglfw3-dev libtbb-dev libassimp-dev
         libvulkan-dev vulkan-tools vulkan-validationlayers-dev
 
@@ -92,11 +91,6 @@ jobs:
 
     - name: Build and Install SDL3
       run: cmake --build build && sudo cmake --install build
-
-    - name: Get toml.hpp
-      run: |
-        mkdir include/toml++
-        wget https://github.com/marzer/tomlplusplus/raw/master/toml.hpp -O include/toml++/toml.hpp
 
     # If the analyze step fails for one of the languages you are analyzing with
     # "We were unable to automatically build your code", modify the matrix above
