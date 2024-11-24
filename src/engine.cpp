@@ -533,6 +533,18 @@ void Engine::UnloadModel(Model *model) {
     }
 }
 
+void Engine::AddUIChildren(UI::GenericElement *element) {
+    for (UI::GenericElement *child : element->GetChildren()) {
+        AddUIGenericElement(child);
+    }
+}
+
+void Engine::RemoveUIChildren(UI::GenericElement *element) {
+    for (UI::GenericElement *child : element->GetChildren()) {
+        RemoveUIGenericElement(child);
+    }
+}
+
 void Engine::AddUIGenericElement(UI::GenericElement *element) {
     switch (element->type) {
         case UI::PANEL:
@@ -543,6 +555,25 @@ void Engine::AddUIGenericElement(UI::GenericElement *element) {
             break;
         case UI::BUTTON:
             AddUIButton(reinterpret_cast<UI::Button *>(element));
+            break;
+        case UI::UNKNOWN:
+        case UI::ARROWS:
+        case UI::SCALABLE:
+        case UI::WAYPOINT:
+          break;
+        }
+}
+
+void Engine::RemoveUIGenericElement(UI::GenericElement *element) {
+    switch (element->type) {
+        case UI::PANEL:
+            RemoveUIPanel(reinterpret_cast<UI::Panel *>(element));
+            break;
+        case UI::LABEL:
+            RemoveUILabel(reinterpret_cast<UI::Label *>(element));
+            break;
+        case UI::BUTTON:
+            RemoveUIButton(reinterpret_cast<UI::Button *>(element));
             break;
         case UI::UNKNOWN:
         case UI::ARROWS:
@@ -659,6 +690,8 @@ void Engine::AddUIArrows(UI::Arrows *arrows) {
 }
 
 void Engine::RemoveUIArrows(UI::Arrows *arrows) {
+    RemoveUIChildren(arrows);
+
     for (size_t i = 0; i < m_RenderUIArrows.size(); i++) {
         if (m_RenderUIArrows[i].arrows != arrows)
             continue;
@@ -686,6 +719,8 @@ void Engine::RemoveUIArrows(UI::Arrows *arrows) {
 }
 
 void Engine::RemoveUIWaypoint(UI::Waypoint *waypoint) {
+    RemoveUIChildren(waypoint);
+
     for (size_t i = 0; i < m_RenderUIWaypoints.size(); i++) {
         if (m_RenderUIWaypoints[i].waypoint != waypoint)
             continue;
@@ -711,6 +746,8 @@ void Engine::RemoveUIWaypoint(UI::Waypoint *waypoint) {
 
         vkFreeDescriptorSets(m_EngineDevice, m_UIWaypointDescriptorPool, 1, &renderUIWaypoint.descriptorSet);
     }
+
+    AddUIChildren(waypoint);
 }
 
 void Engine::AddUIPanel(UI::Panel *panel) {
@@ -729,9 +766,13 @@ void Engine::AddUIPanel(UI::Panel *panel) {
     vkMapMemory(m_EngineDevice, renderUIPanel.uboBuffer.memory, 0, sizeof(renderUIPanel.ubo), 0, &(renderUIPanel.uboBuffer.mappedData));
 
     m_UIPanels.push_back(renderUIPanel);
+
+    AddUIChildren(panel);
 }
 
 void Engine::RemoveUIPanel(UI::Panel *panel) {
+    RemoveUIChildren(panel);
+
     for (size_t i = 0; i < m_UIPanels.size(); i++) {
         RenderUIPanel renderUIPanel = m_UIPanels[i];
 
@@ -778,9 +819,13 @@ void Engine::AddUILabel(UI::Label *label) {
     vkMapMemory(m_EngineDevice, renderUILabel.uboBuffer.memory, 0, sizeof(renderUILabel.ubo), 0, &(renderUILabel.uboBuffer.mappedData));
 
     m_UILabels.push_back(renderUILabel);
+
+    AddUIChildren(label);
 }
 
 void Engine::RemoveUILabel(UI::Label *label) {
+    RemoveUIChildren(label);
+
     for (size_t i = 0; i < m_UILabels.size(); i++) {
         RenderUILabel renderUILabel = m_UILabels[i];
 
@@ -807,13 +852,11 @@ void Engine::RemoveUILabel(UI::Label *label) {
 }
 
 void Engine::AddUIButton(UI::Button *button) {
-    AddUIPanel(button->bgPanel);
-    AddUILabel(button->fgLabel);
+    AddUIChildren(button);
 }
 
 void Engine::RemoveUIButton(UI::Button *button) {
-    RemoveUIPanel(button->bgPanel);
-    RemoveUILabel(button->fgLabel);
+    AddUIChildren(button);
 }
 
 void Engine::RegisterUpdateFunction(const std::function<void()> &func) {

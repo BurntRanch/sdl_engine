@@ -182,8 +182,12 @@ public:
     void LoadModel(Model *model);   // this is the first function created to be used by main.cpp
     void UnloadModel(Model *model);
 
+    void AddUIChildren(UI::GenericElement *element);
+    void RemoveUIChildren(UI::GenericElement *element);
+
     // Find out the type through the "type" member variable and call the appropriate function for you!
     void AddUIGenericElement(UI::GenericElement *element);
+    void RemoveUIGenericElement(UI::GenericElement *element);
 
     void AddUIWaypoint(UI::Waypoint *waypoint);
     void RemoveUIWaypoint(UI::Waypoint *waypoint);

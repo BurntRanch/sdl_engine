@@ -20,12 +20,12 @@ ifeq ($(LOG_FRAME), 1)
 endif
 
 NAME		 = BurntEngine
-TARGET		 = main
+TARGET		 = libengine.so.1
 SRC 	   	 = $(sort $(wildcard src/*.cpp))
 OBJ 	   	 = $(SRC:.cpp=.o)
-LDFLAGS   	+= -lassimp -lfmt -lSDL3 -lvulkan -lfreetype
+LDFLAGS   	+= -lassimp -lfmt -lSDL3 -lvulkan -lfreetype -shared -fno-PIE -Wl,-soname,libengine.so.1
 CXXFLAGS  	?= -mtune=generic -march=native
-CXXFLAGS        += -funroll-all-loops -Iinclude -isystem/usr/include/freetype2 -std=c++17 $(VARS)
+CXXFLAGS        += -funroll-all-loops -Iinclude -isystem/usr/include/freetype2 -fPIC -std=c++17 $(VARS)
 
 all: $(TARGET)
 
