@@ -3,6 +3,7 @@
 #include "common.hpp"
 #include "fmt/base.h"
 #include "error.hpp"
+#include "model.hpp"
 #include "ui/arrows.hpp"
 #include "ui/button.hpp"
 #include "ui/label.hpp"
@@ -101,7 +102,7 @@ VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>
 Get ready for loss of braincells!
 */
 
-Engine::~Engine() {
+Renderer::~Renderer() {
     fmt::println("Destroying Engine!");
 
     if (m_EngineDevice)
@@ -220,7 +221,7 @@ Engine::~Engine() {
     SDL_Quit();
 }
 
-VkShaderModule Engine::CreateShaderModule(VkDevice device, const std::vector<char> &code) {
+VkShaderModule Renderer::CreateShaderModule(VkDevice device, const std::vector<char> &code) {
     VkShaderModuleCreateInfo shaderCreateInfo = {};
     shaderCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     shaderCreateInfo.codeSize = code.size();
@@ -233,7 +234,7 @@ VkShaderModule Engine::CreateShaderModule(VkDevice device, const std::vector<cha
     return out;
 }
 
-SwapChainSupportDetails Engine::QuerySwapChainSupport(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface) {
+SwapChainSupportDetails Renderer::QuerySwapChainSupport(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface) {
     SwapChainSupportDetails details;
 
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &details.capabilities); 
@@ -257,7 +258,7 @@ SwapChainSupportDetails Engine::QuerySwapChainSupport(VkPhysicalDevice physicalD
     return details;
 }
 
-void Engine::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size) {
+void Renderer::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size) {
     EngineSharedContext sharedContext = GetSharedContext();
 
     VkCommandBuffer commandBuffer = BeginSingleTimeCommands(sharedContext);
@@ -273,7 +274,7 @@ void Engine::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBu
 }
 
 // first element = diffuse
-std::array<TextureImageAndMemory, 1> Engine::LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations) {
+std::array<TextureImageAndMemory, 1> Renderer::LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations) {
     std::array<TextureImageAndMemory, 1> textures;
 
     EngineSharedContext sharedContext = GetSharedContext();
@@ -330,7 +331,7 @@ std::array<TextureImageAndMemory, 1> Engine::LoadTexturesFromMesh(Mesh &mesh, bo
     return textures;
 }
 
-TextureBufferAndMemory Engine::LoadTextureFromFile(const std::string &name) {
+TextureBufferAndMemory Renderer::LoadTextureFromFile(const std::string &name) {
     int texWidth, texHeight;
     
     fmt::println("Loading image {} ...", name);
@@ -364,7 +365,7 @@ TextureBufferAndMemory Engine::LoadTextureFromFile(const std::string &name) {
     return {{imageStagingBuffer, imageStagingMemory}, (Uint32)texWidth, (Uint32)texHeight, (Uint8)4};
 }
 
-VkImageView Engine::CreateImageView(TextureImageAndMemory &imageAndMemory, VkFormat format, VkImageAspectFlags aspectMask, bool recordCreation) {
+VkImageView Renderer::CreateImageView(TextureImageAndMemory &imageAndMemory, VkFormat format, VkImageAspectFlags aspectMask, bool recordCreation) {
     VkImageViewCreateInfo imageViewCreateInfo{};
     imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     imageViewCreateInfo.image = imageAndMemory.imageAndMemory.image;
@@ -387,7 +388,7 @@ VkImageView Engine::CreateImageView(TextureImageAndMemory &imageAndMemory, VkFor
     return imageView;
 }
 
-VkSampler Engine::CreateSampler(float maxAnisotropy, bool recordCreation) {
+VkSampler Renderer::CreateSampler(float maxAnisotropy, bool recordCreation) {
     VkSamplerCreateInfo samplerCreateInfo{};
     samplerCreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerCreateInfo.magFilter = VK_FILTER_LINEAR;
@@ -417,7 +418,7 @@ VkSampler Engine::CreateSampler(float maxAnisotropy, bool recordCreation) {
     return sampler;
 }
 
-VkFormat Engine::FindBestFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
+VkFormat Renderer::FindBestFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
     for (VkFormat format : candidates) {
         VkFormatProperties props;
         vkGetPhysicalDeviceFormatProperties(m_EnginePhysicalDevice, format, &props);
@@ -432,7 +433,7 @@ VkFormat Engine::FindBestFormat(const std::vector<VkFormat>& candidates, VkImage
     throw std::runtime_error(engineError::CANT_FIND_ANY_FORMAT);
 }
 
-RenderModel Engine::LoadMesh(Mesh &mesh, Model *model, bool loadTextures) {
+RenderModel Renderer::LoadMesh(Mesh &mesh, Model *model, bool loadTextures) {
     EngineSharedContext sharedContext = GetSharedContext();
 
     RenderModel renderModel{};
@@ -474,15 +475,15 @@ RenderModel Engine::LoadMesh(Mesh &mesh, Model *model, bool loadTextures) {
     return renderModel;
 }
 
-void Engine::SetMouseCaptureState(bool capturing) {
+void Renderer::SetMouseCaptureState(bool capturing) {
     SDL_SetWindowRelativeMouseMode(m_EngineWindow, capturing);
 }
 
-void Engine::LoadModel(Model *model) {
+void Renderer::LoadModel(Model *model) {
     std::vector<std::future<RenderModel>> tasks;
 
     for (Mesh &mesh : model->meshes) {
-        tasks.push_back(std::async(std::launch::async, &Engine::LoadMesh, this, std::ref(mesh), model, true));
+        tasks.push_back(std::async(std::launch::async, &Renderer::LoadMesh, this, std::ref(mesh), model, true));
     }
 
     // Any exception here is going to just happen and get caught like a regular engine error.
@@ -493,7 +494,7 @@ void Engine::LoadModel(Model *model) {
     return;
 }
 
-void Engine::UnloadRenderModel(RenderModel &renderModel) {
+void Renderer::UnloadRenderModel(RenderModel &renderModel) {
     vkDeviceWaitIdle(m_EngineDevice);
 
     if (renderModel.diffTextureImageView)
@@ -517,7 +518,7 @@ void Engine::UnloadRenderModel(RenderModel &renderModel) {
     vkFreeMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, NULL);
 }
 
-void Engine::UnloadModel(Model *model) {
+void Renderer::UnloadModel(Model *model) {
     for (size_t i = 0; i < m_RenderModels.size(); i++) {
         if (m_RenderModels[i].model != model)
             continue;
@@ -533,19 +534,19 @@ void Engine::UnloadModel(Model *model) {
     }
 }
 
-void Engine::AddUIChildren(UI::GenericElement *element) {
+void Renderer::AddUIChildren(UI::GenericElement *element) {
     for (UI::GenericElement *child : element->GetChildren()) {
         AddUIGenericElement(child);
     }
 }
 
-void Engine::RemoveUIChildren(UI::GenericElement *element) {
+void Renderer::RemoveUIChildren(UI::GenericElement *element) {
     for (UI::GenericElement *child : element->GetChildren()) {
         RemoveUIGenericElement(child);
     }
 }
 
-void Engine::AddUIGenericElement(UI::GenericElement *element) {
+void Renderer::AddUIGenericElement(UI::GenericElement *element) {
     switch (element->type) {
         case UI::PANEL:
             AddUIPanel(reinterpret_cast<UI::Panel *>(element));
@@ -564,7 +565,7 @@ void Engine::AddUIGenericElement(UI::GenericElement *element) {
         }
 }
 
-void Engine::RemoveUIGenericElement(UI::GenericElement *element) {
+void Renderer::RemoveUIGenericElement(UI::GenericElement *element) {
     switch (element->type) {
         case UI::PANEL:
             RemoveUIPanel(reinterpret_cast<UI::Panel *>(element));
@@ -583,7 +584,7 @@ void Engine::RemoveUIGenericElement(UI::GenericElement *element) {
         }
 }
 
-void Engine::AddUIWaypoint(UI::Waypoint *waypoint) {
+void Renderer::AddUIWaypoint(UI::Waypoint *waypoint) {
     EngineSharedContext sharedContext = GetSharedContext();
 
     RenderUIWaypoint renderUIWaypoint{};
@@ -655,7 +656,7 @@ void Engine::AddUIWaypoint(UI::Waypoint *waypoint) {
     m_RenderUIWaypoints.push_back(renderUIWaypoint);
 }
 
-void Engine::AddUIArrows(UI::Arrows *arrows) {
+void Renderer::AddUIArrows(UI::Arrows *arrows) {
     EngineSharedContext sharedContext = GetSharedContext();
 
     RenderUIArrows renderUIArrows{};
@@ -689,7 +690,7 @@ void Engine::AddUIArrows(UI::Arrows *arrows) {
     m_RenderUIArrows.push_back(renderUIArrows);
 }
 
-void Engine::RemoveUIArrows(UI::Arrows *arrows) {
+void Renderer::RemoveUIArrows(UI::Arrows *arrows) {
     RemoveUIChildren(arrows);
 
     for (size_t i = 0; i < m_RenderUIArrows.size(); i++) {
@@ -718,7 +719,7 @@ void Engine::RemoveUIArrows(UI::Arrows *arrows) {
     }
 }
 
-void Engine::RemoveUIWaypoint(UI::Waypoint *waypoint) {
+void Renderer::RemoveUIWaypoint(UI::Waypoint *waypoint) {
     RemoveUIChildren(waypoint);
 
     for (size_t i = 0; i < m_RenderUIWaypoints.size(); i++) {
@@ -750,7 +751,7 @@ void Engine::RemoveUIWaypoint(UI::Waypoint *waypoint) {
     AddUIChildren(waypoint);
 }
 
-void Engine::AddUIPanel(UI::Panel *panel) {
+void Renderer::AddUIPanel(UI::Panel *panel) {
     RenderUIPanel renderUIPanel{};
 
     renderUIPanel.panel = panel;
@@ -770,7 +771,7 @@ void Engine::AddUIPanel(UI::Panel *panel) {
     AddUIChildren(panel);
 }
 
-void Engine::RemoveUIPanel(UI::Panel *panel) {
+void Renderer::RemoveUIPanel(UI::Panel *panel) {
     RemoveUIChildren(panel);
 
     for (size_t i = 0; i < m_UIPanels.size(); i++) {
@@ -794,7 +795,7 @@ void Engine::RemoveUIPanel(UI::Panel *panel) {
     }
 }
 
-void Engine::AddUILabel(UI::Label *label) {
+void Renderer::AddUILabel(UI::Label *label) {
     EngineSharedContext sharedContext = GetSharedContext();
 
     RenderUILabel renderUILabel{};
@@ -823,7 +824,7 @@ void Engine::AddUILabel(UI::Label *label) {
     AddUIChildren(label);
 }
 
-void Engine::RemoveUILabel(UI::Label *label) {
+void Renderer::RemoveUILabel(UI::Label *label) {
     RemoveUIChildren(label);
 
     for (size_t i = 0; i < m_UILabels.size(); i++) {
@@ -851,23 +852,31 @@ void Engine::RemoveUILabel(UI::Label *label) {
     }
 }
 
-void Engine::AddUIButton(UI::Button *button) {
+void Renderer::AddUIButton(UI::Button *button) {
     AddUIChildren(button);
 }
 
-void Engine::RemoveUIButton(UI::Button *button) {
+void Renderer::RemoveUIButton(UI::Button *button) {
     AddUIChildren(button);
 }
 
-void Engine::RegisterUpdateFunction(const std::function<void()> &func) {
+void Renderer::RegisterUpdateFunction(const std::function<void()> &func) {
     m_UpdateFunctions.push_back(func);
 }
 
-void Engine::RegisterFixedUpdateFunction(const std::function<void(std::array<bool, 322>)> &func) {
+void Renderer::RegisterFixedUpdateFunction(const std::function<void(std::array<bool, 322>)> &func) {
     m_FixedUpdateFunctions.push_back(func);
 }
 
-Glyph Engine::GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, char c, float &x, float &y, float depth) {
+void Renderer::RegisterSDLEventListener(const std::function<void(SDL_Event *)> &func, SDL_EventType types) {
+    if (m_SDLEventListeners.find(types) == m_SDLEventListeners.end()) {
+        m_SDLEventListeners.insert(std::make_pair(types, std::vector<std::function<void(SDL_Event *)>>()));
+    }
+    
+    m_SDLEventListeners[types].push_back(func);
+}
+
+Glyph Renderer::GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, char c, float &x, float &y, float depth) {
     Glyph glyph{};
     
     glyph.character = c;
@@ -958,14 +967,16 @@ Glyph Engine::GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, 
     xpos -= 1.0f;
     ypos -= 1.0f - (PIXEL_HEIGHT_FLOAT / static_cast<float>(m_Settings.DisplayHeight));
 
-    BufferAndMemory bufferAndMemory = CreateSimpleVertexBuffer(sharedContext, {
-                                                            {glm::vec3(0.0f, 0.0f, depth), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec3(w, h, depth), glm::vec2(1.0f, 1.0f)},
-                                                            {glm::vec3(0.0f, h, depth), glm::vec2(0.0f, 1.0f)},
-                                                            {glm::vec3(0.0f, 0.0f, depth), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec3(w, 0.0f, depth), glm::vec2(1.0f, 0.0f)},
-                                                            {glm::vec3(w, h, depth), glm::vec2(1.0f, 1.0f)}
-                                                        }, false);
+    std::vector<SimpleVertex> simpleVerts = {
+                                                {glm::vec3(0.0f, 0.0f, depth), glm::vec2(0.0f, 0.0f)},
+                                                {glm::vec3(w, h, depth), glm::vec2(1.0f, 1.0f)},
+                                                {glm::vec3(0.0f, h, depth), glm::vec2(0.0f, 1.0f)},
+                                                {glm::vec3(0.0f, 0.0f, depth), glm::vec2(0.0f, 0.0f)},
+                                                {glm::vec3(w, 0.0f, depth), glm::vec2(1.0f, 0.0f)},
+                                                {glm::vec3(w, h, depth), glm::vec2(1.0f, 1.0f)}
+                                            };
+
+    BufferAndMemory bufferAndMemory = CreateSimpleVertexBuffer(sharedContext, simpleVerts, false);
     
     glyph.offset.x = xpos;
     glyph.offset.y = ypos;
@@ -986,7 +997,7 @@ Glyph Engine::GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, 
     return glyph;
 }
 
-void Engine::InitSwapchain() {
+void Renderer::InitSwapchain() {
     if (m_Swapchain) {
         vkDestroySwapchainKHR(m_EngineDevice, m_Swapchain, NULL);
     }
@@ -1091,7 +1102,7 @@ void Engine::InitSwapchain() {
     }
 }
 
-void Engine::InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageView) {
+void Renderer::InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageView) {
     for (VkFramebuffer framebuffer : m_SwapchainFramebuffers)
         if (framebuffer)
             vkDestroyFramebuffer(m_EngineDevice, framebuffer, NULL);
@@ -1102,7 +1113,7 @@ void Engine::InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageVie
         m_SwapchainFramebuffers[i] = CreateFramebuffer(renderPass, m_SwapchainImageViews[i], {m_Settings.DisplayWidth, m_Settings.DisplayHeight}, depthImageView);
 }
 
-VkImageView Engine::CreateDepthImage(Uint32 width, Uint32 height) {
+VkImageView Renderer::CreateDepthImage(Uint32 width, Uint32 height) {
     EngineSharedContext sharedContext = GetSharedContext();
 
     VkFormat depthFormat = FindDepthFormat();
@@ -1118,7 +1129,7 @@ VkImageView Engine::CreateDepthImage(Uint32 width, Uint32 height) {
     return depthImageView;
 }
 
-Uint32 Engine::FindMemoryType(Uint32 typeFilter, VkMemoryPropertyFlags properties) {
+Uint32 Renderer::FindMemoryType(Uint32 typeFilter, VkMemoryPropertyFlags properties) {
     VkPhysicalDeviceMemoryProperties memoryProperties;
     vkGetPhysicalDeviceMemoryProperties(m_EnginePhysicalDevice, &memoryProperties);
 
@@ -1130,7 +1141,7 @@ Uint32 Engine::FindMemoryType(Uint32 typeFilter, VkMemoryPropertyFlags propertie
     throw std::runtime_error(engineError::CANT_FIND_SUITABLE_MEMTYPE);
 }
 
-void Engine::InitInstance() {
+void Renderer::InitInstance() {
     Uint32 extensionCount;
     // Ask SDL to return a pointer to a C-string array, extensionCount will be set to the length.
     const char * const * instanceExtensions = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
@@ -1175,7 +1186,7 @@ void Engine::InitInstance() {
 /* Creates a Vulkan graphics pipeline, shaderName will be used as a part of the path.
  * Sanitization is the job of the caller.
  */
-PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts, bool isSimple, bool enableDepth) {
+PipelineAndLayout Renderer::CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts, bool isSimple, bool enableDepth) {
     auto vertShader = readFile("shaders/" + shaderName + ".vert.spv");
     auto fragShader = readFile("shaders/" + shaderName + ".frag.spv");
 
@@ -1339,7 +1350,7 @@ PipelineAndLayout Engine::CreateGraphicsPipeline(const std::string &shaderName, 
     return pipelineAndLayout;
 }
 
-VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, bool shouldContainDepthImage) {
+VkRenderPass Renderer::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, bool shouldContainDepthImage) {
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = imageFormat;
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -1425,7 +1436,7 @@ VkRenderPass Engine::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentSto
     return renderPass;
 }
 
-VkFramebuffer Engine::CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkExtent2D resolution, VkImageView depthImageView) {
+VkFramebuffer Renderer::CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkExtent2D resolution, VkImageView depthImageView) {
     std::array<VkImageView, 2> attachments = {imageView, depthImageView};
 
     VkFramebufferCreateInfo createInfo{};
@@ -1445,13 +1456,13 @@ VkFramebuffer Engine::CreateFramebuffer(VkRenderPass renderPass, VkImageView ima
 }
 
 
-bool Engine::QuitEventCheck(SDL_Event &event) {
+bool Renderer::QuitEventCheck(SDL_Event &event) {
     if (event.type == SDL_EVENT_QUIT || (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE))
         return true;
     return false;
 }
 
-void Engine::Init() {
+void Renderer::Init() {
     int SDL_INIT_STATUS = SDL_Init(SDL_INIT_VIDEO);
     if (!SDL_INIT_STATUS)
         throw std::runtime_error(fmt::format(engineError::FAILED_SDL_INIT, SDL_INIT_STATUS));
@@ -1958,7 +1969,7 @@ void Engine::Init() {
     std::fill(m_KeyMap.begin(), m_KeyMap.end(), false);
 }
 
-void Engine::CallFixedUpdateFunctions(bool *shouldQuitFlag) {
+void Renderer::CallFixedUpdateFunctions(bool *shouldQuitFlag) {
     using namespace std::chrono;
     using namespace std::this_thread;
 
@@ -1969,7 +1980,7 @@ void Engine::CallFixedUpdateFunctions(bool *shouldQuitFlag) {
     }
 }
 
-void Engine::Start() {
+void Renderer::Start() {
     // NOW, we are getting to the while loop.
     bool shouldQuit = false;
     Uint32 currentFrameIndex = 0;
@@ -1997,6 +2008,16 @@ void Engine::Start() {
                 case SDL_EVENT_KEY_UP:
                     m_KeyMap[event.key.scancode] = false;
                     break;
+            }
+
+            try {
+                auto &listeners = m_SDLEventListeners.at((SDL_EventType)(event.type));
+
+                for (auto &listener : listeners) {
+                    listener(&event);
+                }
+            } catch (const std::out_of_range &e) {
+                continue;
             }
         }
 
@@ -2508,4 +2529,73 @@ void Engine::Start() {
     }
 
     //fixedUpdateThread.join();
+}
+
+void Engine::InitRenderer(Settings &settings, const Camera *primaryCamera) {
+    m_Settings = &settings;
+
+    m_Renderer = new Renderer(settings, primaryCamera);
+
+    m_Renderer->Init();
+
+    m_Renderer->RegisterSDLEventListener(std::bind(&Engine::CheckButtonClicks, this, std::placeholders::_1), SDL_EVENT_MOUSE_BUTTON_UP);
+}
+
+void Engine::RegisterUIButtonListener(const std::function<void(std::string)> listener) {
+    m_UIButtonListeners.push_back(listener);
+}
+
+Renderer *Engine::GetRenderer() {
+    return m_Renderer;
+}
+
+void Engine::CheckButtonClicks(SDL_Event *event) {
+    SDL_MouseButtonEvent *mouseButtonEvent = reinterpret_cast<SDL_MouseButtonEvent *>(event);
+    glm::vec2 mousePos = glm::vec2(mouseButtonEvent->x, mouseButtonEvent->y)/glm::vec2(m_Settings->DisplayWidth, m_Settings->DisplayHeight);
+
+    for (UI::Button *button : m_UIButtons) {
+        glm::vec2 position = button->GetPosition();
+        glm::vec2 scale = button->GetScale();
+
+        if (position.x <= mousePos.x && mousePos.x <= position.x + scale.x &&
+            position.y <= mousePos.y && mousePos.y <= position.y + scale.y) {
+                for (auto listener : m_UIButtonListeners) {
+                    listener(button->id);
+                }
+            }
+    }
+}
+
+void Engine::StartRenderer() {
+    m_Renderer->Start();
+}
+
+void Engine::LoadUIFile(const std::string &name) {
+    if (m_Renderer == nullptr) {
+        return;
+    }
+
+    EngineSharedContext sharedContext = m_Renderer->GetSharedContext();
+    std::vector<UI::GenericElement *> UIElements = UI::LoadUIFile(sharedContext, name);
+    for (UI::GenericElement *element : UIElements) {
+        m_Renderer->AddUIGenericElement(element);
+
+        if (element->type == UI::BUTTON) {
+            RegisterUIButton(reinterpret_cast<UI::Button *>(element));
+        }
+    }
+}
+
+void Engine::RegisterUIButton(UI::Button *button) {
+    m_UIButtons.push_back(button);
+}
+
+void Engine::UnregisterUIButton(UI::Button *button) {
+    auto buttonIter = std::find(m_UIButtons.begin(), m_UIButtons.end(), button);
+
+    if (buttonIter != m_UIButtons.end()) {
+        m_UIButtons.erase(buttonIter);
+    }
+
+    return;
 }

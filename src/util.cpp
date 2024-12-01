@@ -1,5 +1,6 @@
 #include "util.hpp"
 #include "camera.hpp"
+#include "rapidxml.hpp"
 #include "ui/label.hpp"
 #include "common.hpp"
 #include <sstream>
@@ -77,4 +78,91 @@ glm::vec2 adjustScaleToFitType(UI::Scalable *self, glm::vec2 scale, UI::FitType 
     }
 
     return scale;
+}
+
+rapidxml::xml_node<char>* getPropertiesNode(rapidxml::xml_node<char> *uiObjectNode) {
+    using rapidxml::xml_node;
+
+    xml_node<char> *propertiesNode = uiObjectNode->first_node("Properties");
+    UTILASSERT(propertiesNode);
+
+    return propertiesNode;
+};
+
+std::string getID(rapidxml::xml_node<char> *propertiesNode) {
+    using rapidxml::xml_node;
+
+    xml_node<char> *idNode = propertiesNode->first_node("ID");
+    UTILASSERT(idNode);
+    std::string id = idNode->value();
+
+    return id;
+}
+
+glm::vec3 getColor(rapidxml::xml_node<char> *propertiesNode) {
+    using rapidxml::xml_node;
+
+    xml_node<char> *colorNode = propertiesNode->first_node("Color");
+    UTILASSERT(colorNode);
+
+    xml_node<char> *colorRNode = colorNode->first_node("R");
+    UTILASSERT(colorRNode);
+    float colorR = std::stof(colorRNode->value());
+
+    xml_node<char> *colorGNode = colorNode->first_node("G");
+    UTILASSERT(colorGNode);
+    float colorG = std::stof(colorGNode->value());
+
+    xml_node<char> *colorBNode = colorNode->first_node("B");
+    UTILASSERT(colorBNode);
+    float colorB = std::stof(colorBNode->value());
+
+    return glm::vec3(colorR, colorG, colorB);
+}
+
+glm::vec2 getPosition(rapidxml::xml_node<char> *propertiesNode) {
+    using rapidxml::xml_node;
+
+    xml_node<char> *positionNode = propertiesNode->first_node("Position");
+    UTILASSERT(positionNode);
+
+    xml_node<char> *positionXNode = positionNode->first_node("X");
+    UTILASSERT(positionXNode);
+    float positionX = std::stof(positionXNode->value());
+
+    xml_node<char> *positionYNode = positionNode->first_node("Y");
+    UTILASSERT(positionYNode);
+    float positionY = std::stof(positionYNode->value());
+
+    return glm::vec2(positionX, positionY);
+}
+
+glm::vec2 getScale(rapidxml::xml_node<char> *propertiesNode) {
+    using rapidxml::xml_node;
+
+    xml_node<char> *scaleNode = propertiesNode->first_node("Scale");
+    UTILASSERT(scaleNode);
+
+    xml_node<char> *scaleXNode = scaleNode->first_node("X");
+    UTILASSERT(scaleXNode);
+    float scaleX = std::stof(scaleXNode->value());
+
+    xml_node<char> *scaleYNode = scaleNode->first_node("Y");
+    UTILASSERT(scaleYNode);
+    float scaleY = std::stof(scaleYNode->value());
+
+    return glm::vec2(scaleX, scaleY);
+}
+
+float getZDepth(rapidxml::xml_node<char> *propertiesNode, float depthDefault) {
+    using rapidxml::xml_node;
+
+    xml_node<char> *zDepthNode = propertiesNode->first_node("ZDepth");
+    float zDepth = depthDefault;
+
+    if (zDepthNode) {
+        zDepth = std::stof(zDepthNode->value());
+    }
+
+    return zDepth;
 }

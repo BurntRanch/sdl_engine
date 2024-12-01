@@ -105,14 +105,6 @@ Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesyst
     FT_Set_Pixel_Sizes(m_FTFace, 0, PIXEL_HEIGHT);
 
     float x = 0.0f;
-
-    /* This value needs to be -1.5 for SOME reason. 
-     *
-     *  If it is too high, the glyph shifts to the bottom and artifacts start showing from above.
-     *  If it is too low, the glyph shifts to the top and artifacts start showing from below.
-     *
-     * Tested against NotoSans-Black.ttf and LiberationMono-Bold.ttf
-     */
     float y = 0.0f;
 
     for (char c : text) {
@@ -188,7 +180,7 @@ inline float GenericElement::GetDepth() {
 }
 
 inline void GenericElement::SetDepth(float depth) {
-    m_Depth = depth;
+    m_Depth = depth*0.9f;   // 0.9f to avoid conflicting with the upscaled image which has a depth of 1.0
 }
 
 inline void GenericElement::SetParent(GenericElement *parent) {
@@ -255,47 +247,24 @@ GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxm
 
     GenericElement *element;
 
-    if (nodeName == "Group") {
-        xml_node<char> *propertiesNode = node->first_node("Properties");
-        UTILASSERT(propertiesNode);
+    xml_node<char> *propertiesNode;
+    propertiesNode = getPropertiesNode(node);
 
+    if (nodeName == "Group") {
         xml_node<char> *fitTypeNode = propertiesNode->first_node("FitType");
 
-        xml_node<char> *positionNode = propertiesNode->first_node("Position");
-        UTILASSERT(positionNode);
+        glm::vec2 position = getPosition(propertiesNode);
 
-        xml_node<char> *positionXNode = positionNode->first_node("X");
-        UTILASSERT(positionXNode);
-        float positionX = std::stof(positionXNode->value());
+        glm::vec2 scale = getScale(propertiesNode);
 
-        xml_node<char> *positionYNode = positionNode->first_node("Y");
-        UTILASSERT(positionYNode);
-        float positionY = std::stof(positionYNode->value());
-
-
-        xml_node<char> *scaleNode = propertiesNode->first_node("Scale");
-        UTILASSERT(scaleNode);
-
-        xml_node<char> *scaleXNode = scaleNode->first_node("X");
-        UTILASSERT(scaleXNode);
-        float scaleX = std::stof(scaleXNode->value());
-
-        xml_node<char> *scaleYNode = scaleNode->first_node("Y");
-        UTILASSERT(scaleYNode);
-        float scaleY = std::stof(scaleYNode->value());
-
-        xml_node<char> *zDepthNode = propertiesNode->first_node("ZDepth");
-        float zDepth = 1.0f;
-
-        if (zDepthNode) {
-            zDepth = std::stof(zDepthNode->value());
-        }
+        float zDepth = getZDepth(propertiesNode);
 
         element = new UI::Scalable();
-        element->SetPosition(glm::vec2(positionX, positionY));
+
+        element->SetPosition(position);
         element->SetDepth(zDepth);
 
-        reinterpret_cast<UI::Scalable *>(element)->SetScale(glm::vec2(scaleX, scaleY));
+        reinterpret_cast<UI::Scalable *>(element)->SetScale(scale);
 
         if (fitTypeNode && std::string(fitTypeNode->value()) == "FIT_CHILDREN") {
             reinterpret_cast<UI::Scalable *>(element)->fitType = UI::FIT_CHILDREN;
@@ -303,58 +272,17 @@ GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxm
             reinterpret_cast<UI::Scalable *>(element)->fitType = UI::NONE;
         }
     } else if (nodeName == "Panel") {
-        xml_node<char> *propertiesNode = node->first_node("Properties");
-        UTILASSERT(propertiesNode);
-
         xml_node<char> *fitTypeNode = propertiesNode->first_node("FitType");
         
-        xml_node<char> *colorNode = propertiesNode->first_node("Color");
-        UTILASSERT(colorNode);
+        glm::vec3 color = getColor(propertiesNode);
 
-        xml_node<char> *colorRNode = colorNode->first_node("R");
-        UTILASSERT(colorRNode);
-        float colorR = std::stof(colorRNode->value());
+        glm::vec2 position = getPosition(propertiesNode);
 
-        xml_node<char> *colorGNode = colorNode->first_node("G");
-        UTILASSERT(colorGNode);
-        float colorG = std::stof(colorGNode->value());
+        glm::vec2 scale = getScale(propertiesNode);
 
-        xml_node<char> *colorBNode = colorNode->first_node("B");
-        UTILASSERT(colorBNode);
-        float colorB = std::stof(colorBNode->value());
+        float zDepth = getZDepth(propertiesNode);
 
-
-        xml_node<char> *positionNode = propertiesNode->first_node("Position");
-        UTILASSERT(positionNode);
-
-        xml_node<char> *positionXNode = positionNode->first_node("X");
-        UTILASSERT(positionXNode);
-        float positionX = std::stof(positionXNode->value());
-
-        xml_node<char> *positionYNode = positionNode->first_node("Y");
-        UTILASSERT(positionYNode);
-        float positionY = std::stof(positionYNode->value());
-
-
-        xml_node<char> *scaleNode = propertiesNode->first_node("Scale");
-        UTILASSERT(scaleNode);
-
-        xml_node<char> *scaleXNode = scaleNode->first_node("X");
-        UTILASSERT(scaleXNode);
-        float scaleX = std::stof(scaleXNode->value());
-
-        xml_node<char> *scaleYNode = scaleNode->first_node("Y");
-        UTILASSERT(scaleYNode);
-        float scaleY = std::stof(scaleYNode->value());
-
-        xml_node<char> *zDepthNode = propertiesNode->first_node("ZDepth");
-        float zDepth = 1.0f;
-
-        if (zDepthNode) {
-            zDepth = std::stof(zDepthNode->value());
-        }
-
-        element = new UI::Panel(sharedContext, glm::vec3(colorR, colorG, colorB), glm::vec2(positionX, positionY), glm::vec2(scaleX, scaleY), zDepth);
+        element = new UI::Panel(sharedContext, color, position, scale, zDepth);
 
         if (fitTypeNode && std::string(fitTypeNode->value()) == "FIT_CHILDREN") {
             reinterpret_cast<UI::Scalable *>(element)->fitType = UI::FIT_CHILDREN;
@@ -362,65 +290,25 @@ GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxm
             reinterpret_cast<UI::Scalable *>(element)->fitType = UI::NONE;
         }
     } else if (nodeName == "Label") {
-        xml_node<char> *propertiesNode = node->first_node("Properties");
-        UTILASSERT(propertiesNode);
-
         xml_node<char> *textNode = propertiesNode->first_node("Text");
         UTILASSERT(textNode);
         std::string text = textNode->value();
 
-        xml_node<char> *positionNode = propertiesNode->first_node("Position");
-        UTILASSERT(positionNode);
-
-        xml_node<char> *positionXNode = positionNode->first_node("X");
-        UTILASSERT(positionXNode);
-        float positionX = std::stof(positionXNode->value());
-
-        xml_node<char> *positionYNode = positionNode->first_node("Y");
-        UTILASSERT(positionYNode);
-        float positionY = std::stof(positionYNode->value());
-
+        glm::vec2 position = getPosition(propertiesNode);
 
         xml_node<char> *fontNode = propertiesNode->first_node("Font");
         UTILASSERT(fontNode);
         std::string fontPath = fontNode->value();
 
-        xml_node<char> *zDepthNode = propertiesNode->first_node("ZDepth");
-        float zDepth = 1.0f;
+        float zDepth = getZDepth(propertiesNode);
 
-        if (zDepthNode) {
-            zDepth = std::stof(zDepthNode->value());
-        }
-
-        element = new UI::Label(sharedContext, text, fontPath, glm::vec2(positionX, positionY), zDepth);
+        element = new UI::Label(sharedContext, text, fontPath, position, zDepth);
     } else if (nodeName == "Button") {
-        xml_node<char> *propertiesNode = node->first_node("Properties");
-        UTILASSERT(propertiesNode);
-
         xml_node<char> *fitTypeNode = propertiesNode->first_node("FitType");
 
-        xml_node<char> *positionNode = propertiesNode->first_node("Position");
-        UTILASSERT(positionNode);
+        glm::vec2 position = getPosition(propertiesNode);
 
-        xml_node<char> *positionXNode = positionNode->first_node("X");
-        UTILASSERT(positionXNode);
-        float positionX = std::stof(positionXNode->value());
-
-        xml_node<char> *positionYNode = positionNode->first_node("Y");
-        UTILASSERT(positionYNode);
-        float positionY = std::stof(positionYNode->value());
-
-
-        xml_node<char> *scaleNode = propertiesNode->first_node("Scale");
-        UTILASSERT(scaleNode);
-
-        xml_node<char> *scaleXNode = scaleNode->first_node("X");
-        UTILASSERT(scaleXNode);
-        float scaleX = std::stof(scaleXNode->value());
-
-        xml_node<char> *scaleYNode = scaleNode->first_node("Y");
-        UTILASSERT(scaleYNode);
-        float scaleY = std::stof(scaleYNode->value());
+        glm::vec2 scale = getScale(propertiesNode);
 
         /* bgPanel and fgLabel */
         xml_node<char> *bgPanelNode = propertiesNode->first_node("BgPanel");
@@ -438,7 +326,7 @@ GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxm
         GenericElement *fgLabel = DeserializeUIElement(sharedContext, labelNode);
         UTILASSERT(fgLabel->type == UI::LABEL);
 
-        element = new UI::Button(glm::vec2(positionX, positionY), glm::vec2(scaleX, scaleY), reinterpret_cast<UI::Panel *>(bgPanel), reinterpret_cast<UI::Label *>(fgLabel));
+        element = new UI::Button(position, scale, reinterpret_cast<UI::Panel *>(bgPanel), reinterpret_cast<UI::Label *>(fgLabel));
 
         /* FIT_CHILDREN is the default for buttons. */
         if (!fitTypeNode || std::string(fitTypeNode->value()) == "FIT_CHILDREN") {
@@ -451,6 +339,8 @@ GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxm
 
         return nullptr;
     }
+
+    element->id = getID(propertiesNode);
 
     for (xml_node<char> *childElement = node->first_node("Properties")->next_sibling(); childElement; childElement = childElement->next_sibling()) {
         DeserializeUIElement(sharedContext, childElement, element);

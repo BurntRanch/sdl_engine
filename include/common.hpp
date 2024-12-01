@@ -13,7 +13,7 @@
 #include <SDL3/SDL_stdinc.h>
 #include <array>
 
-class Engine;
+class Renderer;
 
 struct BufferAndMemory {
     VkBuffer buffer;
@@ -42,7 +42,7 @@ struct TextureImageAndMemory {
 };
 
 struct EngineSharedContext {
-    Engine *engine;
+    Renderer *engine;
 
     VkDevice engineDevice;
     VkPhysicalDevice physicalDevice;
@@ -88,6 +88,8 @@ namespace UI {
 
     class GenericElement {
     public:
+        std::string id;
+
         ElementType genericType;
         ElementType type;
 

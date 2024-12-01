@@ -7,6 +7,7 @@
 #include "ui/button.hpp"
 #include <future>
 #include <mutex>
+#include <unordered_map>
 #ifndef VK_EXT_DEBUG_REPORT_EXTENSION_NAME
 #define VK_EXT_DEBUG_REPORT_EXTENSION_NAME "VK_EXT_debug_report"
 #endif
@@ -61,7 +62,7 @@ const std::vector<const char *> requiredInstanceExtensions = {
 
 const std::vector<const char *> requiredLayerExtensions {
 #if DEBUG
-//   "VK_LAYER_KHRONOS_validation",
+//    "VK_LAYER_KHRONOS_validation",
 #endif
 };
 
@@ -90,14 +91,15 @@ struct UIArrowsUBO {
     glm::vec3 Color;
 };
 
+/* Got a weird bug with floats and found out it was because I didn't put alignas(16), I am now extremely paranoid and will put this in every single UBO with a vec2/float. */
 struct UIPanelUBO {
-    glm::vec4 Dimensions;
-    float Depth;
+alignas(16)    glm::vec4 Dimensions;
+alignas(16)    float Depth;
 };
 
 struct UILabelPositionUBO {
-    glm::vec2 PositionOffset;
-    float Depth;
+alignas(16)    glm::vec2 PositionOffset;
+alignas(16)    float Depth;
 };
 
 struct RenderModel {
@@ -172,10 +174,10 @@ struct RenderPass {
     PipelineAndLayout graphicsPipeline;
 };
 
-class Engine {
+class Renderer {
 public:
-    Engine(Settings &settings, Camera *primaryCam) : m_PrimaryCamera(primaryCam), m_Settings(settings) {};
-    ~Engine();
+    Renderer(Settings &settings, const Camera *primaryCam) : m_PrimaryCamera(primaryCam), m_Settings(settings) {};
+    ~Renderer();
 
     void SetMouseCaptureState(bool capturing);
 
@@ -207,6 +209,9 @@ public:
     void RegisterUpdateFunction(const std::function<void()> &func);
     // Fixed Updates are called 60 times a second.
     void RegisterFixedUpdateFunction(const std::function<void(std::array<bool, 322>)> &func);
+
+    /* DO NOT 'OR' MULTIPLE EVENT TYPES, REGISTER THE SAME FUNCTION WITH A DIFFERENT TYPE IF YOU WANT THAT. */
+    void RegisterSDLEventListener(const std::function<void(SDL_Event *)> &func, SDL_EventType types);
 
     void SetPrimaryCamera(Camera &cam);
 
@@ -256,8 +261,10 @@ private:
     inline bool HasStencilAttachment(VkFormat format) {return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;};
 
     /* Cameras, high-level stuff. */
-    Camera *m_PrimaryCamera;
+    const Camera *m_PrimaryCamera;
     Settings &m_Settings;
+
+    std::unordered_map<SDL_EventType, std::vector<std::function<void(SDL_Event *)>>> m_SDLEventListeners;
 
     std::vector<Glyph> m_GlyphCache;
 
@@ -352,7 +359,36 @@ private:
     std::vector<VkDeviceMemory> m_AllocatedMemory;
     std::vector<VkImageView> m_CreatedImageViews;
     std::vector<VkSampler> m_CreatedSamplers;
+};
 
+class Engine {
+public:
+    Engine() = default;
+
+    void InitRenderer(Settings &settings, const Camera *primaryCamera);
+
+    /* UI::Button listeners will receive events when any button is pressed, along with its ID. */
+    /* Due to how it works, this function can be called before the renderer is initialized. */
+    void RegisterUIButtonListener(const std::function<void(std::string)> listener);
+
+    Renderer *GetRenderer();
+
+    void StartRenderer();
+
+    void LoadUIFile(const std::string &name);
+
+    /* Register a button to the Engine, so that it can forward any clicks inside of it to the UIButton Listeners */
+    void RegisterUIButton(UI::Button *button);
+    void UnregisterUIButton(UI::Button *button);
+private:
+/*  Systems   */
+    Renderer *m_Renderer = nullptr;
+    Settings *m_Settings;
+
+    void CheckButtonClicks(SDL_Event *event);
+
+    std::vector<std::function<void(std::string)>> m_UIButtonListeners;
+    std::vector<UI::Button *> m_UIButtons;
 };
 
 #endif
