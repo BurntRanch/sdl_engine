@@ -28,6 +28,8 @@ using std::string_view;
 using std::array;
 using namespace std::filesystem;
 
+class Object;
+
 struct Vertex {
     glm::vec3 Position;
     //glm::vec3 Color;  // might add later
@@ -141,6 +143,11 @@ public:
     constexpr glm::vec3 GetScale()    { return m_Scale * (m_Parent != nullptr ? m_Parent->GetScale() : glm::vec3(1)); };
     constexpr Model *GetParent()      { return m_Parent; };
 
+    /* Set of functions to give position/rotation/scale without parent inheritance */
+    constexpr glm::vec3 GetRawPosition() { return m_Position; };
+    constexpr glm::vec3 GetRawRotation() { return m_Rotation; };
+    constexpr glm::vec3 GetRawScale()    { return m_Scale; };
+
     /* Return the models Bounding Box, also transforms the bounding box with the Model Matrix. */
     std::array<glm::vec3, 2> GetBoundingBox() { return {glm::vec4(m_BoundingBox[0], 0.0f) * GetModelMatrix(), glm::vec4(m_BoundingBox[1], 0.0f) * GetModelMatrix()}; };
 
@@ -149,8 +156,18 @@ public:
 
     constexpr void SetBoundingBox(std::array<glm::vec3, 2> boundingBox) { m_BoundingBox = boundingBox; };
 
+    /* Only 1 object can be attached at a time. */
+    void SetObjectAttachment(Object *object);
+
     glm::mat4 GetModelMatrix();
+
+    int GetModelID();
+    void SetModelID(int modelID);
 private:
+    int m_ModelID = -1;
+
+    Object *m_ObjectAttachment = nullptr;
+
     // [0] = higher
     // [1] = lower
     std::array<glm::vec3, 2> m_BoundingBox;

@@ -181,6 +181,18 @@ glm::mat4 Model::GetModelMatrix() {
     return m_ModelMatrix;
 }
 
+void Model::SetObjectAttachment(Object *object) {
+    m_ObjectAttachment = object;
+}
+
+int Model::GetModelID() {
+    return m_ModelID;
+}
+
+void Model::SetModelID(int modelID) {
+    m_ModelID = modelID;
+}
+
 //Texture Model::loadDefaultTexture(string typeName) {
 //    Texture tex;
 //    string str = "default_" + typeName + ".png";

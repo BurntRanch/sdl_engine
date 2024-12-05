@@ -5,6 +5,7 @@
 #include "common.hpp"
 #include "ui.hpp"
 #include "ui/button.hpp"
+#include "object.hpp"
 #include <future>
 #include <mutex>
 #include <unordered_map>
@@ -13,6 +14,9 @@
 #endif
 
 #include <functional>
+
+#include <rapidxml.hpp>
+#include <rapidxml_print.hpp>
 
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_init.h>
@@ -37,6 +41,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "fmt/core.h"
+#include "fmt/ranges.h"
 
 #include "error.hpp"
 #include "settings.hpp"
@@ -377,13 +382,19 @@ public:
 
     void LoadUIFile(const std::string &name);
 
+    bool ImportScene(const std::string &path);
+    void ExportScene(const std::string &path);
+
     /* Register a button to the Engine, so that it can forward any clicks inside of it to the UIButton Listeners */
     void RegisterUIButton(UI::Button *button);
     void UnregisterUIButton(UI::Button *button);
 private:
 /*  Systems   */
     Renderer *m_Renderer = nullptr;
+    
     Settings *m_Settings;
+
+    std::vector<Object *> m_Objects;
 
     void CheckButtonClicks(SDL_Event *event);
 

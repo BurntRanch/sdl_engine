@@ -23,11 +23,11 @@ NAME		 = BurntEngine
 TARGET		 = libengine.so.1
 SRC 	   	 = $(sort $(wildcard src/*.cpp))
 OBJ 	   	 = $(SRC:.cpp=.o)
-LDFLAGS   	+= -L$(BUILDDIR)/fmt -lassimp -lfmt -lSDL3 -lvulkan -lfreetype -shared -fno-PIE -Wl,-soname,$(TARGET)
+LDFLAGS   	+= -L$(BUILDDIR)/fmt -L$(BUILDDIR)/steam -lGameNetworkingSockets -lassimp -lfmt -lSDL3 -lvulkan -lfreetype -shared -fno-PIE -Wl,-soname,$(TARGET)
 CXXFLAGS  	?= -mtune=generic -march=native
 CXXFLAGS        += -funroll-all-loops -Iinclude -isystem/usr/include/freetype2 -fPIC -std=c++17 $(VARS)
 
-all: fmt toml $(TARGET)
+all: fmt toml gamenetworkingsockets $(TARGET)
 
 fmt:
 ifeq ($(wildcard $(BUILDDIR)/fmt/libfmt.a),)
@@ -39,6 +39,14 @@ toml:
 ifeq ($(wildcard $(BUILDDIR)/toml++/toml.o),)
 	mkdir -p $(BUILDDIR)/toml++
 	make -C src/toml++ BUILDDIR=$(BUILDDIR)/toml++
+endif
+
+gamenetworkingsockets:
+ifeq ($(wildcard $(BUILDDIR)/steam/libGameNetworkingSockets.so),)
+	mkdir -p $(BUILDDIR)/steam
+	mkdir -p steam/GameNetworkingSockets/build
+	cd steam/GameNetworkingSockets/build && cmake .. && make -j11
+	cp steam/GameNetworkingSockets/build/bin/libGameNetworkingSockets.so $(BUILDDIR)/steam/libGameNetworkingSockets.so
 endif
 
 $(TARGET): fmt toml $(OBJ)

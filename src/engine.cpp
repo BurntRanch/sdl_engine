@@ -3,12 +3,14 @@
 #include "common.hpp"
 #include "fmt/base.h"
 #include "error.hpp"
+#include "fmt/format.h"
 #include "model.hpp"
 #include "ui/arrows.hpp"
 #include "ui/button.hpp"
 #include "ui/label.hpp"
 #include "ui/panel.hpp"
 #include "ui/waypoint.hpp"
+#include "util.hpp"
 
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_events.h>
@@ -2584,6 +2586,264 @@ void Engine::LoadUIFile(const std::string &name) {
             RegisterUIButton(reinterpret_cast<UI::Button *>(element));
         }
     }
+}
+
+/* Import an xml scene, overwriting the current one.
+    * Throws std::runtime_error and rapidxml::parse_error
+
+Input:
+    - fileName, name of the XML scene file.
+
+Output:
+    - True if the scene was sucessfully imported.
+*/
+bool Engine::ImportScene(const std::string &path) {
+    for (Object *object : m_Objects) {
+        for (Model *model : object->GetModelAttachments()) {
+            m_Renderer->UnloadModel(model);
+
+            delete model;
+        }
+
+        delete object;
+    }
+    m_Objects.clear();
+
+    using namespace rapidxml;
+
+    std::ifstream sceneFile(path.data(), std::ios::binary | std::ios::ate);
+
+    if (!sceneFile.good())
+        return false;
+
+    std::vector<char> sceneRawXML(static_cast<int>(sceneFile.tellg()) + 1);
+    
+    sceneFile.seekg(0);
+    sceneFile.read(sceneRawXML.data(), sceneRawXML.size());
+
+    xml_document<char> sceneXML;
+
+    sceneXML.parse<0>(sceneRawXML.data());
+
+    xml_node<char> *sceneNode = sceneXML.first_node("Scene");
+
+    for (xml_node <char> *objectNode = sceneNode->first_node("Object"); objectNode; objectNode = objectNode->next_sibling("Object")) {
+        
+        xml_node<char> *positionNode = objectNode->first_node("Position");
+        UTILASSERT(positionNode);
+        std::string_view positionStr(positionNode->value());
+        std::vector<std::string> positionData = split(positionStr, ' ');
+        
+        glm::vec3 position = glm::vec3(std::stof(positionData[0]), std::stof(positionData[1]), std::stof(positionData[2]));
+
+        xml_node<char> *rotationNode = objectNode->first_node("Rotation");
+        UTILASSERT(rotationNode);
+        std::string_view rotationStr(rotationNode->value());
+        std::vector<std::string> rotationData = split(rotationStr, ' ');
+        glm::vec3 rotation = glm::vec3(std::stof(rotationData[0]), std::stof(rotationData[1]), std::stof(rotationData[2]));
+
+        xml_node<char> *scaleNode = objectNode->first_node("Scale");
+        UTILASSERT(scaleNode);
+        std::string_view scaleStr(scaleNode->value());
+        std::vector<std::string> scaleData = split(scaleStr, ' ');
+        glm::vec3 scale = glm::vec3(std::stof(scaleData[0]), std::stof(scaleData[1]), std::stof(scaleData[2]));
+
+        Object *object = new Object(position, rotation, scale);
+
+        xml_node<char> *objectIDNode = objectNode->first_node("ObjectID");
+        UTILASSERT(objectIDNode);
+        std::string objectIDStr(rotationNode->value());
+        
+        object->SetObjectID(std::stoi(objectIDStr));
+
+        m_Objects.push_back(object);
+
+        for (xml_node<char> *modelNode = objectNode->first_node("Model"); modelNode; modelNode = modelNode->next_sibling("Model")) {
+            Model *model = new Model();
+
+            xml_node<char> *positionNode = modelNode->first_node("Position");
+            UTILASSERT(positionNode);
+            std::string_view positionStr(positionNode->value());
+            std::vector<std::string> positionData = split(positionStr, ' ');
+            model->SetPosition(glm::vec3(std::stof(positionData[0]), std::stof(positionData[1]), std::stof(positionData[2])));
+
+            xml_node<char> *rotationNode = modelNode->first_node("Rotation");
+            UTILASSERT(rotationNode);
+            std::string_view rotationStr(rotationNode->value());
+            std::vector<std::string> rotationData = split(rotationStr, ' ');
+            model->SetRotation(glm::vec3(std::stof(rotationData[0]), std::stof(rotationData[1]), std::stof(rotationData[2])));
+
+            xml_node<char> *scaleNode = modelNode->first_node("Scale");
+            UTILASSERT(scaleNode);
+            std::string_view scaleStr(scaleNode->value());
+            std::vector<std::string> scaleData = split(scaleStr, ' ');
+            model->SetScale(glm::vec3(std::stof(scaleData[0]), std::stof(scaleData[1]), std::stof(scaleData[2])));
+
+            for (xml_node<char> *meshNode = modelNode->first_node("Mesh"); meshNode; meshNode = meshNode->next_sibling("Mesh")) {
+                Mesh mesh;
+
+                xml_node<char> *diffuseNode = meshNode->first_node("Diffuse");
+                UTILASSERT(diffuseNode);
+                std::string_view diffuseStr(diffuseNode->value());
+                std::vector<std::string> diffuseData = split(diffuseStr, ' ');
+                mesh.diffuse = glm::vec3(std::stof(diffuseData[0]), std::stof(diffuseData[1]), std::stof(diffuseData[2]));
+
+                xml_node<char> *indicesNode = meshNode->first_node("Indices");
+                UTILASSERT(indicesNode);
+                std::string_view indicesStr(indicesNode->value());
+                std::vector<std::string> indicesData = split(indicesStr, ',');
+                mesh.indices.resize(indicesData.size());
+
+                size_t i = 0;
+                for (const std::string &str : indicesData) {
+                    mesh.indices[i] = std::stoi(str);
+                    i++;
+                }
+
+                xml_node<char> *diffuseMapPathNode = meshNode->first_node("DiffuseMap");
+                UTILASSERT(diffuseMapPathNode);
+                std::string_view diffuseMapPathStr(diffuseMapPathNode->value());
+                mesh.diffuseMapPath = diffuseMapPathStr;
+
+                for (xml_node<char> *vertexNode = meshNode->first_node("Vertex"); vertexNode; vertexNode = vertexNode->next_sibling("Vertex")) {
+                    Vertex vertex;
+
+                    xml_node<char> *vertexPositionNode = vertexNode->first_node("Position");
+                    UTILASSERT(vertexPositionNode);
+                    std::string_view vertexPositionStr(vertexPositionNode->value());
+                    std::vector<std::string> vertexPositionData = split(vertexPositionStr, ' ');
+                    vertex.Position = glm::vec3(std::stof(vertexPositionData[0]), std::stof(vertexPositionData[1]), std::stof(vertexPositionData[2]));
+
+                    xml_node<char> *vertexNormalNode = vertexNode->first_node("Normal");
+                    UTILASSERT(vertexNormalNode);
+                    std::string_view vertexNormalStr(vertexNormalNode->value());
+                    std::vector<std::string> vertexNormalData = split(vertexNormalStr, ' ');
+                    vertex.Normal = glm::vec3(std::stof(vertexNormalData[0]), std::stof(vertexNormalData[1]), std::stof(vertexNormalData[2]));
+
+                    xml_node<char> *vertexTexCoordNode = vertexNode->first_node("TexCoord");
+                    UTILASSERT(vertexTexCoordNode);
+                    std::string_view vertexTexCoordStr(vertexTexCoordNode->value());
+                    std::vector<std::string> vertexTexCoordData = split(vertexTexCoordStr, ' ');
+                    vertex.TexCoord = glm::vec2(std::stof(vertexTexCoordData[0]), std::stof(vertexTexCoordData[1]));
+
+                    glm::vec3 boundingBoxMin;
+                    glm::vec3 boundingBoxMax;
+
+                    std::array<glm::vec3, 2> modelBoundingBox = model->GetRawBoundingBox();
+
+                    boundingBoxMin.x = std::max(modelBoundingBox[0].x, vertex.Position.x);
+                    boundingBoxMin.y = std::max(modelBoundingBox[0].y, vertex.Position.y);
+                    boundingBoxMin.z = std::max(modelBoundingBox[0].z, vertex.Position.z);
+                    boundingBoxMax.x = std::min(modelBoundingBox[1].x, vertex.Position.x);
+                    boundingBoxMax.y = std::min(modelBoundingBox[1].y, vertex.Position.y);
+                    boundingBoxMax.z = std::min(modelBoundingBox[1].z, vertex.Position.z);
+
+                    model->SetBoundingBox({boundingBoxMin, boundingBoxMax});
+
+                    mesh.vertices.push_back(vertex);
+                }
+
+                model->meshes.push_back(mesh);
+            }
+
+            object->AddModelAttachment(model);
+            m_Renderer->LoadModel(model);
+        }
+    }
+
+    return true;
+}
+
+void Engine::ExportScene(const std::string &path) {
+    using namespace rapidxml;
+
+    xml_document<char> sceneXML;
+
+    xml_node<char> *node = sceneXML.allocate_node(node_type::node_element, "Scene");
+    sceneXML.append_node(node);
+
+    for (Object *object : m_Objects) {
+        xml_node<char> *objectNode = sceneXML.allocate_node(node_type::node_element, "Object");
+        node->append_node(objectNode);
+
+        xml_node<char> *objectIDNode = sceneXML.allocate_node(node_type::node_element, "ObjectID", fmt::to_string(object->GetObjectID()).c_str());
+        objectNode->append_node(objectIDNode);
+        
+        glm::vec3 position = object->GetPosition();
+        glm::vec3 rotation = object->GetRotation();
+        glm::vec3 scale = object->GetScale();
+
+        std::string positionStr = fmt::format("{} {} {}", position.x, position.y, position.z);
+        xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(positionStr.c_str()));
+        objectNode->append_node(positionNode);
+
+        std::string rotationStr = fmt::format("{} {} {}", rotation.x, rotation.y, rotation.z);
+        xml_node<char> *rotationNode = sceneXML.allocate_node(node_type::node_element, "Rotation", sceneXML.allocate_string(rotationStr.c_str()));
+        objectNode->append_node(rotationNode);
+
+        std::string scaleStr = fmt::format("{} {} {}", scale.x, scale.y, scale.z);
+        xml_node<char> *scaleNode = sceneXML.allocate_node(node_type::node_element, "Scale", sceneXML.allocate_string(scaleStr.c_str()));
+        objectNode->append_node(scaleNode);
+
+        for (Model *model : object->GetModelAttachments()) {
+            xml_node<char> *modelNode = sceneXML.allocate_node(node_type::node_element, "Model");
+            objectNode->append_node(modelNode);
+
+            glm::vec3 position = model->GetPosition();
+            glm::vec3 rotation = model->GetRotation();
+            glm::vec3 scale = model->GetScale();
+
+            std::string positionStr = fmt::format("{} {} {}", position.x, position.y, position.z);
+            xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(positionStr.c_str()));
+            modelNode->append_node(positionNode);
+
+            std::string rotationStr = fmt::format("{} {} {}", rotation.x, rotation.y, rotation.z);
+            xml_node<char> *rotationNode = sceneXML.allocate_node(node_type::node_element, "Rotation", sceneXML.allocate_string(rotationStr.c_str()));
+            modelNode->append_node(rotationNode);
+
+            std::string scaleStr = fmt::format("{} {} {}", scale.x, scale.y, scale.z);
+            xml_node<char> *scaleNode = sceneXML.allocate_node(node_type::node_element, "Scale", sceneXML.allocate_string(scaleStr.c_str()));
+            modelNode->append_node(scaleNode);
+
+            for (Mesh &mesh : model->meshes) {
+                xml_node<char> *meshNode = sceneXML.allocate_node(node_type::node_element, "Mesh");
+                modelNode->append_node(meshNode);
+
+                std::string diffuseStr = fmt::format("{} {} {}", mesh.diffuse.x, mesh.diffuse.y, mesh.diffuse.z);
+                xml_node<char> *diffuseNode = sceneXML.allocate_node(node_type::node_element, "Diffuse", sceneXML.allocate_string(diffuseStr.c_str()));
+                meshNode->append_node(diffuseNode);
+
+                std::string indicesStr = fmt::to_string(fmt::join(mesh.indices, ","));
+                xml_node<char> *indicesNode = sceneXML.allocate_node(node_type::node_element, "Indices", sceneXML.allocate_string(indicesStr.c_str()));
+                meshNode->append_node(indicesNode);
+
+                xml_node<char> *diffuseMapPathNode = sceneXML.allocate_node(node_type::node_element, "DiffuseMap", mesh.diffuseMapPath.c_str());
+                meshNode->append_node(diffuseMapPathNode);
+
+                for (Vertex vert : mesh.vertices) {
+                    xml_node<char> *vertexNode = sceneXML.allocate_node(node_type::node_element, "Vertex");
+                    meshNode->append_node(vertexNode);
+
+                    std::string vertPositionStr = fmt::format("{} {} {}", vert.Position.x, vert.Position.y, vert.Position.z);
+                    xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(vertPositionStr.c_str()));
+                    vertexNode->append_node(positionNode);
+                    
+                    std::string vertNormalStr = fmt::format("{} {} {}", vert.Normal.x, vert.Normal.y, vert.Normal.z);
+                    xml_node<char> *normalNode = sceneXML.allocate_node(node_type::node_element, "Normal", sceneXML.allocate_string(vertNormalStr.c_str()));
+                    vertexNode->append_node(normalNode);
+                    
+                    std::string vertTexCoordStr = fmt::format("{} {}", vert.TexCoord.x, vert.TexCoord.y);
+                    xml_node<char> *texCoordNode = sceneXML.allocate_node(node_type::node_element, "TexCoord", sceneXML.allocate_string(vertTexCoordStr.c_str()));
+                    vertexNode->append_node(texCoordNode);
+                }
+            }
+        }
+    }
+
+    std::ofstream targetFile(path);
+    targetFile << sceneXML;
+
+    sceneXML.clear();
 }
 
 void Engine::RegisterUIButton(UI::Button *button) {
