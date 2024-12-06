@@ -98,6 +98,8 @@ Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesyst
 }
 
 void Label::InitGlyphs(std::string text, std::filesystem::path fontPath) {
+    Glyphs.clear();
+
     if (FT_Init_FreeType(&m_FTLibrary)) {
         throw std::runtime_error("Failed to initialize FreeType!");
     }
