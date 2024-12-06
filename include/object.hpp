@@ -3,7 +3,7 @@
 #include "model.hpp"
 class Object {
 public:
-    ~Object();
+    ~Object() = default;
 
     Object(glm::vec3 position, glm::vec3 rotation, glm::vec3 scale);
 

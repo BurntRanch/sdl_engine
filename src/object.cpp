@@ -60,5 +60,10 @@ glm::vec3 Object::GetScale() {
     return m_Scale;
 }
 
-int GetObjectID();
-void SetObjectID(int objectID);
+int Object::GetObjectID() {
+    return m_ObjectID;
+}
+
+void Object::SetObjectID(int objectID) {
+    m_ObjectID = objectID;
+}
