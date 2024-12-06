@@ -385,6 +385,8 @@ public:
     bool ImportScene(const std::string &path);
     void ExportScene(const std::string &path);
 
+    UI::GenericElement *GetElementByID(const std::string &id);
+
     /* Register a button to the Engine, so that it can forward any clicks inside of it to the UIButton Listeners */
     void RegisterUIButton(UI::Button *button);
     void UnregisterUIButton(UI::Button *button);
@@ -395,6 +397,7 @@ private:
     Settings *m_Settings;
 
     std::vector<Object *> m_Objects;
+    std::vector<UI::GenericElement *> m_UIElements;
 
     void CheckButtonClicks(SDL_Event *event);
 

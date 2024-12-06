@@ -23,9 +23,17 @@ public:
     /* Calculates the minimum scale required to fit this entire label. */
     glm::vec2 CalculateMinimumScaleToFit();
 
+    void SetText(std::string text);
+    void SetFont(std::filesystem::path fontPath);
+
     void DestroyBuffers();
 private:
+
+    /* Can and should be called each time m_Text is changed or when initializing Label*/
+    void InitGlyphs(std::string text, std::filesystem::path fontPath);
+
     std::string m_Text;
+    std::filesystem::path m_FontPath;
 
     FT_Library m_FTLibrary;
     FT_Face m_FTFace;

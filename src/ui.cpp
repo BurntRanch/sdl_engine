@@ -94,6 +94,10 @@ Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesyst
     SetPosition(position);
     SetDepth(m_Depth);
 
+    InitGlyphs(text, fontPath);
+}
+
+void Label::InitGlyphs(std::string text, std::filesystem::path fontPath) {
     if (FT_Init_FreeType(&m_FTLibrary)) {
         throw std::runtime_error("Failed to initialize FreeType!");
     }
@@ -116,6 +120,17 @@ Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesyst
 
         Glyphs.push_back(glyph);
     }
+
+    m_Text = text;
+    m_FontPath = fontPath;
+}
+
+void Label::SetText(std::string text) {
+    InitGlyphs(text, m_FontPath);
+}
+
+void Label::SetFont(std::filesystem::path fontPath) {
+    InitGlyphs(m_Text, fontPath);
 }
 
 glm::vec2 Label::CalculateMinimumScaleToFit() {

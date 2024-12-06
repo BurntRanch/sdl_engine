@@ -2585,6 +2585,8 @@ void Engine::LoadUIFile(const std::string &name) {
         if (element->type == UI::BUTTON) {
             RegisterUIButton(reinterpret_cast<UI::Button *>(element));
         }
+
+        m_UIElements.push_back(element);
     }
 }
 
@@ -2844,6 +2846,16 @@ void Engine::ExportScene(const std::string &path) {
     targetFile << sceneXML;
 
     sceneXML.clear();
+}
+
+UI::GenericElement *Engine::GetElementByID(const std::string &id) {
+    for (UI::GenericElement *&element : m_UIElements) {
+        if (element->id == id) {
+            return element;
+        }
+    }
+
+    return nullptr;
 }
 
 void Engine::RegisterUIButton(UI::Button *button) {
