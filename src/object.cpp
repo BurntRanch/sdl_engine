@@ -1,5 +1,9 @@
 #include "object.hpp"
 
+Object::~Object() {
+    
+}
+
 Object::Object(glm::vec3 position, glm::vec3 rotation, glm::vec3 scale) {
     SetPosition(position);
     SetRotation(rotation);
