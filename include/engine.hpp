@@ -190,26 +190,38 @@ public:
     void UnloadModel(Model *model);
 
     void AddUIChildren(UI::GenericElement *element);
-    void RemoveUIChildren(UI::GenericElement *element);
+    bool RemoveUIChildren(UI::GenericElement *element);
 
-    // Find out the type through the "type" member variable and call the appropriate function for you!
+    /* Find out the type through the "type" member variable and call the appropriate function for you! */
     void AddUIGenericElement(UI::GenericElement *element);
-    void RemoveUIGenericElement(UI::GenericElement *element);
+
+    /* Removers return true/false based on if it was found or not found, respectively. */
+    bool RemoveUIGenericElement(UI::GenericElement *element);
 
     void AddUIWaypoint(UI::Waypoint *waypoint);
-    void RemoveUIWaypoint(UI::Waypoint *waypoint);
+
+    /* Read RemoveUIGenericElement comment */
+    bool RemoveUIWaypoint(UI::Waypoint *waypoint);
 
     void AddUIArrows(UI::Arrows *arrows);
-    void RemoveUIArrows(UI::Arrows *arrows);
+
+    /* Read RemoveUIGenericElement comment */
+    bool RemoveUIArrows(UI::Arrows *arrows);
 
     void AddUIPanel(UI::Panel *panel);
-    void RemoveUIPanel(UI::Panel *panel);
+
+    /* Read RemoveUIGenericElement comment */
+    bool RemoveUIPanel(UI::Panel *panel);
 
     void AddUILabel(UI::Label *label);
-    void RemoveUILabel(UI::Label *label);
+
+    /* Read RemoveUIGenericElement comment */
+    bool RemoveUILabel(UI::Label *label);
 
     void AddUIButton(UI::Button *button);
-    void RemoveUIButton(UI::Button *button);
+
+    /* Read RemoveUIGenericElement comment */
+    bool RemoveUIButton(UI::Button *button);
 
     void RegisterUpdateFunction(const std::function<void()> &func);
     // Fixed Updates are called 60 times a second.

@@ -125,6 +125,11 @@ void Label::InitGlyphs(std::string text, std::filesystem::path fontPath) {
 
     m_Text = text;
     m_FontPath = fontPath;
+
+    /* It should return true if this label was added to the Renderer */
+    if (m_SharedContext.engine->RemoveUILabel(this)) {
+        m_SharedContext.engine->AddUILabel(this);
+    }
 }
 
 void Label::SetText(std::string text) {

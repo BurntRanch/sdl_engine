@@ -542,10 +542,12 @@ void Renderer::AddUIChildren(UI::GenericElement *element) {
     }
 }
 
-void Renderer::RemoveUIChildren(UI::GenericElement *element) {
+bool Renderer::RemoveUIChildren(UI::GenericElement *element) {
     for (UI::GenericElement *child : element->GetChildren()) {
         RemoveUIGenericElement(child);
     }
+
+    return true;
 }
 
 void Renderer::AddUIGenericElement(UI::GenericElement *element) {
@@ -567,23 +569,22 @@ void Renderer::AddUIGenericElement(UI::GenericElement *element) {
         }
 }
 
-void Renderer::RemoveUIGenericElement(UI::GenericElement *element) {
+bool Renderer::RemoveUIGenericElement(UI::GenericElement *element) {
     switch (element->type) {
         case UI::PANEL:
-            RemoveUIPanel(reinterpret_cast<UI::Panel *>(element));
-            break;
+            return RemoveUIPanel(reinterpret_cast<UI::Panel *>(element));
         case UI::LABEL:
-            RemoveUILabel(reinterpret_cast<UI::Label *>(element));
-            break;
+            return RemoveUILabel(reinterpret_cast<UI::Label *>(element));
         case UI::BUTTON:
-            RemoveUIButton(reinterpret_cast<UI::Button *>(element));
-            break;
+            return RemoveUIButton(reinterpret_cast<UI::Button *>(element));
         case UI::UNKNOWN:
         case UI::ARROWS:
         case UI::SCALABLE:
         case UI::WAYPOINT:
           break;
         }
+    
+    return false;
 }
 
 void Renderer::AddUIWaypoint(UI::Waypoint *waypoint) {
@@ -692,12 +693,16 @@ void Renderer::AddUIArrows(UI::Arrows *arrows) {
     m_RenderUIArrows.push_back(renderUIArrows);
 }
 
-void Renderer::RemoveUIArrows(UI::Arrows *arrows) {
+bool Renderer::RemoveUIArrows(UI::Arrows *arrows) {
     RemoveUIChildren(arrows);
+    
+    bool found = false;
 
     for (size_t i = 0; i < m_RenderUIArrows.size(); i++) {
         if (m_RenderUIArrows[i].arrows != arrows)
             continue;
+
+        found = true;
 
         RenderUIArrows renderUIArrows = m_RenderUIArrows[i];
 
@@ -719,14 +724,20 @@ void Renderer::RemoveUIArrows(UI::Arrows *arrows) {
             UnloadRenderModel(renderModel);
         }
     }
+
+    return found;
 }
 
-void Renderer::RemoveUIWaypoint(UI::Waypoint *waypoint) {
+bool Renderer::RemoveUIWaypoint(UI::Waypoint *waypoint) {
     RemoveUIChildren(waypoint);
+
+    bool found = false;
 
     for (size_t i = 0; i < m_RenderUIWaypoints.size(); i++) {
         if (m_RenderUIWaypoints[i].waypoint != waypoint)
             continue;
+
+        found = true;
 
         RenderUIWaypoint renderUIWaypoint = m_RenderUIWaypoints[i];
 
@@ -751,6 +762,8 @@ void Renderer::RemoveUIWaypoint(UI::Waypoint *waypoint) {
     }
 
     AddUIChildren(waypoint);
+
+    return found;
 }
 
 void Renderer::AddUIPanel(UI::Panel *panel) {
@@ -773,8 +786,10 @@ void Renderer::AddUIPanel(UI::Panel *panel) {
     AddUIChildren(panel);
 }
 
-void Renderer::RemoveUIPanel(UI::Panel *panel) {
+bool Renderer::RemoveUIPanel(UI::Panel *panel) {
     RemoveUIChildren(panel);
+
+    bool found = false;
 
     for (size_t i = 0; i < m_UIPanels.size(); i++) {
         RenderUIPanel renderUIPanel = m_UIPanels[i];
@@ -782,6 +797,8 @@ void Renderer::RemoveUIPanel(UI::Panel *panel) {
         if (renderUIPanel.panel != panel) {
             continue;
         }
+
+        found = true;
 
         m_UIPanels.erase(m_UIPanels.begin() + i);
 
@@ -795,6 +812,8 @@ void Renderer::RemoveUIPanel(UI::Panel *panel) {
 
         break;
     }
+
+    return found;
 }
 
 void Renderer::AddUILabel(UI::Label *label) {
@@ -826,8 +845,10 @@ void Renderer::AddUILabel(UI::Label *label) {
     AddUIChildren(label);
 }
 
-void Renderer::RemoveUILabel(UI::Label *label) {
+bool Renderer::RemoveUILabel(UI::Label *label) {
     RemoveUIChildren(label);
+
+    bool found = false;
 
     for (size_t i = 0; i < m_UILabels.size(); i++) {
         RenderUILabel renderUILabel = m_UILabels[i];
@@ -835,6 +856,8 @@ void Renderer::RemoveUILabel(UI::Label *label) {
         if (renderUILabel.label != label) {
             continue;
         }
+
+        found = true;
 
         m_UILabels.erase(m_UILabels.begin() + i);
 
@@ -852,14 +875,16 @@ void Renderer::RemoveUILabel(UI::Label *label) {
 
         break;
     }
+
+    return found;
 }
 
 void Renderer::AddUIButton(UI::Button *button) {
     AddUIChildren(button);
 }
 
-void Renderer::RemoveUIButton(UI::Button *button) {
-    AddUIChildren(button);
+bool Renderer::RemoveUIButton(UI::Button *button) {
+    return RemoveUIChildren(button);
 }
 
 void Renderer::RegisterUpdateFunction(const std::function<void()> &func) {
