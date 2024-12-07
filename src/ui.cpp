@@ -50,7 +50,13 @@ glm::vec4 Panel::GetDimensions() {
         glm::vec2 parentPosition = m_Parent->GetPosition();
         glm::vec2 parentScale = (m_Parent->genericType == SCALABLE ? reinterpret_cast<Scalable *>(m_Parent)->GetUnfitScale() : glm::vec4(1.0f));
 
-        glm::vec4 dimensions = m_Dimensions + glm::vec4(parentPosition, 0.0f, 0.0f);
+        glm::vec4 dimensions = m_Dimensions;
+        dimensions.x *= parentScale.x;
+        dimensions.x += parentPosition.x;
+
+        dimensions.y *= parentScale.y;
+        dimensions.y += parentPosition.y;
+        
         dimensions.z *= parentScale.x;
         dimensions.w *= parentScale.y;
 
@@ -197,7 +203,13 @@ Button::Button(glm::vec2 position, glm::vec2 scale, Panel *panel, Label *label) 
 }
 
 inline glm::vec2 GenericElement::GetPosition() {
-    return m_Position + (m_Parent == nullptr ? glm::vec2(0.0f, 0.0f) : m_Parent->GetPosition());
+    glm::vec2 position = m_Position + (m_Parent == nullptr ? glm::vec2(0.0f, 0.0f) : m_Parent->GetPosition());
+
+    if (genericType == SCALABLE && m_Parent != nullptr && m_Parent->genericType == SCALABLE) {
+        position *= reinterpret_cast<Scalable *>(m_Parent)->GetUnfitScale();
+    }
+
+    return position;
 }
 
 inline void GenericElement::SetPosition(glm::vec2 Position) {
@@ -206,6 +218,14 @@ inline void GenericElement::SetPosition(glm::vec2 Position) {
 
 inline float GenericElement::GetDepth() {
     return m_Depth;
+}
+
+inline void GenericElement::SetVisible(bool visible) {
+    m_Visible = visible;
+}
+
+inline bool GenericElement::GetVisible() {
+    return m_Visible && (m_Parent ? m_Parent->GetVisible() : true);
 }
 
 inline void GenericElement::SetDepth(float depth) {
@@ -379,6 +399,7 @@ GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxm
     }
 
     element->id = getID(propertiesNode);
+    element->SetVisible(getVisible(propertiesNode));
 
     for (xml_node<char> *childElement = node->first_node("Properties")->next_sibling(); childElement; childElement = childElement->next_sibling()) {
         DeserializeUIElement(sharedContext, childElement, element);

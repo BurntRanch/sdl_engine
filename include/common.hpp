@@ -99,6 +99,9 @@ namespace UI {
         virtual void SetDepth(float depth);
         virtual float GetDepth();
 
+        virtual void SetVisible(bool visible);
+        virtual bool GetVisible();
+
         virtual void SetParent(GenericElement *parent);
         virtual GenericElement *GetParent();
 
@@ -109,6 +112,8 @@ namespace UI {
         virtual void DestroyBuffers();
     protected:
         glm::vec2 m_Position;
+
+        bool m_Visible = true;
 
         GenericElement *m_Parent = nullptr;
         std::vector<GenericElement *> m_Children;

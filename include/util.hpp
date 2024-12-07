@@ -25,5 +25,6 @@ glm::vec3                getColor(rapidxml::xml_node<char> *propertiesNode);
 glm::vec2                getPosition(rapidxml::xml_node<char> *propertiesNode);
 glm::vec2                getScale(rapidxml::xml_node<char> *propertiesNode);
 float                    getZDepth(rapidxml::xml_node<char> *propertiesNode, float depthDefault = 1.0f);
+bool                     getVisible(rapidxml::xml_node<char> *propertiesNode);
 
 #endif

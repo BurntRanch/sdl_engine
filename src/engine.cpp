@@ -2145,139 +2145,43 @@ void Renderer::Start() {
             fmt::println("Time spent initializing render and calling update functions: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderInitTime - afterAcquireImageResultTime).count()));
         #endif
 
-            glm::mat4 viewMatrix = m_PrimaryCamera->GetViewMatrix();
-            glm::mat4 projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), m_Settings.RenderWidth / (float) m_Settings.RenderHeight, m_Settings.CameraNear, CAMERA_FAR);
+            glm::mat4 viewMatrix;
+            glm::mat4 projectionMatrix;
 
-            // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
-            projectionMatrix[1][1] *= -1;
+            if (m_PrimaryCamera) {
+                viewMatrix = m_PrimaryCamera->GetViewMatrix();
+                projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), m_Settings.RenderWidth / (float) m_Settings.RenderHeight, m_Settings.CameraNear, CAMERA_FAR);
 
-            for (RenderModel &renderModel : m_RenderModels) {
-                renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
+                // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
+                projectionMatrix[1][1] *= -1;
 
-                renderModel.matricesUBO.viewMatrix = viewMatrix;
-                renderModel.matricesUBO.projectionMatrix = projectionMatrix;
+                for (RenderModel &renderModel : m_RenderModels) {
+                    renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
 
-                SDL_memcpy(renderModel.matricesUBOBuffer.mappedData, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
+                    renderModel.matricesUBO.viewMatrix = viewMatrix;
+                    renderModel.matricesUBO.projectionMatrix = projectionMatrix;
 
-                // vertex buffer binding!!
-                VkDeviceSize mainOffsets[] = {0};
-                vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &renderModel.vertexBuffer.buffer, mainOffsets);
-
-                vkCmdBindIndexBuffer(m_CommandBuffers[currentFrameIndex], renderModel.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-                size_t uniformBufferSize = sizeof(MatricesUBO);
-
-                // update descriptor set with buffer
-                VkDescriptorBufferInfo bufferInfo{};
-                bufferInfo.buffer = renderModel.matricesUBOBuffer.buffer;
-                bufferInfo.offset = 0;
-                bufferInfo.range = uniformBufferSize;
-
-                // update descriptor set with image
-                VkDescriptorImageInfo imageInfo{};
-                imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                imageInfo.imageView = renderModel.diffTextureImageView;
-                imageInfo.sampler = renderModel.diffTextureSampler;
-
-                std::array<VkWriteDescriptorSet, 2> descriptorWrites;
-                descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                descriptorWrites[0].pNext = nullptr;
-                descriptorWrites[0].dstSet = m_RenderDescriptorSet; // Ignored
-                descriptorWrites[0].dstBinding = 0;
-                descriptorWrites[0].dstArrayElement = 0;
-                descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                descriptorWrites[0].descriptorCount = 1;
-                descriptorWrites[0].pBufferInfo = &bufferInfo;
-                descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                descriptorWrites[1].pNext = nullptr;
-                descriptorWrites[1].dstSet = m_RenderDescriptorSet; // Ignored
-                descriptorWrites[1].dstBinding = 1;
-                descriptorWrites[1].dstArrayElement = 0;
-                descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                descriptorWrites[1].descriptorCount = 1;
-                descriptorWrites[1].pImageInfo = &imageInfo;
-
-                vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
-
-                //vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainGraphicsPipeline.layout, 0, 1, &m_RenderDescriptorSet, 0, nullptr);
-                vkCmdDrawIndexed(m_CommandBuffers[currentFrameIndex], renderModel.indexBufferSize, 1, 0, 0, 0);
-            }
-
-            // WAYPOINT SHADER!
-            vkCmdNextSubpass(m_CommandBuffers[currentFrameIndex], VK_SUBPASS_CONTENTS_INLINE);
-
-            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIWaypointGraphicsPipeline.pipeline);
-
-            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderViewport);
-
-            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderScissor);
-
-            for (RenderUIWaypoint &renderUIWaypoint : m_RenderUIWaypoints) {
-                // There is no model matrix for render waypoints, We already know where it is in world-space.
-                renderUIWaypoint.matricesUBO.viewMatrix = viewMatrix;
-                renderUIWaypoint.matricesUBO.projectionMatrix = projectionMatrix;
-
-                SDL_memcpy(renderUIWaypoint.matricesUBOBuffer.mappedData, &renderUIWaypoint.matricesUBO, sizeof(renderUIWaypoint.matricesUBO));
-
-                renderUIWaypoint.waypointUBO.Position = renderUIWaypoint.waypoint->GetWorldSpacePosition();
-
-                SDL_memcpy(renderUIWaypoint.waypointUBOBuffer.mappedData, &renderUIWaypoint.waypointUBO, sizeof(renderUIWaypoint.waypointUBO));
-
-                // vertex buffer binding!!
-                VkDeviceSize waypointVertexOffsets[] = {0};
-                vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), waypointVertexOffsets);
-
-                vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIWaypointGraphicsPipeline.layout, 0, 1, &renderUIWaypoint.descriptorSet, 0, nullptr);
-                vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
-            }
-
-            // ARROWS SHADER!
-            vkCmdNextSubpass(m_CommandBuffers[currentFrameIndex], VK_SUBPASS_CONTENTS_INLINE);
-
-            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIArrowsGraphicsPipeline.pipeline);
-
-            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderViewport);
-
-            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderScissor);
-
-            for (RenderUIArrows &renderUIArrows : m_RenderUIArrows) {
-                // index for arrowBuffers
-                int i = 0;
-
-                for (RenderModel &arrowRenderModel : renderUIArrows.arrowRenderModels) {
-                    MatricesUBO &matricesUBO = renderUIArrows.arrowBuffers[i].first.first;
-                    UIArrowsUBO &arrowsUBO = renderUIArrows.arrowBuffers[i].first.second;
-
-                    BufferAndMemory &matricesUBOBuffer = renderUIArrows.arrowBuffers[i].second.first;
-                    BufferAndMemory &arrowsUBOBuffer = renderUIArrows.arrowBuffers[i].second.second;
-
-                    matricesUBO.modelMatrix = arrowRenderModel.model->GetModelMatrix();
-                    matricesUBO.viewMatrix = viewMatrix;
-                    matricesUBO.projectionMatrix = projectionMatrix;
-
-                    SDL_memcpy(matricesUBOBuffer.mappedData, &matricesUBO, sizeof(matricesUBO));
-
-                    arrowsUBO.Color = arrowRenderModel.diffColor;
-
-                    SDL_memcpy(arrowsUBOBuffer.mappedData, &arrowsUBO, sizeof(arrowsUBO));
+                    SDL_memcpy(renderModel.matricesUBOBuffer.mappedData, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
 
                     // vertex buffer binding!!
-                    VkDeviceSize arrowsVertexOffsets[] = {0};
-                    vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(arrowRenderModel.vertexBuffer.buffer), arrowsVertexOffsets);
+                    VkDeviceSize mainOffsets[] = {0};
+                    vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &renderModel.vertexBuffer.buffer, mainOffsets);
 
-                    vkCmdBindIndexBuffer(m_CommandBuffers[currentFrameIndex], arrowRenderModel.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+                    vkCmdBindIndexBuffer(m_CommandBuffers[currentFrameIndex], renderModel.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+                    size_t uniformBufferSize = sizeof(MatricesUBO);
 
                     // update descriptor set with buffer
                     VkDescriptorBufferInfo bufferInfo{};
-                    bufferInfo.buffer = matricesUBOBuffer.buffer;
+                    bufferInfo.buffer = renderModel.matricesUBOBuffer.buffer;
                     bufferInfo.offset = 0;
-                    bufferInfo.range = sizeof(matricesUBO);
+                    bufferInfo.range = uniformBufferSize;
 
-                    // update descriptor set with buffer
-                    VkDescriptorBufferInfo bufferInfo2{};
-                    bufferInfo2.buffer = arrowsUBOBuffer.buffer;
-                    bufferInfo2.offset = 0;
-                    bufferInfo2.range = sizeof(arrowsUBO);
+                    // update descriptor set with image
+                    VkDescriptorImageInfo imageInfo{};
+                    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                    imageInfo.imageView = renderModel.diffTextureImageView;
+                    imageInfo.sampler = renderModel.diffTextureSampler;
 
                     std::array<VkWriteDescriptorSet, 2> descriptorWrites;
                     descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -2293,14 +2197,127 @@ void Renderer::Start() {
                     descriptorWrites[1].dstSet = m_RenderDescriptorSet; // Ignored
                     descriptorWrites[1].dstBinding = 1;
                     descriptorWrites[1].dstArrayElement = 0;
-                    descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                    descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                     descriptorWrites[1].descriptorCount = 1;
-                    descriptorWrites[1].pBufferInfo = &bufferInfo2;
+                    descriptorWrites[1].pImageInfo = &imageInfo;
 
-                    vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIArrowsGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
-                    vkCmdDrawIndexed(m_CommandBuffers[currentFrameIndex], arrowRenderModel.indexBufferSize, 1, 0, 0, 0);
+                    vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
 
-                    i++;
+                    //vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainGraphicsPipeline.layout, 0, 1, &m_RenderDescriptorSet, 0, nullptr);
+                    vkCmdDrawIndexed(m_CommandBuffers[currentFrameIndex], renderModel.indexBufferSize, 1, 0, 0, 0);
+                }
+            }
+
+            // WAYPOINT SHADER!
+            vkCmdNextSubpass(m_CommandBuffers[currentFrameIndex], VK_SUBPASS_CONTENTS_INLINE);
+
+            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIWaypointGraphicsPipeline.pipeline);
+
+            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderViewport);
+
+            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderScissor);
+
+            if (m_PrimaryCamera) {
+                for (RenderUIWaypoint &renderUIWaypoint : m_RenderUIWaypoints) {
+                    if (!renderUIWaypoint.waypoint->GetVisible()) {
+                        continue;
+                    }
+
+                    // There is no model matrix for render waypoints, We already know where it is in world-space.
+                    renderUIWaypoint.matricesUBO.viewMatrix = viewMatrix;
+                    renderUIWaypoint.matricesUBO.projectionMatrix = projectionMatrix;
+
+                    SDL_memcpy(renderUIWaypoint.matricesUBOBuffer.mappedData, &renderUIWaypoint.matricesUBO, sizeof(renderUIWaypoint.matricesUBO));
+
+                    renderUIWaypoint.waypointUBO.Position = renderUIWaypoint.waypoint->GetWorldSpacePosition();
+
+                    SDL_memcpy(renderUIWaypoint.waypointUBOBuffer.mappedData, &renderUIWaypoint.waypointUBO, sizeof(renderUIWaypoint.waypointUBO));
+
+                    // vertex buffer binding!!
+                    VkDeviceSize waypointVertexOffsets[] = {0};
+                    vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), waypointVertexOffsets);
+
+                    vkCmdBindDescriptorSets(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIWaypointGraphicsPipeline.layout, 0, 1, &renderUIWaypoint.descriptorSet, 0, nullptr);
+                    vkCmdDraw(m_CommandBuffers[currentFrameIndex], 6, 1, 0, 0);
+                }
+            }
+
+            // ARROWS SHADER!
+            vkCmdNextSubpass(m_CommandBuffers[currentFrameIndex], VK_SUBPASS_CONTENTS_INLINE);
+
+            vkCmdBindPipeline(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIArrowsGraphicsPipeline.pipeline);
+
+            vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderViewport);
+
+            vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderScissor);
+
+            if (m_PrimaryCamera) {
+                for (RenderUIArrows &renderUIArrows : m_RenderUIArrows) {
+                    if (!renderUIArrows.arrows->GetVisible()) {
+                        continue;
+                    }
+
+                    // index for arrowBuffers
+                    int i = 0;
+
+                    for (RenderModel &arrowRenderModel : renderUIArrows.arrowRenderModels) {
+                        MatricesUBO &matricesUBO = renderUIArrows.arrowBuffers[i].first.first;
+                        UIArrowsUBO &arrowsUBO = renderUIArrows.arrowBuffers[i].first.second;
+
+                        BufferAndMemory &matricesUBOBuffer = renderUIArrows.arrowBuffers[i].second.first;
+                        BufferAndMemory &arrowsUBOBuffer = renderUIArrows.arrowBuffers[i].second.second;
+
+                        matricesUBO.modelMatrix = arrowRenderModel.model->GetModelMatrix();
+                        matricesUBO.viewMatrix = viewMatrix;
+                        matricesUBO.projectionMatrix = projectionMatrix;
+
+                        SDL_memcpy(matricesUBOBuffer.mappedData, &matricesUBO, sizeof(matricesUBO));
+
+                        arrowsUBO.Color = arrowRenderModel.diffColor;
+
+                        SDL_memcpy(arrowsUBOBuffer.mappedData, &arrowsUBO, sizeof(arrowsUBO));
+
+                        // vertex buffer binding!!
+                        VkDeviceSize arrowsVertexOffsets[] = {0};
+                        vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(arrowRenderModel.vertexBuffer.buffer), arrowsVertexOffsets);
+
+                        vkCmdBindIndexBuffer(m_CommandBuffers[currentFrameIndex], arrowRenderModel.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+                        // update descriptor set with buffer
+                        VkDescriptorBufferInfo bufferInfo{};
+                        bufferInfo.buffer = matricesUBOBuffer.buffer;
+                        bufferInfo.offset = 0;
+                        bufferInfo.range = sizeof(matricesUBO);
+
+                        // update descriptor set with buffer
+                        VkDescriptorBufferInfo bufferInfo2{};
+                        bufferInfo2.buffer = arrowsUBOBuffer.buffer;
+                        bufferInfo2.offset = 0;
+                        bufferInfo2.range = sizeof(arrowsUBO);
+
+                        std::array<VkWriteDescriptorSet, 2> descriptorWrites;
+                        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        descriptorWrites[0].pNext = nullptr;
+                        descriptorWrites[0].dstSet = m_RenderDescriptorSet; // Ignored
+                        descriptorWrites[0].dstBinding = 0;
+                        descriptorWrites[0].dstArrayElement = 0;
+                        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                        descriptorWrites[0].descriptorCount = 1;
+                        descriptorWrites[0].pBufferInfo = &bufferInfo;
+                        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        descriptorWrites[1].pNext = nullptr;
+                        descriptorWrites[1].dstSet = m_RenderDescriptorSet; // Ignored
+                        descriptorWrites[1].dstBinding = 1;
+                        descriptorWrites[1].dstArrayElement = 0;
+                        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                        descriptorWrites[1].descriptorCount = 1;
+                        descriptorWrites[1].pBufferInfo = &bufferInfo2;
+
+                        vkCmdPushDescriptorSet(m_CommandBuffers[currentFrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIArrowsGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
+                        vkCmdDrawIndexed(m_CommandBuffers[currentFrameIndex], arrowRenderModel.indexBufferSize, 1, 0, 0, 0);
+
+                        i++;
+                    }
                 }
             }
 
@@ -2356,6 +2373,10 @@ void Renderer::Start() {
             vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayScissor);
 
             for (RenderUIPanel &renderUIPanel : m_UIPanels) {
+                if (!renderUIPanel.panel->GetVisible()) {
+                    continue;
+                }
+
                 // vertex buffer binding!!
                 VkDeviceSize panelVertexOffsets[] = {0};
                 vkCmdBindVertexBuffers(m_CommandBuffers[currentFrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), panelVertexOffsets);
@@ -2421,6 +2442,10 @@ void Renderer::Start() {
             vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayScissor);
 
             for (RenderUILabel &renderUILabel : m_UILabels) {
+                if (!renderUILabel.label->GetVisible()) {
+                    continue;
+                }
+
                 // vertex buffer binding!!
                 VkDeviceSize labelVertexOffsets[] = {0};
 

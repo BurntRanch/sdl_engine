@@ -3,6 +3,7 @@
 #include "rapidxml.hpp"
 #include "ui/label.hpp"
 #include "common.hpp"
+#include <algorithm>
 #include <sstream>
 
 bool endsWith(const std::string_view fullString, const std::string_view ending) {
@@ -165,4 +166,24 @@ float getZDepth(rapidxml::xml_node<char> *propertiesNode, float depthDefault) {
     }
 
     return zDepth;
+}
+
+bool getVisible(rapidxml::xml_node<char> *propertiesNode) {
+    using rapidxml::xml_node;
+
+    xml_node<char> *visibleNode = propertiesNode->first_node("Visible");
+
+    if (!visibleNode) {
+        return true;
+    }
+
+    std::string visibleString = std::string(visibleNode->value());
+
+    std::transform(visibleString.begin(), visibleString.end(), visibleString.begin(), ::tolower);
+
+    if (visibleString == "true") {
+        return true;
+    }
+
+    return false;
 }
