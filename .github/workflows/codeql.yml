@@ -74,7 +74,7 @@ jobs:
 
     - name: Install packages
       run: >
-        sudo apt install ninja-build build-essential cmake libc6-dev-amd64-cross
+        sudo apt install ninja-build build-essential cmake protobuf-compiler libc6-dev-amd64-cross libprotobuf-dev
         libglm-dev libglfw3-dev libtbb-dev libassimp-dev
         libvulkan-dev vulkan-tools vulkan-validationlayers-dev
 

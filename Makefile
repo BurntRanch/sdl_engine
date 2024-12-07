@@ -49,7 +49,7 @@ ifeq ($(wildcard $(BUILDDIR)/steam/libGameNetworkingSockets.so),)
 	cp steam/GameNetworkingSockets/build/bin/libGameNetworkingSockets.so $(BUILDDIR)/steam/libGameNetworkingSockets.so
 endif
 
-$(TARGET): fmt toml $(OBJ)
+$(TARGET): fmt toml gamenetworkingsockets $(OBJ)
 	mkdir -p $(BUILDDIR)
 	$(CXX) $(OBJ) $(BUILDDIR)/toml++/toml.o -o $(BUILDDIR)/$(TARGET) $(LDFLAGS)
 
