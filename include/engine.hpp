@@ -218,11 +218,6 @@ public:
     /* Read RemoveUIGenericElement comment */
     bool RemoveUILabel(UI::Label *label);
 
-    void AddUIButton(UI::Button *button);
-
-    /* Read RemoveUIGenericElement comment */
-    bool RemoveUIButton(UI::Button *button);
-
     void RegisterUpdateFunction(const std::function<void()> &func);
     // Fixed Updates are called 60 times a second.
     void RegisterFixedUpdateFunction(const std::function<void(std::array<bool, 322>)> &func);

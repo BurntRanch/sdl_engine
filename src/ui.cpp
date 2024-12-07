@@ -48,9 +48,12 @@ inline void Panel::SetScale(glm::vec2 scales) {
 glm::vec4 Panel::GetDimensions() {
     if (m_Parent) {
         glm::vec2 parentPosition = m_Parent->GetPosition();
-        glm::vec2 parentScale = (m_Parent->genericType == SCALABLE ? reinterpret_cast<Scalable *>(m_Parent)->GetUnfitScale() : glm::vec4(0.0f));
+        glm::vec2 parentScale = (m_Parent->genericType == SCALABLE ? reinterpret_cast<Scalable *>(m_Parent)->GetUnfitScale() : glm::vec4(1.0f));
 
-        glm::vec4 dimensions = m_Dimensions + glm::vec4(parentPosition, parentScale);
+        glm::vec4 dimensions = m_Dimensions + glm::vec4(parentPosition, 0.0f, 0.0f);
+        dimensions.z *= parentScale.x;
+        dimensions.w *= parentScale.y;
+
         glm::vec2 scales = adjustScaleToFitType(this, glm::vec2(dimensions.z, dimensions.w));
 
         dimensions.z = scales.x;
@@ -74,6 +77,10 @@ glm::vec2 Panel::GetScale() {
     glm::vec4 dimensions = GetDimensions();
 
     return glm::vec2(dimensions.z, dimensions.w);
+}
+
+glm::vec2 Panel::GetUnfitScale() {
+    return glm::vec2(m_Dimensions.z, m_Dimensions.w) * (m_Parent != nullptr && m_Parent->genericType == SCALABLE ? reinterpret_cast<Scalable *>(m_Parent)->GetUnfitScale() : glm::vec3(1));
 }
 
 void Panel::DestroyBuffers() {
@@ -212,7 +219,7 @@ inline void GenericElement::SetParent(GenericElement *parent) {
         return;
     }
 
-    if (genericType == SCALABLE && parent->genericType == SCALABLE) {
+    if (genericType == SCALABLE && parent->genericType == SCALABLE && reinterpret_cast<Scalable *>(this)->fitType == UI::UNSET) {
         reinterpret_cast<Scalable *>(this)->fitType = reinterpret_cast<Scalable *>(this)->fitType;
     }
 
@@ -245,6 +252,11 @@ inline void GenericElement::DestroyBuffers() {
     throw std::runtime_error("You're calling DestroyBuffers on a GenericElement, this is wrong.");
 }
 
+Scalable::Scalable() {
+    type = SCALABLE;
+    genericType = SCALABLE;
+}
+
 inline void Scalable::SetScale(glm::vec2 scales) {
     m_Scale = scales;
 }
@@ -259,6 +271,10 @@ inline glm::vec2 Scalable::GetScale() {
 
 inline glm::vec2 Scalable::GetUnfitScale() {
     glm::vec2 scale = m_Scale * (m_Parent != nullptr && m_Parent->genericType == SCALABLE ? reinterpret_cast<Scalable *>(m_Parent)->GetUnfitScale() : glm::vec3(1));
+
+    if (id == "bgPanel") {
+        fmt::println("{} {} {} {}", m_Scale.x, m_Scale.y, reinterpret_cast<UI::Scalable *>(m_Parent)->GetUnfitScale().x, reinterpret_cast<UI::Scalable *>(m_Parent)->GetUnfitScale().y);
+    }
 
     return scale;
 }

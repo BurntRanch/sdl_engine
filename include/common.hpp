@@ -120,6 +120,8 @@ namespace UI {
     public:
         FitType fitType = UNSET;
 
+        Scalable();
+
         virtual void SetScale(glm::vec2 scales);
 
         virtual glm::vec2 GetScale();

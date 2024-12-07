@@ -15,7 +15,8 @@ public:
     Panel(EngineSharedContext &sharedContext, glm::vec3 color, glm::vec2 position, glm::vec2 scales, float zDepth);
 
     void SetPosition(glm::vec2 position);
-    void SetScale(glm::vec2 position);
+    void SetScale(glm::vec2 scale);
+    glm::vec2 GetUnfitScale();
 
     glm::vec2 GetPosition();
     glm::vec2 GetScale();

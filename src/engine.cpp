@@ -558,15 +558,16 @@ void Renderer::AddUIGenericElement(UI::GenericElement *element) {
         case UI::LABEL:
             AddUILabel(reinterpret_cast<UI::Label *>(element));
             break;
+
+        /* Button literally just acts like a parent that unifies a Panel & Label, we're adding its children anyway so it doesn't matter. */
         case UI::BUTTON:
-            AddUIButton(reinterpret_cast<UI::Button *>(element));
-            break;
         case UI::UNKNOWN:
         case UI::ARROWS:
         case UI::SCALABLE:
         case UI::WAYPOINT:
           break;
         }
+    AddUIChildren(element);
 }
 
 bool Renderer::RemoveUIGenericElement(UI::GenericElement *element) {
@@ -575,8 +576,10 @@ bool Renderer::RemoveUIGenericElement(UI::GenericElement *element) {
             return RemoveUIPanel(reinterpret_cast<UI::Panel *>(element));
         case UI::LABEL:
             return RemoveUILabel(reinterpret_cast<UI::Label *>(element));
+
+        /* Button literally just acts like a parent that unifies a Panel & Label, we're removing its children anyway so it doesn't matter. */
         case UI::BUTTON:
-            return RemoveUIButton(reinterpret_cast<UI::Button *>(element));
+            return RemoveUIChildren(element);
         case UI::UNKNOWN:
         case UI::ARROWS:
         case UI::SCALABLE:
@@ -584,7 +587,7 @@ bool Renderer::RemoveUIGenericElement(UI::GenericElement *element) {
           break;
         }
     
-    return false;
+    return RemoveUIChildren(element);
 }
 
 void Renderer::AddUIWaypoint(UI::Waypoint *waypoint) {
@@ -782,8 +785,6 @@ void Renderer::AddUIPanel(UI::Panel *panel) {
     vkMapMemory(m_EngineDevice, renderUIPanel.uboBuffer.memory, 0, sizeof(renderUIPanel.ubo), 0, &(renderUIPanel.uboBuffer.mappedData));
 
     m_UIPanels.push_back(renderUIPanel);
-
-    AddUIChildren(panel);
 }
 
 bool Renderer::RemoveUIPanel(UI::Panel *panel) {
@@ -841,8 +842,6 @@ void Renderer::AddUILabel(UI::Label *label) {
     vkMapMemory(m_EngineDevice, renderUILabel.uboBuffer.memory, 0, sizeof(renderUILabel.ubo), 0, &(renderUILabel.uboBuffer.mappedData));
 
     m_UILabels.push_back(renderUILabel);
-
-    AddUIChildren(label);
 }
 
 bool Renderer::RemoveUILabel(UI::Label *label) {
@@ -877,14 +876,6 @@ bool Renderer::RemoveUILabel(UI::Label *label) {
     }
 
     return found;
-}
-
-void Renderer::AddUIButton(UI::Button *button) {
-    AddUIChildren(button);
-}
-
-bool Renderer::RemoveUIButton(UI::Button *button) {
-    return RemoveUIChildren(button);
 }
 
 void Renderer::RegisterUpdateFunction(const std::function<void()> &func) {
@@ -2612,6 +2603,25 @@ void Engine::LoadUIFile(const std::string &name) {
         }
 
         m_UIElements.push_back(element);
+
+        std::vector<std::vector<UI::GenericElement *>> UIElementChildren = {element->GetChildren()};
+
+        /* Recursively check for elements to add and register (if they are buttons). */
+        while (!UIElementChildren.empty()) {
+            std::vector<UI::GenericElement *> &children = UIElementChildren[0];
+
+            for (UI::GenericElement *child : children) {
+                if (child->type == UI::BUTTON) {
+                    RegisterUIButton(reinterpret_cast<UI::Button *>(child));
+                }
+
+                m_UIElements.push_back(child);
+
+                UIElementChildren.push_back(child->GetChildren());
+            }
+
+            UIElementChildren.erase(UIElementChildren.begin());
+        }
     }
 }
 
