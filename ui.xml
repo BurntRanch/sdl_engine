@@ -1,0 +1,95 @@
+<UIScene>
+
+<Panel>
+    <Color>
+        <R>1</R>
+        <G>0.5</G>
+        <B>1</B>
+    </Color>
+
+    <Position>
+        <X>0.0</X>
+        <Y>0.0</Y>
+    </Position>
+
+    <Scale>
+        <X>1</X>
+        <Y>0.1</Y>
+    </Scale>
+</Panel>
+
+<Label>
+    <Text>What?</Text>
+
+    <Position>
+        <X>0.0</X>
+        <Y>0.0</Y>
+    </Position>
+
+    <Font>NotoSans-Black.ttf</Font>
+
+    <ZDepth>0.9</ZDepth>
+</Label>
+
+<Label>
+    <Text>What?</Text>
+
+    <Position>
+        <X>0.0</X>
+        <Y>0.5</Y>
+    </Position>
+
+    <Font>NotoSans-Black.ttf</Font>
+
+    <ZDepth>0.9</ZDepth>
+</Label>
+
+<Button>
+    <Position>
+        <X>0.62</X>
+        <Y>0.62</Y>
+    </Position>
+
+    <Scale>
+        <X>0.05</X>
+        <Y>0.01</Y>
+    </Scale>
+
+    <BgPanel>
+        <Panel>
+            <Color>
+                <R>1</R>
+                <G>0.5</G>
+                <B>1</B>
+            </Color>
+
+            <Position>
+                <X>0.0</X>
+                <Y>0.0</Y>
+            </Position>
+
+            <Scale>
+                <X>0</X>
+                <Y>0</Y>
+            </Scale>
+        </Panel>
+    </BgPanel>
+
+    <FgLabel>
+        <Label>
+            <Text>Test</Text>
+
+            <Position>
+                <X>0.0</X>
+                <Y>0.0</Y>
+            </Position>
+
+            <Font>NotoSans-Black.ttf</Font>
+
+            <ZDepth>0.9</ZDepth>
+        </Label>
+    </FgLabel>
+
+</Button>
+
+</UIScene>
