@@ -191,6 +191,8 @@ bool getVisible(rapidxml::xml_node<char> *propertiesNode) {
 }
 
 void onConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *callbackInfo) {
+    fmt::println("Connection status changed!");
+
     try {
         /* Get the engine that owns the listen socket. */
         Engine *owningEngine = connectionStatusChangedListeners.at(callbackInfo->m_info.m_hListenSocket);

@@ -2947,7 +2947,7 @@ void Engine::HostGameServer(SteamNetworkingIPAddr ipAddr) {
     m_NetListenSocket = m_NetworkingSockets->CreateListenSocketIP(ipAddr, 1, &opt);
 
     if (m_NetListenSocket == k_HSteamListenSocket_Invalid) {
-        throw std::runtime_error("Failed to create listen socket IP!");
+        throw std::runtime_error("Failed to create listen socket!");
     }
 
     connectionStatusChangedListeners.insert(std::make_pair(m_NetListenSocket, this));
@@ -2958,10 +2958,14 @@ void Engine::HostGameServer(SteamNetworkingIPAddr ipAddr) {
         throw std::runtime_error("Failed to create poll group!");
     }
 
+    fmt::println("Created a listen socket!");
+
     InitNetworkingThread(NETWORKING_THREAD_ACTIVE_SERVER);
 }
 
 void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *callbackInfo) {
+    fmt::println("Connection status changed!");
+
     switch (callbackInfo->m_info.m_eState) {
         case k_ESteamNetworkingConnectionState_None:
             break;
@@ -3048,6 +3052,8 @@ void Engine::InitNetworkingThread(NetworkingThreadStatus status) {
         return;
     }
 
+    fmt::println("Initializing network thread to {}!", (int)status);
+
     if (status == NETWORKING_THREAD_ACTIVE_CLIENT) {
         m_NetworkingThread = std::thread(&Engine::NetworkingThreadClient_Main, this);
     } else if (status == NETWORKING_THREAD_ACTIVE_SERVER) {
@@ -3062,6 +3068,8 @@ void Engine::NetworkingThreadClient_Main() {
         m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
         throw std::runtime_error("Networking Thread initialized with no networking connection!");
     }
+
+    fmt::println("Started client networking thread!");
 
     while (!m_NetworkingThreadShouldQuit) {
         /* Receiving */
@@ -3100,6 +3108,8 @@ void Engine::NetworkingThreadClient_Main() {
         // ...
     }
 
+    fmt::println("Stopping client networking thread!");
+
     m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
 }
 
@@ -3110,6 +3120,8 @@ void Engine::NetworkingThreadServer_Main() {
         m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
         throw std::runtime_error("Networking Thread initialized with no networking connection!");
     }
+
+    fmt::println("Started server networking thread!");
 
     while (!m_NetworkingThreadShouldQuit) {
         ISteamNetworkingMessage *incomingMessages;
@@ -3141,6 +3153,10 @@ void Engine::NetworkingThreadServer_Main() {
             }
         }
     }
+
+    fmt::println("Stopping server networking thread!");
+
+    m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
 }
 
 /* This should be rewritten, I'll get to it after I get a proper working demo. */
