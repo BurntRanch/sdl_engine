@@ -2928,7 +2928,7 @@ void Engine::ExportScene(const std::string &path) {
 void Engine::ConnectToGameServer(SteamNetworkingIPAddr ipAddr) {
     SteamNetworkingConfigValue_t opt{};    
 
-    opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, (void *)onConnectionStatusChanged);   /* As of now, This won't do anything, We just need opt to be valid. */
+    opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, (void *)onConnectionStatusChangedCallback);
 
     HSteamNetConnection netConnection = m_NetworkingSockets->ConnectByIPAddress(ipAddr, 1, &opt);
     
@@ -2944,15 +2944,13 @@ void Engine::ConnectToGameServer(SteamNetworkingIPAddr ipAddr) {
 void Engine::HostGameServer(SteamNetworkingIPAddr ipAddr) {
     SteamNetworkingConfigValue_t opt{};
     
-    opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, (void *)(onConnectionStatusChanged));
+    opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, (void *)(onConnectionStatusChangedCallback));
 
     m_NetListenSocket = m_NetworkingSockets->CreateListenSocketIP(ipAddr, 1, &opt);
 
     if (m_NetListenSocket == k_HSteamListenSocket_Invalid) {
         throw std::runtime_error("Failed to create listen socket!");
     }
-
-    connectionStatusChangedListeners.insert(std::make_pair(m_NetListenSocket, this));
 
     m_NetPollGroup = m_NetworkingSockets->CreatePollGroup();
 
@@ -2966,7 +2964,7 @@ void Engine::HostGameServer(SteamNetworkingIPAddr ipAddr) {
 }
 
 void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *callbackInfo) {
-    fmt::println("Connection status changed!");
+    fmt::println("Connection status changed!!");
 
     switch (callbackInfo->m_info.m_eState) {
         case k_ESteamNetworkingConnectionState_None:
@@ -3072,6 +3070,7 @@ void Engine::NetworkingThreadClient_Main() {
     fmt::println("Started client networking thread!");
 
     while (!m_NetworkingThreadShouldQuit) {
+        m_CallbackInstance = this;
         m_NetworkingSockets->RunCallbacks();
 
         /* Receiving */
@@ -3127,6 +3126,7 @@ void Engine::NetworkingThreadServer_Main() {
     fmt::println("Started server networking thread!");
 
     while (!m_NetworkingThreadShouldQuit) {
+        m_CallbackInstance = this;
         m_NetworkingSockets->RunCallbacks();
 
         ISteamNetworkingMessage *incomingMessages;
@@ -3174,3 +3174,5 @@ void Engine::DisconnectFromServer() {
         m_NetworkingSockets->CloseConnection(netConnection, 0, nullptr, true);
     }
 }
+
+Engine *Engine::m_CallbackInstance = nullptr;

@@ -441,6 +441,14 @@ private:
     std::vector<Object *> m_Objects;
     std::vector<UI::GenericElement *> m_UIElements;
 
+    /* Thank you Valve for showing me this disgusting technique. I hate it. */
+
+    static Engine *m_CallbackInstance;
+
+    static void onConnectionStatusChangedCallback(SteamNetConnectionStatusChangedCallback_t *callbackInfo) {
+        m_CallbackInstance->ConnectionStatusChanged(callbackInfo);
+    }
+
     void CheckButtonClicks(SDL_Event *event);
 
     void InitNetworkingThread(NetworkingThreadStatus status);
