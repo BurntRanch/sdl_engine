@@ -2942,7 +2942,7 @@ void Engine::ConnectToGameServer(SteamNetworkingIPAddr ipAddr) {
 void Engine::HostGameServer(SteamNetworkingIPAddr ipAddr) {
     SteamNetworkingConfigValue_t opt{};
     
-    opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, (void *)onConnectionStatusChanged);
+    opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, (void *)(&onConnectionStatusChanged));
 
     m_NetListenSocket = m_NetworkingSockets->CreateListenSocketIP(ipAddr, 1, &opt);
 
@@ -3007,8 +3007,6 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                 std::array<std::byte, sizeof(int) + sizeof(char)> testStructSerialized;
                 SDL_memcpy(testStructSerialized.data(), &testStruct.testNumber, sizeof(int));
                 SDL_memcpy(testStructSerialized.data() + sizeof(int), &testStruct.testChar, sizeof(char));
-
-                m_NetworkingSockets->SendMessageToConnection(callbackInfo->m_hConn, testStructSerialized.data(), testStructSerialized.size(), k_nSteamNetworkingSend_Reliable, nullptr);
 
                 m_NetConnections.push_back(callbackInfo->m_hConn);
             }
