@@ -3097,8 +3097,6 @@ void Engine::NetworkingThreadClient_Main() {
 
         accumulativeTickTime -= (1.0f / 64.0f);
 
-        fmt::println("Executing tick at 64 tps with {}s to spare", accumulativeTickTime);
-
         m_CallbackInstance = this;
         m_NetworkingSockets->RunCallbacks();
 
@@ -3173,8 +3171,6 @@ void Engine::NetworkingThreadServer_Main() {
         }
 
         accumulativeTickTime -= (1.0f / 64.0f);
-
-        fmt::println("Executing tick at 64 tps with {}s to spare", accumulativeTickTime);
         
         m_CallbackInstance = this;
         m_NetworkingSockets->RunCallbacks();
