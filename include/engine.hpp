@@ -416,8 +416,9 @@ public:
 
     void DisconnectFromServer();    // Disconnects you from a game server, Safe to call in any situation but wont do anything if you aren't connected to a server.
 
-    // TODO: Implement a handle thing so we know which client to disconnect.
-    // void DisconnectClientFromServer();  // Disconnects a client from your server, Call this only if you're hosting a server.
+    void DisconnectClientFromServer(HSteamNetConnection connection);  // Disconnects a client from your server, Call this only if you're hosting a server.
+
+    void StopHostingGameServer();
 
     UI::GenericElement *GetElementByID(const std::string &id);
 

@@ -8,6 +8,7 @@
 #include "steamnetworkingsockets.h"
 #include "model.hpp"
 #include "steamnetworkingtypes.h"
+#include "steamtypes.h"
 #include "ui/arrows.hpp"
 #include "ui/button.hpp"
 #include "ui/label.hpp"
@@ -2579,6 +2580,8 @@ void Renderer::Start() {
 
 Engine::~Engine() {
     DisconnectFromServer();
+
+    StopHostingGameServer();
 }
 
 void Engine::InitRenderer(Settings &settings, const Camera *primaryCamera) {
@@ -2964,7 +2967,7 @@ void Engine::HostGameServer(SteamNetworkingIPAddr ipAddr) {
 }
 
 void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *callbackInfo) {
-    fmt::println("Connection status changed!!");
+    fmt::println("Connection status changed!! ({})", (int)callbackInfo->m_info.m_eState);
 
     switch (callbackInfo->m_info.m_eState) {
         case k_ESteamNetworkingConnectionState_None:
@@ -2985,6 +2988,8 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
             break;
         case k_ESteamNetworkingConnectionState_Connecting:
             if (m_NetworkingThreadStatus == NETWORKING_THREAD_ACTIVE_SERVER) {
+                fmt::println("We're getting a connection!");
+
                 /* This callback only happens when a new client is connecting. */
                 UTILASSERT(std::find(m_NetConnections.begin(), m_NetConnections.end(), callbackInfo->m_hConn) == m_NetConnections.end());
 
@@ -3007,6 +3012,9 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                 std::array<std::byte, sizeof(int) + sizeof(char)> testStructSerialized;
                 SDL_memcpy(testStructSerialized.data(), &testStruct.testNumber, sizeof(int));
                 SDL_memcpy(testStructSerialized.data() + sizeof(int), &testStruct.testChar, sizeof(char));
+
+                int64 msgNumber = 0;
+                m_NetworkingSockets->SendMessageToConnection(callbackInfo->m_hConn, testStructSerialized.data(), testStructSerialized.size(), k_nSteamNetworkingSend_Reliable, &msgNumber);
 
                 m_NetConnections.push_back(callbackInfo->m_hConn);
             }
@@ -3139,7 +3147,7 @@ void Engine::NetworkingThreadServer_Main() {
             for (int i = 0; i < msgCount; i++) {
                 ISteamNetworkingMessage *incomingMessage = incomingMessages + (i * sizeof(ISteamNetworkingMessage));
 
-                if (incomingMessage->GetSize() != sizeof(TestNetworkStruct)) {
+                if (incomingMessage->GetSize() != sizeof(int) + sizeof(char)) {
                     fmt::println("Invalid packet!");
                 } else {
                     const void *data = incomingMessage->GetData();
@@ -3173,6 +3181,27 @@ void Engine::DisconnectFromServer() {
     for (HSteamNetConnection netConnection : m_NetConnections) {
         m_NetworkingSockets->CloseConnection(netConnection, 0, nullptr, true);
     }
+}
+
+void Engine::DisconnectClientFromServer(HSteamNetConnection connection) {
+    auto it = std::find(m_NetConnections.begin(), m_NetConnections.end(), connection);
+    UTILASSERT(it != m_NetConnections.end());
+
+    m_NetworkingSockets->CloseConnection(connection, 0, nullptr, true);
+
+    m_NetConnections.erase(it);
+}
+
+void Engine::StopHostingGameServer() {
+    m_NetworkingThreadShouldQuit = true;
+
+    m_NetworkingThread.join();
+
+    while (m_NetConnections.size() != 0) {
+        DisconnectClientFromServer(m_NetConnections[0]);
+    }
+
+    m_NetworkingSockets->CloseListenSocket(m_NetListenSocket);
 }
 
 Engine *Engine::m_CallbackInstance = nullptr;
