@@ -2944,7 +2944,7 @@ void Engine::ConnectToGameServer(SteamNetworkingIPAddr ipAddr) {
 void Engine::HostGameServer(SteamNetworkingIPAddr ipAddr) {
     SteamNetworkingConfigValue_t opt{};
     
-    opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, (void *)(&onConnectionStatusChanged));
+    opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, (void *)(onConnectionStatusChanged));
 
     m_NetListenSocket = m_NetworkingSockets->CreateListenSocketIP(ipAddr, 1, &opt);
 
@@ -3072,6 +3072,8 @@ void Engine::NetworkingThreadClient_Main() {
     fmt::println("Started client networking thread!");
 
     while (!m_NetworkingThreadShouldQuit) {
+        m_NetworkingSockets->RunCallbacks();
+
         /* Receiving */
         for (HSteamNetConnection netConnection : m_NetConnections) {
             ISteamNetworkingMessage *incomingMessages;
@@ -3125,6 +3127,8 @@ void Engine::NetworkingThreadServer_Main() {
     fmt::println("Started server networking thread!");
 
     while (!m_NetworkingThreadShouldQuit) {
+        m_NetworkingSockets->RunCallbacks();
+
         ISteamNetworkingMessage *incomingMessages;
         int msgCount = m_NetworkingSockets->ReceiveMessagesOnPollGroup(m_NetPollGroup, &incomingMessages, 1);
 
