@@ -3077,7 +3077,28 @@ void Engine::NetworkingThreadClient_Main() {
 
     fmt::println("Started client networking thread!");
 
+    using namespace std::chrono;
+
+    high_resolution_clock::time_point lastTickTime = high_resolution_clock::now();
+    double accumulativeTickTime = 0;
+
     while (!m_NetworkingThreadShouldQuit) {
+        high_resolution_clock::time_point now = high_resolution_clock::now();
+
+        double tickDeltaTime = (duration_cast<duration<double>>(now - lastTickTime).count());
+
+        accumulativeTickTime += tickDeltaTime;
+
+        /* hardcoded 64 tick, to be replaced. */
+        if (accumulativeTickTime < (1.0f/64.0f)) {
+            std::this_thread::sleep_for(milliseconds(8));  /* keep waking up at half the time just incase */
+            continue;
+        }
+
+        accumulativeTickTime -= (1.0f / 64.0f);
+
+        fmt::println("Executing tick at 64 tps with {}s to spare", accumulativeTickTime);
+
         m_CallbackInstance = this;
         m_NetworkingSockets->RunCallbacks();
 
@@ -3133,7 +3154,28 @@ void Engine::NetworkingThreadServer_Main() {
 
     fmt::println("Started server networking thread!");
 
+    using namespace std::chrono;
+
+    high_resolution_clock::time_point lastTickTime = high_resolution_clock::now();
+    double accumulativeTickTime = 0;
+
     while (!m_NetworkingThreadShouldQuit) {
+        high_resolution_clock::time_point now = high_resolution_clock::now();
+
+        double tickDeltaTime = (duration_cast<duration<double>>(now - lastTickTime).count());
+
+        accumulativeTickTime += tickDeltaTime;
+
+        /* hardcoded 64 tick, to be replaced. */
+        if (accumulativeTickTime < (1.0f/64.0f)) {
+            std::this_thread::sleep_for(milliseconds(8));  /* keep waking up at half the time just incase */
+            continue;
+        }
+
+        accumulativeTickTime -= (1.0f / 64.0f);
+
+        fmt::println("Executing tick at 64 tps with {}s to spare", accumulativeTickTime);
+        
         m_CallbackInstance = this;
         m_NetworkingSockets->RunCallbacks();
 
@@ -3165,6 +3207,8 @@ void Engine::NetworkingThreadServer_Main() {
                 incomingMessage->Release();
             }
         }
+
+        lastTickTime = now;
     }
 
     fmt::println("Stopping server networking thread!");
