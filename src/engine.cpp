@@ -2926,7 +2926,9 @@ void Engine::ExportScene(const std::string &path) {
 }
 
 void Engine::ConnectToGameServer(SteamNetworkingIPAddr ipAddr) {
-    SteamNetworkingConfigValue_t opt{};
+    SteamNetworkingConfigValue_t opt{};    
+
+    opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, (void *)onConnectionStatusChanged);   /* As of now, This won't do anything, We just need opt to be valid. */
 
     HSteamNetConnection netConnection = m_NetworkingSockets->ConnectByIPAddress(ipAddr, 1, &opt);
     
@@ -3081,7 +3083,8 @@ void Engine::NetworkingThreadClient_Main() {
             if (msgCount > 0) {
                 for (int i = 0; i < msgCount; i++) {
                     ISteamNetworkingMessage *incomingMessage = incomingMessages + (i * sizeof(ISteamNetworkingMessage));
-                    if (incomingMessage->GetSize() != sizeof(TestNetworkStruct)) {
+
+                    if (incomingMessage->GetSize() != sizeof(int) + sizeof(char)) {
                         fmt::println("Invalid packet!");
                     } else {
                         const void *data = incomingMessage->GetData();
