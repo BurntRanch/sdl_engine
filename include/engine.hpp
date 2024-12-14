@@ -483,12 +483,25 @@ private:
 
     void ExecutePacket(Networking_GeneralPacket &packet);
 
+    /* Deserialization */
+    Networking_GeneralPacket DeserializePacket(void *packetData);
+
+    Networking_CreateObject_Packet *DeserializeCreateObjectPacket(std::vector<std::byte> &packetVector);
+    Networking_LoadModel_Packet *DeserializeLoadModelPacket(std::vector<std::byte> &packetVector);
+    Networking_AttachModelToObject_Packet *DeserializeAttachModelToObjectPacket(std::vector<std::byte> &packetVector);
+    Networking_LoadScene_Packet *DeserializeLoadScenePacket(std::vector<std::byte> &packetVector);
+
+    /* Serialization */
+
     void SerializeAndSendPacket(Networking_GeneralPacket &packet, HSteamNetConnection connection);
 
     void SerializeCreateObjectPacket(Networking_CreateObject_Packet *packet, std::vector<std::byte> &serializedOutput);
     void SerializeLoadModelPacket(Networking_LoadModel_Packet *packet, std::vector<std::byte> &serializedOutput);
     void SerializeAttachModelToObjectPacket(Networking_AttachModelToObject_Packet *packet, std::vector<std::byte> &serializedOutput);
     void SerializeLoadScenePacket(Networking_LoadScene_Packet *packet, std::vector<std::byte> &serializedOutput);
+
+    template<typename T>
+    T Deserialize(std::vector<std::byte> object);
 
     template<typename T>
     std::vector<std::byte> Serialize(T object);
