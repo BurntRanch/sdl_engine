@@ -3476,14 +3476,10 @@ std::vector<std::byte> Engine::Serialize(T object) {
             serializedOutput.insert(serializedOutput.end(), serializedChar.begin(), serializedChar.end());
         }
     } else {
-        serializedOutput.reserve(serializedOutput.size() + sizeof(T));
-
-        memcpy(serializedOutput.data() + serializedOutput.size() - sizeof(T), &object, sizeof(T));
-
-        // for (size_t i = 0; i < sizeof(T); i++) {
-        //     std::byte *byte = reinterpret_cast<std::byte *>(&object) + i;
-        //     serializedOutput.push_back(*byte);
-        // }
+        for (size_t i = 0; i < sizeof(T); i++) {
+            std::byte *byte = reinterpret_cast<std::byte *>(&object) + i;
+            serializedOutput.push_back(*byte);
+        }
     }
 
     return serializedOutput;
