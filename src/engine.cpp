@@ -2991,7 +2991,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
 
             break;
         case k_ESteamNetworkingConnectionState_Connecting:
-            if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_SERVER) {
+            if (m_NetworkingThreadStatus | NETWORKING_THREAD_ACTIVE_SERVER) {
                 fmt::println("We're getting a connection!");
 
                 /* This callback only happens when a new client is connecting. */
@@ -3200,7 +3200,7 @@ void Engine::NetworkingThreadServer_Main() {
 
 /* This should be rewritten, I'll get to it after I get a proper working demo. */
 void Engine::DisconnectFromServer() {
-    if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_CLIENT) {
+    if (m_NetworkingThreadStatus | NETWORKING_THREAD_ACTIVE_CLIENT) {
         m_NetworkingThreadShouldQuit = true;
 
         m_NetworkingThread.join();
@@ -3221,7 +3221,7 @@ void Engine::DisconnectClientFromServer(HSteamNetConnection connection) {
 }
 
 void Engine::StopHostingGameServer() {
-    if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_SERVER) {
+    if (m_NetworkingThreadStatus | NETWORKING_THREAD_ACTIVE_SERVER) {
         m_NetworkingThreadShouldQuit = true;
 
         m_NetworkingThread.join();
