@@ -490,8 +490,9 @@ void Renderer::SetMouseCaptureState(bool capturing) {
 void Renderer::LoadModel(Model *model) {
     std::vector<std::future<RenderModel>> tasks;
 
+    vkDeviceWaitIdle(m_EngineDevice);
     for (Mesh &mesh : model->meshes) {
-        tasks.push_back(std::async(std::launch::async, &Renderer::LoadMesh, this, std::ref(mesh), model, true));
+        tasks.push_back(std::async(std::launch::deferred, &Renderer::LoadMesh, this, std::ref(mesh), model, true));
     }
 
     // Any exception here is going to just happen and get caught like a regular engine error.
@@ -2062,7 +2063,15 @@ void Renderer::Start() {
 #endif
 
         // we got (MAX_FRAMES_IN_FLIGHT) "slots" to use, we can write frames as long as the current frame slot we're using isn't occupied.
-        vkWaitForFences(m_EngineDevice, 1, &m_InFlightFences[currentFrameIndex], true, UINT64_MAX);
+        VkResult waitForFencesResult;
+
+        while (waitForFencesResult != VK_SUCCESS) {
+            /* 10ms wait */
+            waitForFencesResult = vkWaitForFences(m_EngineDevice, 1, &m_InFlightFences[currentFrameIndex], true, 10000000);
+            if (waitForFencesResult != VK_TIMEOUT) {
+                throw std::runtime_error(fmt::format(engineError::WAIT_FOR_FENCES_FAILED, string_VkResult(waitForFencesResult)));
+            }
+        }
 
 #ifdef LOG_FRAME
         afterFenceTime = high_resolution_clock::now();
@@ -2549,8 +2558,9 @@ void Renderer::Start() {
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &m_RenderFinishedSemaphores[currentFrameIndex];
 
-        if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFences[currentFrameIndex]) != VK_SUCCESS)
-            throw std::runtime_error(engineError::QUEUE_SUBMIT_FAILURE);
+        VkResult queueSubmitResult = vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFences[currentFrameIndex]);
+        if (queueSubmitResult != VK_SUCCESS)
+            throw std::runtime_error(fmt::format(engineError::QUEUE_SUBMIT_FAILURE, string_VkResult(queueSubmitResult)));
 
         // we finished, now we should present the frame.
         VkPresentInfoKHR presentInfo{};
@@ -2991,7 +3001,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
 
             break;
         case k_ESteamNetworkingConnectionState_Connecting:
-            if (m_NetworkingThreadStatus | NETWORKING_THREAD_ACTIVE_SERVER) {
+            if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_SERVER) {
                 fmt::println("We're getting a connection!");
 
                 /* This callback only happens when a new client is connecting. */
@@ -3113,13 +3123,14 @@ void Engine::NetworkingThreadClient_Main() {
                 for (int i = 0; i < msgCount; i++) {
                     ISteamNetworkingMessage *incomingMessage = incomingMessages + (i * sizeof(ISteamNetworkingMessage));
 
-                    if (incomingMessage->GetSize() != sizeof(int) + sizeof(char)) {
+                    if (incomingMessage->GetSize() <= sizeof(int) + sizeof(size_t)) {
                         fmt::println("Invalid packet!");
                     } else {
                         const void *data = incomingMessage->GetData();
 
-                        /* TODO: Deserialize and process packets */
-                        fmt::println("Got a packet! not much for me to do here..");
+                        Networking_GeneralPacket packet = DeserializePacket(const_cast<void *>(data));
+
+                        ImportScene(reinterpret_cast<Networking_LoadScene_Packet *>(packet.packetData)->sceneName);
                     }
                     
                     incomingMessage->Release();
@@ -3174,13 +3185,13 @@ void Engine::NetworkingThreadServer_Main() {
         int msgCount = m_NetworkingSockets->ReceiveMessagesOnPollGroup(m_NetPollGroup, &incomingMessages, 1);
 
         if (msgCount < 0) {
-            throw std::runtime_error("Error receiving messages from server!");
+            throw std::runtime_error("Error receiving messages from a client!");
         }
         if (msgCount > 0) {
             for (int i = 0; i < msgCount; i++) {
                 ISteamNetworkingMessage *incomingMessage = incomingMessages + (i * sizeof(ISteamNetworkingMessage));
 
-                if (incomingMessage->GetSize() != sizeof(int) + sizeof(char)) {
+                if (incomingMessage->GetSize() <= sizeof(int) + sizeof(size_t)) {
                     fmt::println("Invalid packet!");
                 } else {
                     fmt::println("Got a packet.. what do I do with that?");
@@ -3200,7 +3211,7 @@ void Engine::NetworkingThreadServer_Main() {
 
 /* This should be rewritten, I'll get to it after I get a proper working demo. */
 void Engine::DisconnectFromServer() {
-    if (m_NetworkingThreadStatus | NETWORKING_THREAD_ACTIVE_CLIENT) {
+    if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_CLIENT) {
         m_NetworkingThreadShouldQuit = true;
 
         m_NetworkingThread.join();
@@ -3221,7 +3232,7 @@ void Engine::DisconnectClientFromServer(HSteamNetConnection connection) {
 }
 
 void Engine::StopHostingGameServer() {
-    if (m_NetworkingThreadStatus | NETWORKING_THREAD_ACTIVE_SERVER) {
+    if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_SERVER) {
         m_NetworkingThreadShouldQuit = true;
 
         m_NetworkingThread.join();
@@ -3435,12 +3446,12 @@ T Engine::Deserialize(std::vector<std::byte> object) {
     T result;
 
     if constexpr (std::is_same<T, std::string>::value) {
-        assert(object.size() == sizeof(size_t));    /* minimum size */
+        assert(object.size() >= sizeof(size_t));    /* minimum size */
 
         size_t stringSize = *reinterpret_cast<size_t *>(object.data());
         object.erase(object.begin(), object.begin() + sizeof(size_t));
 
-        assert(object.size() == stringSize);    /* Each char is 1 byte, this is valid. */
+        assert(object.size() >= stringSize);    /* Each char is 1 byte, this is valid. */
 
         char *string = reinterpret_cast<char *>(object.data());
 

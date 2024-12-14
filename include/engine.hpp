@@ -69,7 +69,7 @@ const std::vector<const char *> requiredInstanceExtensions = {
 
 const std::vector<const char *> requiredLayerExtensions {
 #if DEBUG
-//    "VK_LAYER_KHRONOS_validation",
+    "VK_LAYER_KHRONOS_validation",
 #endif
 };
 
@@ -410,10 +410,10 @@ struct Networking_GeneralPacket {
 };
 
 enum NetworkingThreadStatus {
-    NETWORKING_THREAD_INACTIVE = 0x00,
-    NETWORKING_THREAD_ACTIVE_SERVER = 0x01,
-    NETWORKING_THREAD_ACTIVE_CLIENT = 0x10,
-    NETWORKING_THREAD_ACTIVE_BOTH = 0x11
+    NETWORKING_THREAD_INACTIVE = 0,
+    NETWORKING_THREAD_ACTIVE_SERVER = 1,
+    NETWORKING_THREAD_ACTIVE_CLIENT = 2,
+    NETWORKING_THREAD_ACTIVE_BOTH = 3
 };
 
 class Engine {
