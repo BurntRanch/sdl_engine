@@ -3253,12 +3253,16 @@ Networking_GeneralPacket Engine::DeserializePacket(void *packetData) {
     switch (packet.packetType) {
         case PACKET_TYPE_CREATE_OBJECT:
             packet.packetData = DeserializeCreateObjectPacket(packetVector);
+            break;
         case PACKET_TYPE_LOAD_MODEL:
             packet.packetData = DeserializeLoadModelPacket(packetVector);
+            break;
         case PACKET_TYPE_ATTACH_MODEL_TO_OBJECT:
             packet.packetData = DeserializeAttachModelToObjectPacket(packetVector);
+            break;
         case PACKET_TYPE_LOAD_SCENE:
             packet.packetData = DeserializeLoadScenePacket(packetVector);
+            break;
         default:
             throw std::runtime_error("Deserializing an unknown packet!");
     }
@@ -3344,12 +3348,16 @@ void Engine::SerializeAndSendPacket(Networking_GeneralPacket &packet, HSteamNetC
     switch (packet.packetType) {
         case PACKET_TYPE_CREATE_OBJECT:
             SerializeCreateObjectPacket(reinterpret_cast<Networking_CreateObject_Packet *>(packet.packetData), serializedPacket);
+            break;
         case PACKET_TYPE_LOAD_MODEL:
             SerializeLoadModelPacket(reinterpret_cast<Networking_LoadModel_Packet *>(packet.packetData), serializedPacket);
+            break;
         case PACKET_TYPE_ATTACH_MODEL_TO_OBJECT:
             SerializeAttachModelToObjectPacket(reinterpret_cast<Networking_AttachModelToObject_Packet *>(packet.packetData), serializedPacket);
+            break;
         case PACKET_TYPE_LOAD_SCENE:
             SerializeLoadScenePacket(reinterpret_cast<Networking_LoadScene_Packet *>(packet.packetData), serializedPacket);
+            break;
         default:
             throw std::runtime_error("Serializing an unknown packet!");
     }
