@@ -2989,7 +2989,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
 
             break;
         case k_ESteamNetworkingConnectionState_Connecting:
-            if (m_NetworkingThreadStatus == NETWORKING_THREAD_ACTIVE_SERVER) {
+            if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_SERVER) {
                 fmt::println("We're getting a connection!");
 
                 /* This callback only happens when a new client is connecting. */
@@ -3007,16 +3007,15 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                     break;
                 }
 
-                TestNetworkStruct testStruct{};
-                testStruct.testNumber = 1234;
-                testStruct.testChar = 'E';
+                Networking_LoadScene_Packet packet{};
+                packet.sceneName = "viking_room.xml";
 
-                std::array<std::byte, sizeof(int) + sizeof(char)> testStructSerialized;
-                SDL_memcpy(testStructSerialized.data(), &testStruct.testNumber, sizeof(int));
-                SDL_memcpy(testStructSerialized.data() + sizeof(int), &testStruct.testChar, sizeof(char));
+                Networking_GeneralPacket generalPacket{};
+                generalPacket.packetType = PACKET_TYPE_LOAD_SCENE;
+                generalPacket.packetSize = sizeof(packet);
+                generalPacket.packetData = &packet;
 
-                int64 msgNumber = 0;
-                m_NetworkingSockets->SendMessageToConnection(callbackInfo->m_hConn, testStructSerialized.data(), testStructSerialized.size(), k_nSteamNetworkingSend_Reliable, &msgNumber);
+                SerializeAndSendPacket(generalPacket, callbackInfo->m_hConn);
 
                 m_NetConnections.push_back(callbackInfo->m_hConn);
             }
@@ -3067,17 +3066,15 @@ void Engine::InitNetworkingThread(NetworkingThreadStatus status) {
     } else if (status == NETWORKING_THREAD_ACTIVE_SERVER) {
         m_NetworkingThread = std::thread(&Engine::NetworkingThreadServer_Main, this);
     }
-
-    m_NetworkingThreadStatus = status;
 }
 
 void Engine::NetworkingThreadClient_Main() {
     if (m_NetConnections.empty()) {
-        m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
         throw std::runtime_error("Networking Thread initialized with no networking connection!");
     }
 
     fmt::println("Started client networking thread!");
+    m_NetworkingThreadStatus &= NETWORKING_THREAD_ACTIVE_CLIENT;
 
     using namespace std::chrono;
 
@@ -3119,14 +3116,7 @@ void Engine::NetworkingThreadClient_Main() {
                     } else {
                         const void *data = incomingMessage->GetData();
 
-                        TestNetworkStruct testStruct{};
-
-                        testStruct.testNumber = *reinterpret_cast<const int *>(data);
-                        testStruct.testChar = *(reinterpret_cast<const char *>(data) + sizeof(testStruct.testNumber));
-
-                        fmt::println("{} {}", testStruct.testNumber, testStruct.testChar);
-
-                        m_NetworkingSockets->SendMessageToConnection(netConnection, data, incomingMessage->GetSize(), 0, &incomingMessage->m_nMessageNumber);
+                        /* TODO: Deserialize and process packets */
                     }
                     
                     incomingMessage->Release();
@@ -3141,18 +3131,18 @@ void Engine::NetworkingThreadClient_Main() {
 
     fmt::println("Stopping client networking thread!");
 
-    m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
+    m_NetworkingThreadStatus &= ~NETWORKING_THREAD_INACTIVE;
 }
 
 
 
 void Engine::NetworkingThreadServer_Main() {
     if (!m_NetListenSocket) {
-        m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
         throw std::runtime_error("Networking Thread initialized with no networking connection!");
     }
 
     fmt::println("Started server networking thread!");
+    m_NetworkingThreadStatus &= NETWORKING_THREAD_ACTIVE_SERVER;
 
     using namespace std::chrono;
 
@@ -3190,16 +3180,7 @@ void Engine::NetworkingThreadServer_Main() {
                 if (incomingMessage->GetSize() != sizeof(int) + sizeof(char)) {
                     fmt::println("Invalid packet!");
                 } else {
-                    const void *data = incomingMessage->GetData();
-
-                    TestNetworkStruct testStruct{};
-
-                    testStruct.testNumber = *reinterpret_cast<const int *>(data);
-                    testStruct.testChar = *(reinterpret_cast<const char *>(data) + sizeof(testStruct.testNumber));
-
-                    fmt::println("{} {}", testStruct.testNumber, testStruct.testChar);
-
-                    m_NetworkingSockets->SendMessageToConnection(incomingMessage->GetConnection(), data, incomingMessage->GetSize(), 0, &incomingMessage->m_nMessageNumber);
+                    fmt::println("Got a packet.. what do I do with that?");
                 }
                 
                 incomingMessage->Release();
@@ -3211,12 +3192,12 @@ void Engine::NetworkingThreadServer_Main() {
 
     fmt::println("Stopping server networking thread!");
 
-    m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
+    m_NetworkingThreadStatus &= ~NETWORKING_THREAD_ACTIVE_SERVER;
 }
 
 /* This should be rewritten, I'll get to it after I get a proper working demo. */
 void Engine::DisconnectFromServer() {
-    if (m_NetworkingThreadStatus == NETWORKING_THREAD_ACTIVE_CLIENT) {
+    if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_CLIENT) {
         m_NetworkingThreadShouldQuit = true;
 
         m_NetworkingThread.join();
@@ -3237,7 +3218,7 @@ void Engine::DisconnectClientFromServer(HSteamNetConnection connection) {
 }
 
 void Engine::StopHostingGameServer() {
-    if (m_NetworkingThreadStatus == NETWORKING_THREAD_ACTIVE_SERVER) {
+    if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_SERVER) {
         m_NetworkingThreadShouldQuit = true;
 
         m_NetworkingThread.join();
@@ -3250,6 +3231,109 @@ void Engine::StopHostingGameServer() {
             m_NetworkingSockets->CloseListenSocket(m_NetListenSocket);
         }
     }
+}
+
+void Engine::SerializeAndSendPacket(Networking_GeneralPacket &packet, HSteamNetConnection connection) {
+    /* packetType is the first element, so might aswell initialize the array as such */
+    std::vector<std::byte> serializedPacket = Serialize(packet.packetType);
+
+    switch (packet.packetType) {
+        case PACKET_TYPE_CREATE_OBJECT:
+            SerializeCreateObjectPacket(reinterpret_cast<Networking_CreateObject_Packet *>(packet.packetData), serializedPacket);
+        case PACKET_TYPE_LOAD_MODEL:
+            SerializeLoadModelPacket(reinterpret_cast<Networking_LoadModel_Packet *>(packet.packetData), serializedPacket);
+        case PACKET_TYPE_ATTACH_MODEL_TO_OBJECT:
+            SerializeAttachModelToObjectPacket(reinterpret_cast<Networking_AttachModelToObject_Packet *>(packet.packetData), serializedPacket);
+        case PACKET_TYPE_LOAD_SCENE:
+            SerializeLoadScenePacket(reinterpret_cast<Networking_LoadScene_Packet *>(packet.packetData), serializedPacket);
+        default:
+            throw std::runtime_error("Serializing an unknown packet!");
+    }
+
+    m_NetworkingSockets->SendMessageToConnection(connection, serializedPacket.data(), serializedPacket.size(), k_nSteamNetworkingSend_Reliable, nullptr);
+}
+
+void Engine::SerializeCreateObjectPacket(Networking_CreateObject_Packet *packet, std::vector<std::byte> &serializedOutput) {
+    std::vector<std::vector<std::byte>> serializedObjects;
+
+    /* Positions */
+    serializedObjects.push_back(Serialize(packet->position.x));
+    serializedObjects.push_back(Serialize(packet->position.y));
+    serializedObjects.push_back(Serialize(packet->position.z));
+
+    /* Rotations */
+    serializedObjects.push_back(Serialize(packet->rotation.x));
+    serializedObjects.push_back(Serialize(packet->rotation.y));
+    serializedObjects.push_back(Serialize(packet->rotation.z));
+
+    /* Scales */
+    serializedObjects.push_back(Serialize(packet->scale.x));
+    serializedObjects.push_back(Serialize(packet->scale.y));
+    serializedObjects.push_back(Serialize(packet->scale.z));
+
+    /* ObjectID */
+    serializedObjects.push_back(Serialize(packet->objectID));
+
+    /* for each serialized object, put it at the end of serializedOutput */
+    std::for_each(serializedObjects.begin(), serializedObjects.end(), [&serializedOutput] (std::vector<std::byte> e) { serializedOutput.insert(serializedOutput.end(), e.begin(), e.end()); });
+}
+
+void Engine::SerializeLoadModelPacket(Networking_LoadModel_Packet *packet, std::vector<std::byte> &serializedOutput) {
+    std::vector<std::vector<std::byte>> serializedObjects;
+
+    /* Positions */
+    serializedObjects.push_back(Serialize(packet->modelName));
+
+    /* ModelID */
+    serializedObjects.push_back(Serialize(packet->modelID));
+
+    /* for each serialized object, put it at the end of serializedOutput */
+    std::for_each(serializedObjects.begin(), serializedObjects.end(), [&serializedOutput] (std::vector<std::byte> e) { serializedOutput.insert(serializedOutput.end(), e.begin(), e.end()); });
+}
+
+void Engine::SerializeAttachModelToObjectPacket(Networking_AttachModelToObject_Packet *packet, std::vector<std::byte> &serializedOutput) {
+    std::vector<std::vector<std::byte>> serializedObjects;
+
+    /* modelID */
+    serializedObjects.push_back(Serialize(packet->modelID));
+
+    /* objectID */
+    serializedObjects.push_back(Serialize(packet->objectID));
+
+    /* for each serialized object, put it at the end of serializedOutput */
+    std::for_each(serializedObjects.begin(), serializedObjects.end(), [&serializedOutput] (std::vector<std::byte> e) { serializedOutput.insert(serializedOutput.end(), e.begin(), e.end()); });
+}
+
+void Engine::SerializeLoadScenePacket(Networking_LoadScene_Packet *packet, std::vector<std::byte> &serializedOutput) {
+    std::vector<std::vector<std::byte>> serializedObjects;
+
+    /* SceneName */
+    serializedObjects.push_back(Serialize(packet->sceneName));
+
+    /* for each serialized object, put it at the end of serializedOutput */
+    std::for_each(serializedObjects.begin(), serializedObjects.end(), [&serializedOutput] (std::vector<std::byte> e) { serializedOutput.insert(serializedOutput.end(), e.begin(), e.end()); });
+}
+
+template<typename T>
+std::vector<std::byte> Serialize(T object) {
+    std::vector<std::byte> serializedOutput;
+
+    if (std::is_same<T, std::string>::value) {
+        std::vector<std::byte> serializedStringSize = Serialize(object.size());
+        serializedOutput.insert(serializedOutput.end(), serializedStringSize.begin(), serializedStringSize.end());
+
+        for (char &c : object) {
+            std::vector<std::byte> serializedChar = Serialize(c);
+            serializedOutput.insert(serializedOutput.end(), serializedChar.begin(), serializedChar.end());
+        }
+    } else {
+        for (size_t i = 0; i < sizeof(T); i++) {
+            std::byte *byte = reinterpret_cast<std::byte *>(&object) + i;
+            serializedOutput.push_back(*byte);
+        }
+    }
+
+    return serializedOutput;
 }
 
 Engine *Engine::m_CallbackInstance = nullptr;

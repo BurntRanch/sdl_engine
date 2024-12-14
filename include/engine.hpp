@@ -375,15 +375,45 @@ private:
     std::vector<VkSampler> m_CreatedSamplers;
 };
 
-struct TestNetworkStruct {
-    int testNumber;
-    char testChar;
+enum Networking_PacketType {
+    PACKET_TYPE_CREATE_OBJECT,
+    PACKET_TYPE_LOAD_MODEL,
+    PACKET_TYPE_ATTACH_MODEL_TO_OBJECT,
+    PACKET_TYPE_LOAD_SCENE,
+};
+
+struct Networking_CreateObject_Packet {
+    glm::vec3 position;
+    glm::vec3 rotation;
+    glm::vec3 scale;
+    int objectID;
+};
+
+struct Networking_LoadModel_Packet {
+    std::string modelName;
+    int modelID;
+};
+
+struct Networking_AttachModelToObject_Packet {
+    int modelID;
+    int objectID;
+};
+
+struct Networking_LoadScene_Packet {
+    std::string sceneName;
+};
+
+struct Networking_GeneralPacket {
+    Networking_PacketType packetType;
+    size_t packetSize;
+    void *packetData;   /* Depending on the packetType, you have to deserialize it differently. */
 };
 
 enum NetworkingThreadStatus {
-    NETWORKING_THREAD_INACTIVE,
-    NETWORKING_THREAD_ACTIVE_SERVER,
-    NETWORKING_THREAD_ACTIVE_CLIENT
+    NETWORKING_THREAD_INACTIVE = 0x00,
+    NETWORKING_THREAD_ACTIVE_SERVER = 0x01,
+    NETWORKING_THREAD_ACTIVE_CLIENT = 0x10,
+    NETWORKING_THREAD_ACTIVE_BOTH = 0x11
 };
 
 class Engine {
@@ -432,8 +462,9 @@ private:
     ISteamNetworkingSockets *m_NetworkingSockets;
     std::vector<HSteamNetConnection> m_NetConnections;
     HSteamListenSocket m_NetListenSocket = k_HSteamListenSocket_Invalid;
-    HSteamNetPollGroup m_NetPollGroup;
-    NetworkingThreadStatus m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
+    HSteamNetPollGroup m_NetPollGroup = k_HSteamNetPollGroup_Invalid;
+
+    int m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
 
     std::thread m_NetworkingThread;
     
@@ -449,6 +480,18 @@ private:
     static void onConnectionStatusChangedCallback(SteamNetConnectionStatusChangedCallback_t *callbackInfo) {
         m_CallbackInstance->ConnectionStatusChanged(callbackInfo);
     }
+
+    void ExecutePacket(Networking_GeneralPacket &packet);
+
+    void SerializeAndSendPacket(Networking_GeneralPacket &packet, HSteamNetConnection connection);
+
+    void SerializeCreateObjectPacket(Networking_CreateObject_Packet *packet, std::vector<std::byte> &serializedOutput);
+    void SerializeLoadModelPacket(Networking_LoadModel_Packet *packet, std::vector<std::byte> &serializedOutput);
+    void SerializeAttachModelToObjectPacket(Networking_AttachModelToObject_Packet *packet, std::vector<std::byte> &serializedOutput);
+    void SerializeLoadScenePacket(Networking_LoadScene_Packet *packet, std::vector<std::byte> &serializedOutput);
+
+    template<typename T>
+    std::vector<std::byte> Serialize(T object);
 
     void CheckButtonClicks(SDL_Event *event);
 
