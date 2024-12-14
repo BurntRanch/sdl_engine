@@ -2582,6 +2582,8 @@ Engine::~Engine() {
     DisconnectFromServer();
 
     StopHostingGameServer();
+
+    GameNetworkingSockets_Kill();
 }
 
 void Engine::InitRenderer(Settings &settings, const Camera *primaryCamera) {
@@ -3214,12 +3216,14 @@ void Engine::NetworkingThreadServer_Main() {
 
 /* This should be rewritten, I'll get to it after I get a proper working demo. */
 void Engine::DisconnectFromServer() {
-    m_NetworkingThreadShouldQuit = true;
+    if (m_NetworkingThreadStatus == NETWORKING_THREAD_ACTIVE_CLIENT) {
+        m_NetworkingThreadShouldQuit = true;
 
-    m_NetworkingThread.join();
+        m_NetworkingThread.join();
 
-    for (HSteamNetConnection netConnection : m_NetConnections) {
-        m_NetworkingSockets->CloseConnection(netConnection, 0, nullptr, true);
+        for (HSteamNetConnection netConnection : m_NetConnections) {
+            m_NetworkingSockets->CloseConnection(netConnection, 0, nullptr, true);
+        }
     }
 }
 
@@ -3233,15 +3237,19 @@ void Engine::DisconnectClientFromServer(HSteamNetConnection connection) {
 }
 
 void Engine::StopHostingGameServer() {
-    m_NetworkingThreadShouldQuit = true;
+    if (m_NetworkingThreadStatus == NETWORKING_THREAD_ACTIVE_SERVER) {
+        m_NetworkingThreadShouldQuit = true;
 
-    m_NetworkingThread.join();
+        m_NetworkingThread.join();
 
-    while (m_NetConnections.size() != 0) {
-        DisconnectClientFromServer(m_NetConnections[0]);
+        while (m_NetConnections.size() != 0) {
+            DisconnectClientFromServer(m_NetConnections[0]);
+        }
+
+        if (m_NetListenSocket != k_HSteamListenSocket_Invalid) {
+            m_NetworkingSockets->CloseListenSocket(m_NetListenSocket);
+        }
     }
-
-    m_NetworkingSockets->CloseListenSocket(m_NetListenSocket);
 }
 
 Engine *Engine::m_CallbackInstance = nullptr;

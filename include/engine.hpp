@@ -431,7 +431,7 @@ private:
     bool m_NetworkingThreadShouldQuit = false;
     ISteamNetworkingSockets *m_NetworkingSockets;
     std::vector<HSteamNetConnection> m_NetConnections;
-    HSteamListenSocket m_NetListenSocket;
+    HSteamListenSocket m_NetListenSocket = k_HSteamListenSocket_Invalid;
     HSteamNetPollGroup m_NetPollGroup;
     NetworkingThreadStatus m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
 
