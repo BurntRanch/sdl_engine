@@ -32,6 +32,7 @@
 #include <fstream>
 #include <functional>
 #include <future>
+#include <iterator>
 #include <set>
 #include <stdexcept>
 #include <algorithm>
@@ -3019,15 +3020,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                     break;
                 }
 
-                Networking_LoadScene_Packet packet{};
-                packet.sceneName = "viking_room.xml";
-
-                Networking_GeneralPacket generalPacket{};
-                generalPacket.packetType = PACKET_TYPE_LOAD_SCENE;
-                generalPacket.packetSize = sizeof(packet);
-                generalPacket.packetData = &packet;
-
-                SerializeAndSendPacket(generalPacket, callbackInfo->m_hConn);
+                SendFullUpdateToConnection(callbackInfo->m_hConn);
 
                 m_NetConnections.push_back(callbackInfo->m_hConn);
             }
@@ -3127,10 +3120,12 @@ void Engine::NetworkingThreadClient_Main() {
                         fmt::println("Invalid packet!");
                     } else {
                         const void *data = incomingMessage->GetData();
+                        
+                        std::vector<std::byte> message{reinterpret_cast<const std::byte *>(data), reinterpret_cast<const std::byte *>(incomingMessage->GetSize())};
 
-                        Networking_GeneralPacket packet = DeserializePacket(const_cast<void *>(data));
+                        Networking_StatePacket packet = DeserializePacket(message);
 
-                        ImportScene(reinterpret_cast<Networking_LoadScene_Packet *>(packet.packetData)->sceneName);
+                        fmt::println("New state packet just dropped! {} objects sent by server", packet.objects.size());
                     }
                     
                     incomingMessage->Release();
@@ -3247,242 +3242,192 @@ void Engine::StopHostingGameServer() {
     }
 }
 
-Networking_GeneralPacket Engine::DeserializePacket(void *packetData) {
-    std::byte *packetOffset = (std::byte *)(packetData) + sizeof(Networking_PacketType) + sizeof(size_t);
+Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &serializedPacket) {
+    UTILASSERT(serializedPacket.size() >= sizeof(size_t));
 
-    std::vector<std::byte> generalPacketVector((std::byte *)(packetData), packetOffset);
+    Networking_StatePacket statePacket{};
 
-    Networking_GeneralPacket packet{};
+    size_t objectsCount;
+    Deserialize(serializedPacket, objectsCount);
 
-    packet.packetType = Deserialize<Networking_PacketType>(generalPacketVector);
-    generalPacketVector.erase(generalPacketVector.begin(), generalPacketVector.begin() + sizeof(Networking_PacketType));
+    for (size_t i = 0; i < objectsCount; i++) {
+        Networking_Object objectPacket;
 
-    packet.packetSize = Deserialize<size_t>(generalPacketVector);
+        DeserializeNetworkingObject({serializedPacket.begin() + sizeof(size_t), serializedPacket.end()}, objectPacket);
+    }
+}
 
-    std::vector<std::byte> packetVector(packetOffset, packetOffset + packet.packetSize);
+void Engine::DeserializeNetworkingObject(std::vector<std::byte> serializedObjectPacket, Networking_Object &dest) {
+    /* objectID + position/rotation/scale + modelAttachments size */
+    UTILASSERT(serializedObjectPacket.size() >= sizeof(int) + (sizeof(float) * 9) + sizeof(size_t));
+
+    Deserialize(serializedObjectPacket, dest.ObjectID);
+
+    Deserialize(serializedObjectPacket, dest.position.x);
+    Deserialize(serializedObjectPacket, dest.position.y);
+    Deserialize(serializedObjectPacket, dest.position.z);
+
+    Deserialize(serializedObjectPacket, dest.rotation.x);
+    Deserialize(serializedObjectPacket, dest.rotation.y);
+    Deserialize(serializedObjectPacket, dest.rotation.z);
+
+    Deserialize(serializedObjectPacket, dest.scale.x);
+    Deserialize(serializedObjectPacket, dest.scale.y);
+    Deserialize(serializedObjectPacket, dest.scale.z);
+
+    size_t modelAttachmentsSize;
+    Deserialize(serializedObjectPacket, modelAttachmentsSize);
+
+    for (size_t i = 0; i < modelAttachmentsSize; i++) {
+        Networking_Model modelPacket{};
+
+        DeserializeNetworkingModel(serializedObjectPacket, modelPacket);
+
+        dest.modelAttachments.push_back(modelPacket);
+    }
+}
+
+
+
+void Engine::DeserializeNetworkingModel(std::vector<std::byte> serializedModelPacket, Networking_Model &dest) {
+    UTILASSERT(serializedModelPacket.size() >= sizeof(int) + (sizeof(float) * 9) + sizeof(size_t));
+
+    Deserialize(serializedModelPacket, dest.modelID);
+
+    Deserialize(serializedModelPacket, dest.position.x);
+    Deserialize(serializedModelPacket, dest.position.y);
+    Deserialize(serializedModelPacket, dest.position.z);
+
+    Deserialize(serializedModelPacket, dest.rotation.x);
+    Deserialize(serializedModelPacket, dest.rotation.y);
+    Deserialize(serializedModelPacket, dest.rotation.z);
+
+    Deserialize(serializedModelPacket, dest.scale.x);
+    Deserialize(serializedModelPacket, dest.scale.y);
+    Deserialize(serializedModelPacket, dest.scale.z);
+
+    Deserialize(serializedModelPacket, dest.modelName);
+}
+
+void Engine::SendFullUpdateToConnection(HSteamNetConnection connection) {
+    Networking_StatePacket statePacket{};
     
-    switch (packet.packetType) {
-        case PACKET_TYPE_CREATE_OBJECT:
-            packet.packetData = DeserializeCreateObjectPacket(packetVector);
-            break;
-        case PACKET_TYPE_LOAD_MODEL:
-            packet.packetData = DeserializeLoadModelPacket(packetVector);
-            break;
-        case PACKET_TYPE_ATTACH_MODEL_TO_OBJECT:
-            packet.packetData = DeserializeAttachModelToObjectPacket(packetVector);
-            break;
-        case PACKET_TYPE_LOAD_SCENE:
-            packet.packetData = DeserializeLoadScenePacket(packetVector);
-            break;
-        default:
-            throw std::runtime_error("Deserializing an unknown packet!");
+    for (Object *object : m_Objects) {
+        Networking_Object objectPacket{};
+
+        objectPacket.ObjectID = object->GetObjectID();
+        
+        objectPacket.position = object->GetPosition();
+        objectPacket.rotation = object->GetRotation();
+        objectPacket.scale = object->GetScale();
+
+        for (Model *model : object->GetModelAttachments()) {
+            Networking_Model modelPacket{};
+
+            modelPacket.modelID = model->GetModelID();
+
+            modelPacket.position = model->GetRawPosition();
+            modelPacket.rotation = model->GetRawRotation();
+            modelPacket.scale = model->GetRawScale();
+
+            modelPacket.modelName = model->GetOriginalPath();
+
+            objectPacket.modelAttachments.push_back(modelPacket);
+        }
+
+        statePacket.objects.push_back(objectPacket);
     }
 
-    return packet;
-}
+    std::vector<std::byte> serializedPacket;
 
-Networking_CreateObject_Packet *Engine::DeserializeCreateObjectPacket(std::vector<std::byte> &packetVector) {
-    Networking_CreateObject_Packet *packet = new Networking_CreateObject_Packet();
-
-    packet->position.x = Deserialize<float>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(float));
-
-    packet->position.y = Deserialize<float>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(float));
-
-    packet->position.z = Deserialize<float>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(float));
-
-
-    packet->rotation.x = Deserialize<float>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(float));
-
-    packet->rotation.y = Deserialize<float>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(float));
-
-    packet->rotation.z = Deserialize<float>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(float));
-
-
-    packet->scale.x = Deserialize<float>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(float));
-
-    packet->scale.y = Deserialize<float>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(float));
-
-    packet->scale.z = Deserialize<float>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(float));
-
-    packet->objectID = Deserialize<int>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(int));
-
-    return packet;
-}
-
-Networking_LoadModel_Packet *Engine::DeserializeLoadModelPacket(std::vector<std::byte> &packetVector) {
-    Networking_LoadModel_Packet *packet = new Networking_LoadModel_Packet();
-
-    packet->modelName = Deserialize<std::string>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(size_t) + sizeof(packet->modelName.size()));
-
-    packet->modelID = Deserialize<int>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(int));
-
-    return packet;
-}
-
-Networking_AttachModelToObject_Packet *Engine::DeserializeAttachModelToObjectPacket(std::vector<std::byte> &packetVector) {
-    Networking_AttachModelToObject_Packet *packet = new Networking_AttachModelToObject_Packet();
-
-    packet->modelID = Deserialize<int>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(int));
-
-    packet->objectID = Deserialize<int>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(int));
-
-    return packet;
-}
-
-Networking_LoadScene_Packet *Engine::DeserializeLoadScenePacket(std::vector<std::byte> &packetVector) {
-    Networking_LoadScene_Packet *packet = new Networking_LoadScene_Packet();
-
-    packet->sceneName = Deserialize<std::string>(packetVector);
-    packetVector.erase(packetVector.begin(), packetVector.begin() + sizeof(size_t) + sizeof(packet->sceneName.size()));
-
-    return packet;
-}
-
-void Engine::SerializeAndSendPacket(Networking_GeneralPacket &packet, HSteamNetConnection connection) {
-    /* packetType is the first element, so might aswell initialize the array as such */
-    std::vector<std::byte> serializedPacket = Serialize(packet.packetType);
-
-    switch (packet.packetType) {
-        case PACKET_TYPE_CREATE_OBJECT:
-            SerializeCreateObjectPacket(reinterpret_cast<Networking_CreateObject_Packet *>(packet.packetData), serializedPacket);
-            break;
-        case PACKET_TYPE_LOAD_MODEL:
-            SerializeLoadModelPacket(reinterpret_cast<Networking_LoadModel_Packet *>(packet.packetData), serializedPacket);
-            break;
-        case PACKET_TYPE_ATTACH_MODEL_TO_OBJECT:
-            SerializeAttachModelToObjectPacket(reinterpret_cast<Networking_AttachModelToObject_Packet *>(packet.packetData), serializedPacket);
-            break;
-        case PACKET_TYPE_LOAD_SCENE:
-            SerializeLoadScenePacket(reinterpret_cast<Networking_LoadScene_Packet *>(packet.packetData), serializedPacket);
-            break;
-        default:
-            throw std::runtime_error("Serializing an unknown packet!");
+    /* packet object size is the first element, so might aswell initialize the array as such */
+    Serialize(statePacket.objects.size(), serializedPacket);
+    
+    for (Networking_Object &objectPacket : statePacket.objects) {
+        SerializeNetworkingObject(objectPacket, serializedPacket);
     }
-
-    std::vector<std::byte> serializedPacketSize = Serialize(serializedPacket.size());
-
-    serializedPacket.insert(serializedPacket.begin() + sizeof(Networking_PacketType), serializedPacketSize.begin(), serializedPacketSize.end());
 
     m_NetworkingSockets->SendMessageToConnection(connection, serializedPacket.data(), serializedPacket.size(), k_nSteamNetworkingSend_Reliable, nullptr);
 }
 
-void Engine::SerializeCreateObjectPacket(Networking_CreateObject_Packet *packet, std::vector<std::byte> &serializedOutput) {
-    std::vector<std::vector<std::byte>> serializedObjects;
+void Engine::SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest) {
+    Serialize(objectPacket.ObjectID, dest);
 
-    /* Positions */
-    serializedObjects.push_back(Serialize(packet->position.x));
-    serializedObjects.push_back(Serialize(packet->position.y));
-    serializedObjects.push_back(Serialize(packet->position.z));
+    Serialize(objectPacket.position.x, dest);
+    Serialize(objectPacket.position.y, dest);
+    Serialize(objectPacket.position.z, dest);
 
-    /* Rotations */
-    serializedObjects.push_back(Serialize(packet->rotation.x));
-    serializedObjects.push_back(Serialize(packet->rotation.y));
-    serializedObjects.push_back(Serialize(packet->rotation.z));
+    Serialize(objectPacket.rotation.x, dest);
+    Serialize(objectPacket.rotation.y, dest);
+    Serialize(objectPacket.rotation.z, dest);
 
-    /* Scales */
-    serializedObjects.push_back(Serialize(packet->scale.x));
-    serializedObjects.push_back(Serialize(packet->scale.y));
-    serializedObjects.push_back(Serialize(packet->scale.z));
+    Serialize(objectPacket.scale.x, dest);
+    Serialize(objectPacket.scale.y, dest);
+    Serialize(objectPacket.scale.z, dest);
 
-    /* ObjectID */
-    serializedObjects.push_back(Serialize(packet->objectID));
-
-    /* for each serialized object, put it at the end of serializedOutput */
-    std::for_each(serializedObjects.begin(), serializedObjects.end(), [&serializedOutput] (std::vector<std::byte> e) { serializedOutput.insert(serializedOutput.end(), e.begin(), e.end()); });
+    for (Networking_Model &modelPacket : objectPacket.modelAttachments) {
+        SerializeNetworkingModel(modelPacket, dest);
+    }
 }
 
-void Engine::SerializeLoadModelPacket(Networking_LoadModel_Packet *packet, std::vector<std::byte> &serializedOutput) {
-    std::vector<std::vector<std::byte>> serializedObjects;
 
-    /* Positions */
-    serializedObjects.push_back(Serialize(packet->modelName));
 
-    /* ModelID */
-    serializedObjects.push_back(Serialize(packet->modelID));
+void Engine::SerializeNetworkingModel(Networking_Model &modelPacket, std::vector<std::byte> &dest) {
+    Serialize(modelPacket.modelID, dest);
 
-    /* for each serialized object, put it at the end of serializedOutput */
-    std::for_each(serializedObjects.begin(), serializedObjects.end(), [&serializedOutput] (std::vector<std::byte> e) { serializedOutput.insert(serializedOutput.end(), e.begin(), e.end()); });
-}
+    Serialize(modelPacket.position.x, dest);
+    Serialize(modelPacket.position.y, dest);
+    Serialize(modelPacket.position.z, dest);
 
-void Engine::SerializeAttachModelToObjectPacket(Networking_AttachModelToObject_Packet *packet, std::vector<std::byte> &serializedOutput) {
-    std::vector<std::vector<std::byte>> serializedObjects;
+    Serialize(modelPacket.rotation.x, dest);
+    Serialize(modelPacket.rotation.y, dest);
+    Serialize(modelPacket.rotation.z, dest);
 
-    /* modelID */
-    serializedObjects.push_back(Serialize(packet->modelID));
+    Serialize(modelPacket.scale.x, dest);
+    Serialize(modelPacket.scale.y, dest);
+    Serialize(modelPacket.scale.z, dest);
 
-    /* objectID */
-    serializedObjects.push_back(Serialize(packet->objectID));
-
-    /* for each serialized object, put it at the end of serializedOutput */
-    std::for_each(serializedObjects.begin(), serializedObjects.end(), [&serializedOutput] (std::vector<std::byte> e) { serializedOutput.insert(serializedOutput.end(), e.begin(), e.end()); });
-}
-
-void Engine::SerializeLoadScenePacket(Networking_LoadScene_Packet *packet, std::vector<std::byte> &serializedOutput) {
-    std::vector<std::vector<std::byte>> serializedObjects;
-
-    /* SceneName */
-    serializedObjects.push_back(Serialize(packet->sceneName));
-
-    /* for each serialized object, put it at the end of serializedOutput */
-    std::for_each(serializedObjects.begin(), serializedObjects.end(), [&serializedOutput] (std::vector<std::byte> e) { serializedOutput.insert(serializedOutput.end(), e.begin(), e.end()); });
+    Serialize(modelPacket.modelName, dest);
 }
 
 template<typename T>
-T Engine::Deserialize(std::vector<std::byte> object) {
-    T result;
-
+void Engine::Deserialize(std::vector<std::byte> &object, T &dest) {
     if constexpr (std::is_same<T, std::string>::value) {
-        assert(object.size() >= sizeof(size_t));    /* minimum size */
+        UTILASSERT(object.size() >= sizeof(size_t));    /* minimum size */
 
         size_t stringSize = *reinterpret_cast<size_t *>(object.data());
         object.erase(object.begin(), object.begin() + sizeof(size_t));
 
-        assert(object.size() >= stringSize);    /* Each char is 1 byte, this is valid. */
+        UTILASSERT(object.size() >= stringSize);    /* Each char is 1 byte, this is valid. */
 
         char *string = reinterpret_cast<char *>(object.data());
 
-        result = std::string(string, stringSize);
-    } else {
-        result = *reinterpret_cast<T *>(object.data());
-    }
+        dest = std::string(string, stringSize);
 
-    return result;
+        object.erase(object.begin(), object.begin() + stringSize);
+    } else {
+        UTILASSERT(object.size() >= sizeof(T));
+        
+        dest = *reinterpret_cast<T *>(object.data());
+
+        object.erase(object.begin(), object.begin() + sizeof(T));
+    }
 }
 
 template<typename T>
-std::vector<std::byte> Engine::Serialize(T object) {
-    std::vector<std::byte> serializedOutput;
-
+void Engine::Serialize(T object, std::vector<std::byte> &dest) {
     if constexpr (std::is_same<T, std::string>::value) {
-        std::vector<std::byte> serializedStringSize = Serialize(object.size());
-        serializedOutput.insert(serializedOutput.end(), serializedStringSize.begin(), serializedStringSize.end());
+        Serialize(object.size(), dest);
 
         for (char &c : object) {
-            std::vector<std::byte> serializedChar = Serialize(c);
-            serializedOutput.insert(serializedOutput.end(), serializedChar.begin(), serializedChar.end());
+            Serialize(c, dest);
         }
     } else {
         for (size_t i = 0; i < sizeof(T); i++) {
             std::byte *byte = reinterpret_cast<std::byte *>(&object) + i;
-            serializedOutput.push_back(*byte);
+            dest.push_back(*byte);
         }
     }
-
-    return serializedOutput;
 }
 
 Engine *Engine::m_CallbackInstance = nullptr;

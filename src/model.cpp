@@ -1,5 +1,6 @@
 #include "error.hpp"
 #include "fmt/format.h"
+#include "object.hpp"
 
 #include <assimp/material.h>
 #include <assimp/mesh.h>
@@ -10,6 +11,8 @@
 
 Model::Model(const string_view path, glm::vec3 position, glm::vec3 rotation, glm::vec3 scale)
 {
+    m_Path = path;
+    
     loadModel(path);
     
     SetPosition(position);
@@ -163,6 +166,17 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
     return Mesh(*this, vertices, indices, diffuseMap/*, shininess, roughness, metallic*/, diffuse);
 }
 
+
+glm::vec3 Model::GetPosition() {
+    return m_Position + (m_ObjectAttachment != nullptr ? m_ObjectAttachment->GetPosition() : glm::vec3(0)) + (m_Parent != nullptr ? m_Parent->GetPosition() : glm::vec3(0)); 
+};
+glm::vec3 Model::GetRotation() {
+    return m_Rotation + (m_ObjectAttachment != nullptr ? m_ObjectAttachment->GetRotation() : glm::vec3(0)) + (m_Parent != nullptr ? m_Parent->GetRotation() : glm::vec3(0));
+};
+glm::vec3 Model::GetScale()    {
+    return m_Scale * (m_ObjectAttachment != nullptr ? m_ObjectAttachment->GetScale() : glm::vec3(1)) * (m_Parent != nullptr ? m_Parent->GetScale() : glm::vec3(1)); 
+}
+
 glm::mat4 Model::GetModelMatrix() {
     if (!m_NeedsUpdate)
         return m_ModelMatrix;
@@ -170,11 +184,11 @@ glm::mat4 Model::GetModelMatrix() {
     fmt::println("Updating model matrix for object {}!", fmt::ptr(this));
 
     // Update the model matrix with the position/rotation.
-    m_ModelMatrix = glm::scale(glm::mat4(1.0f), m_Scale);
-    m_ModelMatrix *= glm::translate(glm::mat4(1.0f), m_Position);
-    m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(m_Rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-    m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(m_Rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-    m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(m_Rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
+    m_ModelMatrix = glm::scale(glm::mat4(1.0f), GetScale());
+    m_ModelMatrix *= glm::translate(glm::mat4(1.0f), GetPosition());
+    m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(GetRotation().x), glm::vec3(1.0f, 0.0f, 0.0f));
+    m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(GetRotation().y), glm::vec3(0.0f, 1.0f, 0.0f));
+    m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(GetRotation().z), glm::vec3(0.0f, 0.0f, 1.0f));
 
     m_NeedsUpdate = false;
 

@@ -375,38 +375,30 @@ private:
     std::vector<VkSampler> m_CreatedSamplers;
 };
 
-enum Networking_PacketType {
-    PACKET_TYPE_CREATE_OBJECT,
-    PACKET_TYPE_LOAD_MODEL,
-    PACKET_TYPE_ATTACH_MODEL_TO_OBJECT,
-    PACKET_TYPE_LOAD_SCENE,
-};
+/* A representation of a Model to be transmitted over the network. */
+struct Networking_Model {
+    int modelID;
 
-struct Networking_CreateObject_Packet {
     glm::vec3 position;
     glm::vec3 rotation;
     glm::vec3 scale;
-    int objectID;
+
+    std::string modelName;  /* the path */
 };
 
-struct Networking_LoadModel_Packet {
-    std::string modelName;
-    int modelID;
+/* A representation of an Object to be transmitted over the network. */
+struct Networking_Object {
+    int ObjectID;
+
+    glm::vec3 position;
+    glm::vec3 rotation;
+    glm::vec3 scale;
+
+    std::vector<Networking_Model> modelAttachments;
 };
 
-struct Networking_AttachModelToObject_Packet {
-    int modelID;
-    int objectID;
-};
-
-struct Networking_LoadScene_Packet {
-    std::string sceneName;
-};
-
-struct Networking_GeneralPacket {
-    Networking_PacketType packetType;
-    size_t packetSize;
-    void *packetData;   /* Depending on the packetType, you have to deserialize it differently. */
+struct Networking_StatePacket {
+    std::vector<Networking_Object> objects;
 };
 
 enum NetworkingThreadStatus {
@@ -481,30 +473,32 @@ private:
         m_CallbackInstance->ConnectionStatusChanged(callbackInfo);
     }
 
-    void ExecutePacket(Networking_GeneralPacket &packet);
+    void ExecutePacket(Networking_StatePacket &packet);
 
     /* Deserialization */
-    Networking_GeneralPacket DeserializePacket(void *packetData);
+    Networking_StatePacket DeserializePacket(std::vector<std::byte> &serializedPacket);
 
-    Networking_CreateObject_Packet *DeserializeCreateObjectPacket(std::vector<std::byte> &packetVector);
-    Networking_LoadModel_Packet *DeserializeLoadModelPacket(std::vector<std::byte> &packetVector);
-    Networking_AttachModelToObject_Packet *DeserializeAttachModelToObjectPacket(std::vector<std::byte> &packetVector);
-    Networking_LoadScene_Packet *DeserializeLoadScenePacket(std::vector<std::byte> &packetVector);
+    /* Deserialize the Networking_Object */
+    void DeserializeNetworkingObject(std::vector<std::byte> serializedObjectPacket, Networking_Object &dest);
+    void DeserializeNetworkingModel(std::vector<std::byte> serializedModelPacket, Networking_Model &dest);
 
-    /* Serialization */
+    /* Sends a full update to the connection. Sends every single object, regardless whether it has changed, to the client. Avoid sending this unless it's a clients first time connecting. */
+    void SendFullUpdateToConnection(HSteamNetConnection);
 
-    void SerializeAndSendPacket(Networking_GeneralPacket &packet, HSteamNetConnection connection);
+    // /* Send an update to the client, Keep in mind the server won't send objects that haven't changed to the client. */
+    // void SendUpdateToConnection(HSteamNetConnection connection);
 
-    void SerializeCreateObjectPacket(Networking_CreateObject_Packet *packet, std::vector<std::byte> &serializedOutput);
-    void SerializeLoadModelPacket(Networking_LoadModel_Packet *packet, std::vector<std::byte> &serializedOutput);
-    void SerializeAttachModelToObjectPacket(Networking_AttachModelToObject_Packet *packet, std::vector<std::byte> &serializedOutput);
-    void SerializeLoadScenePacket(Networking_LoadScene_Packet *packet, std::vector<std::byte> &serializedOutput);
+    /* Serialize the Networking_Object and append it to dest */
+    void SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest);
+    void SerializeNetworkingModel(Networking_Model &modelPacket, std::vector<std::byte> &dest);
 
+    /* Deserialize to dest */
     template<typename T>
-    T Deserialize(std::vector<std::byte> object);
+    void Deserialize(std::vector<std::byte> &object, T &dest);
 
+    /* Serialize and append to dest. */
     template<typename T>
-    std::vector<std::byte> Serialize(T object);
+    void Serialize(T object, std::vector<std::byte> &dest);
 
     void CheckButtonClicks(SDL_Event *event);
 

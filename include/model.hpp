@@ -138,9 +138,9 @@ public:
 
     void SetParent(Model *parent) { m_Parent = parent; parent->children.push_back(this); SetPosition(GetPosition()); SetRotation(GetRotation()); SetScale(GetScale()); };
 
-    constexpr glm::vec3 GetPosition() { return m_Position + (m_Parent != nullptr ? m_Parent->GetPosition() : glm::vec3(0)); };
-    constexpr glm::vec3 GetRotation() { return m_Rotation + (m_Parent != nullptr ? m_Parent->GetRotation() : glm::vec3(0)); };
-    constexpr glm::vec3 GetScale()    { return m_Scale * (m_Parent != nullptr ? m_Parent->GetScale() : glm::vec3(1)); };
+    glm::vec3 GetPosition();
+    glm::vec3 GetRotation();
+    glm::vec3 GetScale();
     constexpr Model *GetParent()      { return m_Parent; };
 
     /* Set of functions to give position/rotation/scale without parent inheritance */
@@ -155,6 +155,9 @@ public:
     constexpr std::array<glm::vec3, 2> GetRawBoundingBox() { return m_BoundingBox; };
 
     constexpr void SetBoundingBox(std::array<glm::vec3, 2> boundingBox) { m_BoundingBox = boundingBox; };
+
+    /* Get the path that this Model has loaded. */
+    string GetOriginalPath() { return m_Path; };
 
     /* Only 1 object can be attached at a time. */
     void SetObjectAttachment(Object *object);
@@ -175,6 +178,9 @@ private:
     // model data
     //vector<Texture> textures_loaded;
     string m_Directory;
+
+    /* Original Path in which the model was loaded from. */
+    string m_Path;
 
     Model *m_Parent = nullptr;
 
