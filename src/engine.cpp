@@ -3084,7 +3084,7 @@ void Engine::NetworkingThreadClient_Main() {
     }
 
     fmt::println("Started client networking thread!");
-    m_NetworkingThreadStatus &= NETWORKING_THREAD_ACTIVE_CLIENT;
+    m_NetworkingThreadStatus |= NETWORKING_THREAD_ACTIVE_CLIENT;
 
     using namespace std::chrono;
 
@@ -3145,7 +3145,7 @@ void Engine::NetworkingThreadClient_Main() {
 
     fmt::println("Stopping client networking thread!");
 
-    m_NetworkingThreadStatus &= ~NETWORKING_THREAD_INACTIVE;
+    m_NetworkingThreadStatus &= ~NETWORKING_THREAD_ACTIVE_CLIENT;
 }
 
 
@@ -3156,7 +3156,7 @@ void Engine::NetworkingThreadServer_Main() {
     }
 
     fmt::println("Started server networking thread!");
-    m_NetworkingThreadStatus &= NETWORKING_THREAD_ACTIVE_SERVER;
+    m_NetworkingThreadStatus |= NETWORKING_THREAD_ACTIVE_SERVER;
 
     using namespace std::chrono;
 
