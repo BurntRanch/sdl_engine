@@ -3255,6 +3255,8 @@ Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &seriali
 
         DeserializeNetworkingObject({serializedPacket.begin() + sizeof(size_t), serializedPacket.end()}, objectPacket);
     }
+
+    return statePacket;
 }
 
 void Engine::DeserializeNetworkingObject(std::vector<std::byte> serializedObjectPacket, Networking_Object &dest) {
