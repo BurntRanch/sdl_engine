@@ -2697,7 +2697,9 @@ Output:
 bool Engine::ImportScene(const std::string &path) {
     for (Object *object : m_Objects) {
         for (Model *model : object->GetModelAttachments()) {
-            m_Renderer->UnloadModel(model);
+            if (m_Renderer) {
+                m_Renderer->UnloadModel(model);
+            }
 
             delete model;
         }
@@ -2844,7 +2846,10 @@ bool Engine::ImportScene(const std::string &path) {
             }
 
             object->AddModelAttachment(model);
-            m_Renderer->LoadModel(model);
+
+            if (m_Renderer) {
+                m_Renderer->LoadModel(model);
+            }
         }
     }
 
