@@ -3126,7 +3126,7 @@ void Engine::NetworkingThreadClient_Main() {
                     } else {
                         const void *data = incomingMessage->GetData();
                         
-                        std::vector<std::byte> message{reinterpret_cast<const std::byte *>(data), reinterpret_cast<const std::byte *>(incomingMessage->GetSize())};
+                        std::vector<std::byte> message{reinterpret_cast<const std::byte *>(data), reinterpret_cast<const std::byte *>(data) + incomingMessage->GetSize()};
 
                         Networking_StatePacket packet = DeserializePacket(message);
 
@@ -3259,6 +3259,8 @@ Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &seriali
         Networking_Object objectPacket;
 
         DeserializeNetworkingObject({serializedPacket.begin() + sizeof(size_t), serializedPacket.end()}, objectPacket);
+
+        statePacket.objects.push_back(objectPacket);
     }
 
     return statePacket;
@@ -3371,6 +3373,8 @@ void Engine::SerializeNetworkingObject(Networking_Object &objectPacket, std::vec
     Serialize(objectPacket.scale.x, dest);
     Serialize(objectPacket.scale.y, dest);
     Serialize(objectPacket.scale.z, dest);
+
+    Serialize(objectPacket.modelAttachments.size(), dest);
 
     for (Networking_Model &modelPacket : objectPacket.modelAttachments) {
         SerializeNetworkingModel(modelPacket, dest);
