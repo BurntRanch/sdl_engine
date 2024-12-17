@@ -495,8 +495,8 @@ private:
     Networking_StatePacket DeserializePacket(std::vector<std::byte> &serializedPacket);
 
     /* Deserialize the Networking_Object */
-    void DeserializeNetworkingObject(std::vector<std::byte> serializedObjectPacket, Networking_Object &dest);
-    void DeserializeNetworkingModel(std::vector<std::byte> serializedModelPacket, Networking_Model &dest);
+    void DeserializeNetworkingObject(std::vector<std::byte> &serializedObjectPacket, Networking_Object &dest);
+    void DeserializeNetworkingModel(std::vector<std::byte> &serializedModelPacket, Networking_Model &dest);
 
     /* Sends a full update to the connection. Sends every single object, regardless whether it has changed, to the client. Avoid sending this unless it's a clients first time connecting. */
     void SendFullUpdateToConnection(HSteamNetConnection);

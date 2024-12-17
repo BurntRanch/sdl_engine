@@ -3286,7 +3286,7 @@ Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &seriali
     for (size_t i = 0; i < objectsCount; i++) {
         Networking_Object objectPacket;
 
-        DeserializeNetworkingObject({serializedPacket.begin() + sizeof(size_t), serializedPacket.end()}, objectPacket);
+        DeserializeNetworkingObject(serializedPacket, objectPacket);
 
         statePacket.objects.push_back(objectPacket);
     }
@@ -3294,7 +3294,7 @@ Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &seriali
     return statePacket;
 }
 
-void Engine::DeserializeNetworkingObject(std::vector<std::byte> serializedObjectPacket, Networking_Object &dest) {
+void Engine::DeserializeNetworkingObject(std::vector<std::byte> &serializedObjectPacket, Networking_Object &dest) {
     /* objectID + position/rotation/scale + modelAttachments size */
     UTILASSERT(serializedObjectPacket.size() >= sizeof(int) + (sizeof(float) * 9) + sizeof(size_t));
 
@@ -3326,7 +3326,7 @@ void Engine::DeserializeNetworkingObject(std::vector<std::byte> serializedObject
 
 
 
-void Engine::DeserializeNetworkingModel(std::vector<std::byte> serializedModelPacket, Networking_Model &dest) {
+void Engine::DeserializeNetworkingModel(std::vector<std::byte> &serializedModelPacket, Networking_Model &dest) {
     UTILASSERT(serializedModelPacket.size() >= sizeof(int) + (sizeof(float) * 9) + sizeof(size_t));
 
     Deserialize(serializedModelPacket, dest.modelID);
