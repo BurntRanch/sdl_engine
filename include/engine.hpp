@@ -403,7 +403,10 @@ struct Networking_StatePacket {
 };
 
 enum Networking_EventType {
+    NETWORKING_NULL,
     NETWORKING_SCENE_CHANGED,
+    NETWORKING_NEW_OBJECT,
+    NETWORKING_UPDATE_OBJECT,
 };
 
 /* This isn't meant to be sent over the network, this is meant to be sent between the NetworkThread and the render thread */

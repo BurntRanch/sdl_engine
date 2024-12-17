@@ -3136,11 +3136,32 @@ void Engine::NetworkingThreadClient_Main() {
                         fmt::println("New state packet just dropped! {} objects sent by server", packet.objects.size());
 
                         /* add a dummy type */
-                        Networking_Event event{NETWORKING_SCENE_CHANGED, packet};
+                        Networking_Event event{NETWORKING_NULL, packet};
 
                         if (m_ScenePath != packet.scenePath) {
                             /* Fire event */
                             event.type = NETWORKING_SCENE_CHANGED;
+
+                            m_NetworkingEvents.push_back(event);
+                        }
+
+                        for (Networking_Object &networkingObject : packet.objects) {
+                            auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [networkingObject] (Object &obj) { return obj.GetObjectID() == networkingObject.ObjectID; });
+
+                            /* If the scene changed, we should wait until the scene is properly loaded */
+                            if (it == m_Objects.end() && m_ScenePath == packet.scenePath) {
+                                event.type = NETWORKING_NEW_OBJECT;
+
+                                m_NetworkingEvents.push_back(event);
+
+                                continue;
+                            }
+
+                            Object *obj = m_Objects.at(std::distance(m_Objects.begin(), it));
+
+                            UTILASSERT(obj);
+
+                            event.type = NETWORKING_UPDATE_OBJECT;
 
                             m_NetworkingEvents.push_back(event);
                         }
@@ -3268,7 +3289,11 @@ void Engine::ProcessNetworkEvents() {
             case NETWORKING_SCENE_CHANGED:
                 /* This is bad. No sanitization whatsoever. */
                 /* TODO: sanitize. */
-                ImportScene(event.packet.scenePath);
+                if (m_ScenePath != event.packet.scenePath) {
+                    ImportScene(event.packet.scenePath);
+                }
+            default:
+                break;
         }
 
         m_NetworkingEvents.erase(m_NetworkingEvents.begin());
