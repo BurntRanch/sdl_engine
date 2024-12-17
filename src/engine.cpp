@@ -3080,10 +3080,6 @@ void Engine::InitNetworkingThread(NetworkingThreadStatus status) {
 }
 
 void Engine::NetworkingThreadClient_Main() {
-    if (m_NetConnections.empty()) {
-        throw std::runtime_error("Networking Thread initialized with no networking connection!");
-    }
-
     fmt::println("Started client networking thread!");
     m_NetworkingThreadStatus |= NETWORKING_THREAD_ACTIVE_CLIENT;
 
