@@ -3406,6 +3406,8 @@ void Engine::SendFullUpdateToConnection(HSteamNetConnection connection) {
     }
 
     m_NetworkingSockets->SendMessageToConnection(connection, serializedPacket.data(), serializedPacket.size(), k_nSteamNetworkingSend_Reliable, nullptr);
+
+    m_LastPacket = statePacket;
 }
 
 
@@ -3430,16 +3432,13 @@ void Engine::SendUpdateToConnection(HSteamNetConnection connection) {
             objectPacket.position != lastPacketObjectEquivalent->position ||
             objectPacket.rotation != lastPacketObjectEquivalent->rotation ||
             objectPacket.scale != lastPacketObjectEquivalent->scale ||
-            objectPacket.modelAttachments.size() != lastPacketObjectEquivalent->modelAttachments.size()))
+            object->GetModelAttachments().size() != lastPacketObjectEquivalent->modelAttachments.size()))
             anythingChanged = true;
 
         size_t i = 0;
         
         for (Model *model : object->GetModelAttachments()) {
             Networking_Model modelPacket{};
-
-            auto lastPacketModelAttachmentEquivalent = std::find_if(lastPacketObjectEquivalent->modelAttachments.begin(), lastPacketObjectEquivalent->modelAttachments.end(), [model] (Networking_Model &lastModelPacket) { return model->GetModelID() == lastModelPacket.modelID; });
-            anythingChanged = lastPacketModelAttachmentEquivalent == lastPacketObjectEquivalent->modelAttachments.end();
 
             modelPacket.modelID = model->GetModelID();
 
@@ -3449,12 +3448,16 @@ void Engine::SendUpdateToConnection(HSteamNetConnection connection) {
 
             modelPacket.modelName = model->GetOriginalPath();
 
-            if (!anythingChanged && (
-                modelPacket.position != lastPacketModelAttachmentEquivalent->position ||
-                modelPacket.rotation != lastPacketModelAttachmentEquivalent->rotation ||
-                modelPacket.scale != lastPacketModelAttachmentEquivalent->scale ||
-                modelPacket.modelName != lastPacketModelAttachmentEquivalent->modelName))
-                anythingChanged = true;
+            if (!anythingChanged) {
+                auto lastPacketModelAttachmentEquivalent = std::find_if(lastPacketObjectEquivalent->modelAttachments.begin(), lastPacketObjectEquivalent->modelAttachments.end(), [model] (Networking_Model &lastModelPacket) { return model->GetModelID() == lastModelPacket.modelID; });
+                anythingChanged = lastPacketModelAttachmentEquivalent == lastPacketObjectEquivalent->modelAttachments.end();
+
+                if (modelPacket.position != lastPacketModelAttachmentEquivalent->position ||
+                    modelPacket.rotation != lastPacketModelAttachmentEquivalent->rotation ||
+                    modelPacket.scale != lastPacketModelAttachmentEquivalent->scale ||
+                    modelPacket.modelName != lastPacketModelAttachmentEquivalent->modelName)
+                    anythingChanged = true;
+            }
 
             objectPacket.modelAttachments.push_back(modelPacket);
 
@@ -3463,6 +3466,7 @@ void Engine::SendUpdateToConnection(HSteamNetConnection connection) {
 
         if (anythingChanged) {
             statePacket.objects.push_back(objectPacket);
+            m_LastPacket.objects.at(std::distance(m_LastPacket.objects.begin(), lastPacketObjectEquivalent)) = objectPacket;
         }
     }
 
