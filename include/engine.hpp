@@ -398,7 +398,19 @@ struct Networking_Object {
 };
 
 struct Networking_StatePacket {
+    std::string scenePath;
     std::vector<Networking_Object> objects;
+};
+
+enum Networking_EventType {
+    NETWORKING_SCENE_CHANGED,
+};
+
+/* This isn't meant to be sent over the network, this is meant to be sent between the NetworkThread and the render thread */
+struct Networking_Event {
+    Networking_EventType type;
+
+    Networking_StatePacket packet;
 };
 
 enum NetworkingThreadStatus {
@@ -441,6 +453,7 @@ public:
     void DisconnectClientFromServer(HSteamNetConnection connection);  // Disconnects a client from your server, Call this only if you're hosting a server.
 
     void StopHostingGameServer();
+    void ProcessNetworkEvents();
 
     UI::GenericElement *GetElementByID(const std::string &id);
 
@@ -455,6 +468,9 @@ private:
     std::vector<HSteamNetConnection> m_NetConnections;
     HSteamListenSocket m_NetListenSocket = k_HSteamListenSocket_Invalid;
     HSteamNetPollGroup m_NetPollGroup = k_HSteamNetPollGroup_Invalid;
+
+    std::string m_ScenePath = "";
+    std::vector<Networking_Event> m_NetworkingEvents;
 
     int m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
 

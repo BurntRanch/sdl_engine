@@ -2607,6 +2607,7 @@ void Engine::InitRenderer(Settings &settings, const Camera *primaryCamera) {
     m_Renderer->Init();
 
     m_Renderer->RegisterSDLEventListener(std::bind(&Engine::CheckButtonClicks, this, std::placeholders::_1), SDL_EVENT_MOUSE_BUTTON_UP);
+    m_Renderer->RegisterUpdateFunction(std::bind(&Engine::ProcessNetworkEvents, this));
 }
 
 void Engine::InitNetworking() {
@@ -2852,6 +2853,8 @@ bool Engine::ImportScene(const std::string &path) {
             }
         }
     }
+
+    m_ScenePath = path;
 
     return true;
 }
@@ -3131,6 +3134,16 @@ void Engine::NetworkingThreadClient_Main() {
                         Networking_StatePacket packet = DeserializePacket(message);
 
                         fmt::println("New state packet just dropped! {} objects sent by server", packet.objects.size());
+
+                        /* add a dummy type */
+                        Networking_Event event{NETWORKING_SCENE_CHANGED, packet};
+
+                        if (m_ScenePath != packet.scenePath) {
+                            /* Fire event */
+                            event.type = NETWORKING_SCENE_CHANGED;
+
+                            m_NetworkingEvents.push_back(event);
+                        }
                     }
                     
                     incomingMessage->Release();
@@ -3247,10 +3260,25 @@ void Engine::StopHostingGameServer() {
     }
 }
 
-Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &serializedPacket) {
-    UTILASSERT(serializedPacket.size() >= sizeof(size_t));
+void Engine::ProcessNetworkEvents() {
+    while (!m_NetworkingEvents.empty()) {
+        Networking_Event &event = m_NetworkingEvents[0];
 
+        switch (event.type) {
+            case NETWORKING_SCENE_CHANGED:
+                /* This is bad. No sanitization whatsoever. */
+                /* TODO: sanitize. */
+                ImportScene(event.packet.scenePath);
+        }
+
+        m_NetworkingEvents.erase(m_NetworkingEvents.begin());
+    }
+}
+
+Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &serializedPacket) {
     Networking_StatePacket statePacket{};
+
+    Deserialize(serializedPacket, statePacket.scenePath);
 
     size_t objectsCount;
     Deserialize(serializedPacket, objectsCount);
@@ -3320,6 +3348,8 @@ void Engine::DeserializeNetworkingModel(std::vector<std::byte> serializedModelPa
 
 void Engine::SendFullUpdateToConnection(HSteamNetConnection connection) {
     Networking_StatePacket statePacket{};
+
+    statePacket.scenePath = m_ScenePath;
     
     for (Object *object : m_Objects) {
         Networking_Object objectPacket{};
@@ -3349,7 +3379,7 @@ void Engine::SendFullUpdateToConnection(HSteamNetConnection connection) {
 
     std::vector<std::byte> serializedPacket;
 
-    /* packet object size is the first element, so might aswell initialize the array as such */
+    Serialize(statePacket.scenePath, serializedPacket);
     Serialize(statePacket.objects.size(), serializedPacket);
     
     for (Networking_Object &objectPacket : statePacket.objects) {
