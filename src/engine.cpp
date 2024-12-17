@@ -2064,14 +2064,10 @@ void Renderer::Start() {
 #endif
 
         // we got (MAX_FRAMES_IN_FLIGHT) "slots" to use, we can write frames as long as the current frame slot we're using isn't occupied.
-        VkResult waitForFencesResult;
-
-        while (waitForFencesResult != VK_SUCCESS) {
-            /* 10ms wait */
-            waitForFencesResult = vkWaitForFences(m_EngineDevice, 1, &m_InFlightFences[currentFrameIndex], true, 10000000);
-            if (waitForFencesResult != VK_TIMEOUT) {
-                throw std::runtime_error(fmt::format(engineError::WAIT_FOR_FENCES_FAILED, string_VkResult(waitForFencesResult)));
-            }
+        VkResult waitForFencesResult = vkWaitForFences(m_EngineDevice, 1, &m_InFlightFences[currentFrameIndex], true, 10000000);
+        
+        if (waitForFencesResult != VK_SUCCESS) {
+            throw std::runtime_error(fmt::format(engineError::WAIT_FOR_FENCES_FAILED, string_VkResult(waitForFencesResult)));
         }
 
 #ifdef LOG_FRAME
