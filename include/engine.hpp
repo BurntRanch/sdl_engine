@@ -484,6 +484,8 @@ private:
     std::vector<Object *> m_Objects;
     std::vector<UI::GenericElement *> m_UIElements;
 
+    Networking_StatePacket m_LastPacket;
+
     /* Thank you Valve for showing me this disgusting technique. I hate it. */
 
     static Engine *m_CallbackInstance;
@@ -504,8 +506,8 @@ private:
     /* Sends a full update to the connection. Sends every single object, regardless whether it has changed, to the client. Avoid sending this unless it's a clients first time connecting. */
     void SendFullUpdateToConnection(HSteamNetConnection);
 
-    // /* Send an update to the client, Keep in mind the server won't send objects that haven't changed to the client. */
-    // void SendUpdateToConnection(HSteamNetConnection connection);
+    /* Send an update to the client, Keep in mind the server won't send objects that haven't changed to the client. */
+    void SendUpdateToConnection(HSteamNetConnection connection);
 
     /* Serialize the Networking_Object and append it to dest */
     void SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest);

@@ -2962,8 +2962,6 @@ void Engine::ConnectToGameServer(SteamNetworkingIPAddr ipAddr) {
         throw std::runtime_error("Failed to connect to server!");
     }
 
-    m_NetConnections.push_back(netConnection);
-
     InitNetworkingThread(NETWORKING_THREAD_ACTIVE_CLIENT);
 }
 
@@ -3029,9 +3027,9 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                 }
 
                 SendFullUpdateToConnection(callbackInfo->m_hConn);
-
-                m_NetConnections.push_back(callbackInfo->m_hConn);
             }
+
+            m_NetConnections.push_back(callbackInfo->m_hConn);
 
             break;
         
@@ -3146,7 +3144,7 @@ void Engine::NetworkingThreadClient_Main() {
                         }
 
                         for (Networking_Object &networkingObject : packet.objects) {
-                            auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [networkingObject] (Object &obj) { return obj.GetObjectID() == networkingObject.ObjectID; });
+                            auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [networkingObject] (Object *obj) { return obj->GetObjectID() == networkingObject.ObjectID; });
 
                             /* If the scene changed, we should wait until the scene is properly loaded */
                             if (it == m_Objects.end() && m_ScenePath == packet.scenePath) {
@@ -3233,6 +3231,10 @@ void Engine::NetworkingThreadServer_Main() {
                 
                 incomingMessage->Release();
             }
+        }
+
+        for (HSteamNetConnection &netConnection : m_NetConnections) {
+            SendUpdateToConnection(netConnection);
         }
 
         lastTickTime = now;
@@ -3400,6 +3402,76 @@ void Engine::SendFullUpdateToConnection(HSteamNetConnection connection) {
         }
 
         statePacket.objects.push_back(objectPacket);
+    }
+
+    std::vector<std::byte> serializedPacket;
+
+    Serialize(statePacket.scenePath, serializedPacket);
+    Serialize(statePacket.objects.size(), serializedPacket);
+    
+    for (Networking_Object &objectPacket : statePacket.objects) {
+        SerializeNetworkingObject(objectPacket, serializedPacket);
+    }
+
+    m_NetworkingSockets->SendMessageToConnection(connection, serializedPacket.data(), serializedPacket.size(), k_nSteamNetworkingSend_Reliable, nullptr);
+}
+
+
+void Engine::SendUpdateToConnection(HSteamNetConnection connection) {
+    Networking_StatePacket statePacket{};
+
+    statePacket.scenePath = m_ScenePath;
+    
+    for (Object *object : m_Objects) {
+        Networking_Object objectPacket{};
+
+        auto lastPacketObjectEquivalent = std::find_if(m_LastPacket.objects.begin(), m_LastPacket.objects.end(), [object] (Networking_Object &obj) { return obj.ObjectID == object->GetObjectID(); });
+        bool anythingChanged = lastPacketObjectEquivalent == m_LastPacket.objects.end();
+
+        objectPacket.ObjectID = object->GetObjectID();
+        
+        objectPacket.position = object->GetPosition();
+        objectPacket.rotation = object->GetRotation();
+        objectPacket.scale = object->GetScale();
+        
+        if (!anythingChanged && (
+            objectPacket.position != lastPacketObjectEquivalent->position ||
+            objectPacket.rotation != lastPacketObjectEquivalent->rotation ||
+            objectPacket.scale != lastPacketObjectEquivalent->scale ||
+            objectPacket.modelAttachments.size() != lastPacketObjectEquivalent->modelAttachments.size()))
+            anythingChanged = true;
+
+        size_t i = 0;
+        
+        for (Model *model : object->GetModelAttachments()) {
+            Networking_Model modelPacket{};
+
+            auto lastPacketModelAttachmentEquivalent = std::find_if(lastPacketObjectEquivalent->modelAttachments.begin(), lastPacketObjectEquivalent->modelAttachments.end(), [model] (Networking_Model &lastModelPacket) { return model->GetModelID() == lastModelPacket.modelID; });
+            anythingChanged = lastPacketModelAttachmentEquivalent == lastPacketObjectEquivalent->modelAttachments.end();
+
+            modelPacket.modelID = model->GetModelID();
+
+            modelPacket.position = model->GetRawPosition();
+            modelPacket.rotation = model->GetRawRotation();
+            modelPacket.scale = model->GetRawScale();
+
+            modelPacket.modelName = model->GetOriginalPath();
+
+            if (!anythingChanged && (
+                modelPacket.position != lastPacketModelAttachmentEquivalent->position ||
+                modelPacket.rotation != lastPacketModelAttachmentEquivalent->rotation ||
+                modelPacket.scale != lastPacketModelAttachmentEquivalent->scale ||
+                modelPacket.modelName != lastPacketModelAttachmentEquivalent->modelName))
+                anythingChanged = true;
+
+            objectPacket.modelAttachments.push_back(modelPacket);
+
+            i++;
+        }
+
+        if (anythingChanged) {
+            statePacket.objects.push_back(objectPacket);
+        }
     }
 
     std::vector<std::byte> serializedPacket;
