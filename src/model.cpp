@@ -2,51 +2,15 @@
 #include "fmt/format.h"
 #include "object.hpp"
 
+#include <algorithm>
 #include <assimp/material.h>
 #include <assimp/mesh.h>
 #include <assimp/postprocess.h>
+#include <glm/geometric.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <model.hpp>
 #include <stdexcept>
-
-
-Model::Model(const string_view path, glm::vec3 position, glm::vec3 rotation, glm::vec3 scale)
-{
-    m_Path = path;
-    
-    loadModel(path);
-    
-    SetPosition(position);
-    SetRotation(rotation);
-    SetScale(scale);
-}
-
-void Model::loadModel(string_view path)
-{
-    Assimp::Importer import;
-    const aiScene *scene = import.ReadFile(path.data(), aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_ForceGenNormals | /*aiProcess_GenSmoothNormals |*/ aiProcess_FlipUVs/* | aiProcess_CalcTangentSpace*/);	
-    
-    if(!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) 
-        throw std::runtime_error(fmt::format("Couldn't load models from assimp: {}", import.GetErrorString()));
-    
-    m_Directory = path.substr(0, path.find_last_of('/'));
-
-    processNode(scene->mRootNode, scene);
-}
-
-void Model::processNode(aiNode *node, const aiScene *scene)
-{
-    // process all the node's meshes (if any)
-    for(unsigned int i = 0; i < node->mNumMeshes; i++)
-    {
-        aiMesh *mesh = scene->mMeshes[node->mMeshes[i]]; 
-        meshes.push_back(processMesh(mesh, scene));
-    }
-    // then do the same for each of its children
-    for(unsigned int i = 0; i < node->mNumChildren; i++)
-    {
-        processNode(node->mChildren[i], scene);
-    }
-}
+#include <vector>
 
 Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
 {
@@ -166,37 +130,29 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
     return Mesh(*this, vertices, indices, diffuseMap/*, shininess, roughness, metallic*/, diffuse);
 }
 
-
-glm::vec3 Model::GetPosition() {
-    return m_Position + (m_ObjectAttachment != nullptr ? m_ObjectAttachment->GetPosition() : glm::vec3(0)) + (m_Parent != nullptr ? m_Parent->GetPosition() : glm::vec3(0)); 
-};
-glm::vec3 Model::GetRotation() {
-    return m_Rotation + (m_ObjectAttachment != nullptr ? m_ObjectAttachment->GetRotation() : glm::vec3(0)) + (m_Parent != nullptr ? m_Parent->GetRotation() : glm::vec3(0));
-};
-glm::vec3 Model::GetScale()    {
-    return m_Scale * (m_ObjectAttachment != nullptr ? m_ObjectAttachment->GetScale() : glm::vec3(1)) * (m_Parent != nullptr ? m_Parent->GetScale() : glm::vec3(1)); 
-}
-
 glm::mat4 Model::GetModelMatrix() {
-    if (!m_NeedsUpdate)
-        return m_ModelMatrix;
+    /* This used to exist before, but now we're not sure when the object attachment moves. */
+    // if (!m_NeedsUpdate)
+    //     return m_ModelMatrix;
 
-    fmt::println("Updating model matrix for object {}!", fmt::ptr(this));
+    // fmt::println("Updating model matrix for object {}!", fmt::ptr(this));
 
     // Update the model matrix with the position/rotation.
-    m_ModelMatrix = glm::scale(glm::mat4(1.0f), GetScale());
-    m_ModelMatrix *= glm::translate(glm::mat4(1.0f), GetPosition());
-    m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(GetRotation().x), glm::vec3(1.0f, 0.0f, 0.0f));
-    m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(GetRotation().y), glm::vec3(0.0f, 1.0f, 0.0f));
-    m_ModelMatrix *= glm::rotate(glm::mat4(1.0f), glm::radians(GetRotation().z), glm::vec3(0.0f, 0.0f, 1.0f));
-
-    m_NeedsUpdate = false;
+    if (m_ObjectAttachment) {
+        m_ModelMatrix = glm::translate(glm::mat4(1.0f), m_ObjectAttachment->GetPosition());
+        m_ModelMatrix *= glm::mat4_cast(m_ObjectAttachment->GetRotation());
+        m_ModelMatrix *= glm::scale(glm::mat4(1.0f), m_ObjectAttachment->GetScale());
+    }
 
     return m_ModelMatrix;
 }
 
 void Model::SetObjectAttachment(Object *object) {
     m_ObjectAttachment = object;
+}
+
+Object *Model::GetObjectAttachment() {
+    return m_ObjectAttachment;
 }
 
 int Model::GetModelID() {

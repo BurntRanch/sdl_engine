@@ -46,7 +46,7 @@ ifeq ($(wildcard $(BUILDDIR)/steam/libGameNetworkingSockets.so),)
 	mkdir -p $(BUILDDIR)/steam
 	mkdir -p steam/GameNetworkingSockets/build
 	cd steam/GameNetworkingSockets/build && cmake .. && make -j11
-	cp steam/GameNetworkingSockets/build/bin/libGameNetworkingSockets.so $(BUILDDIR)/steam/libGameNetworkingSockets.so
+	cp steam/GameNetworkingSockets/build/bin/libGameNetworkingSockets.so $(BUILDDIR)/steam/
 endif
 
 $(TARGET): fmt toml gamenetworkingsockets $(OBJ)

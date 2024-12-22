@@ -338,7 +338,7 @@ inline void ChangeImageLayout(EngineSharedContext &sharedContext, VkImage image,
     EndSingleTimeCommands(sharedContext, commandBuffer);
 }
 
-inline void CopyHostBufferToDeviceBuffer(EngineSharedContext &sharedContext, VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size) {
+inline void CopyHostBufferToDeviceBuffer(EngineSharedContext &sharedContext, VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0) {
     VkCommandBuffer commandBuffer = BeginSingleTimeCommands(sharedContext);
 
     VkBufferCopy bufferCopy{};

@@ -1,10 +1,12 @@
 #include "engine.hpp"
 
+#include "camera.hpp"
 #include "common.hpp"
 #include "fmt/base.h"
 #include "error.hpp"
 #include "fmt/format.h"
 #include "isteamnetworkingsockets.h"
+#include "object.hpp"
 #include "steamnetworkingsockets.h"
 #include "model.hpp"
 #include "steamnetworkingtypes.h"
@@ -32,12 +34,14 @@
 #include <fstream>
 #include <functional>
 #include <future>
+#include <glm/fwd.hpp>
 #include <iterator>
 #include <set>
 #include <stdexcept>
 #include <algorithm>
 #include <thread>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 #include <vulkan/vulkan_core.h>
@@ -677,9 +681,10 @@ void Renderer::AddUIArrows(UI::Arrows *arrows) {
 
     renderUIArrows.arrows = arrows;
 
-    renderUIArrows.arrowRenderModels[0] = LoadMesh(arrows->arrowsModel->meshes[0], arrows->arrowsModel, false);
-    renderUIArrows.arrowRenderModels[1] = LoadMesh(arrows->arrowsModel->meshes[1], arrows->arrowsModel, false);
-    renderUIArrows.arrowRenderModels[2] = LoadMesh(arrows->arrowsModel->meshes[2], arrows->arrowsModel, false);
+    /* probably broken but UI::Arrows is basically dead as we aren't planning on making our own map editor. */
+    renderUIArrows.arrowRenderModels[0] = LoadMesh(arrows->arrowsObject->GetModelAttachments()[0]->meshes[0], arrows->arrowsObject->GetModelAttachments()[0], false);
+    renderUIArrows.arrowRenderModels[1] = LoadMesh(arrows->arrowsObject->GetModelAttachments()[0]->meshes[1], arrows->arrowsObject->GetModelAttachments()[0], false);
+    renderUIArrows.arrowRenderModels[2] = LoadMesh(arrows->arrowsObject->GetModelAttachments()[0]->meshes[2], arrows->arrowsObject->GetModelAttachments()[0], false);
 
     for (auto &arrowBuffer : renderUIArrows.arrowBuffers) {
         // matrices UBO
@@ -2705,149 +2710,14 @@ bool Engine::ImportScene(const std::string &path) {
     }
     m_Objects.clear();
 
-    using namespace rapidxml;
+    Object *rootObject = new Object(glm::vec3(0), glm::quat(), glm::vec3(0));
 
-    std::ifstream sceneFile(path.data(), std::ios::binary | std::ios::ate);
+    rootObject->ImportFromFile(path);
 
-    if (!sceneFile.good())
-        return false;
+    m_Objects.push_back(rootObject);
 
-    std::vector<char> sceneRawXML(static_cast<int>(sceneFile.tellg()) + 1);
-    
-    sceneFile.seekg(0);
-    sceneFile.read(sceneRawXML.data(), sceneRawXML.size());
-
-    xml_document<char> sceneXML;
-
-    sceneXML.parse<0>(sceneRawXML.data());
-
-    xml_node<char> *sceneNode = sceneXML.first_node("Scene");
-
-    for (xml_node <char> *objectNode = sceneNode->first_node("Object"); objectNode; objectNode = objectNode->next_sibling("Object")) {
-        
-        xml_node<char> *positionNode = objectNode->first_node("Position");
-        UTILASSERT(positionNode);
-        std::string_view positionStr(positionNode->value());
-        std::vector<std::string> positionData = split(positionStr, ' ');
-        
-        glm::vec3 position = glm::vec3(std::stof(positionData[0]), std::stof(positionData[1]), std::stof(positionData[2]));
-
-        xml_node<char> *rotationNode = objectNode->first_node("Rotation");
-        UTILASSERT(rotationNode);
-        std::string_view rotationStr(rotationNode->value());
-        std::vector<std::string> rotationData = split(rotationStr, ' ');
-        glm::vec3 rotation = glm::vec3(std::stof(rotationData[0]), std::stof(rotationData[1]), std::stof(rotationData[2]));
-
-        xml_node<char> *scaleNode = objectNode->first_node("Scale");
-        UTILASSERT(scaleNode);
-        std::string_view scaleStr(scaleNode->value());
-        std::vector<std::string> scaleData = split(scaleStr, ' ');
-        glm::vec3 scale = glm::vec3(std::stof(scaleData[0]), std::stof(scaleData[1]), std::stof(scaleData[2]));
-
-        Object *object = new Object(position, rotation, scale);
-
-        xml_node<char> *objectIDNode = objectNode->first_node("ObjectID");
-        UTILASSERT(objectIDNode);
-        std::string objectIDStr(rotationNode->value());
-        
-        object->SetObjectID(std::stoi(objectIDStr));
-
-        m_Objects.push_back(object);
-
-        for (xml_node<char> *modelNode = objectNode->first_node("Model"); modelNode; modelNode = modelNode->next_sibling("Model")) {
-            Model *model = new Model();
-
-            xml_node<char> *positionNode = modelNode->first_node("Position");
-            UTILASSERT(positionNode);
-            std::string_view positionStr(positionNode->value());
-            std::vector<std::string> positionData = split(positionStr, ' ');
-            model->SetPosition(glm::vec3(std::stof(positionData[0]), std::stof(positionData[1]), std::stof(positionData[2])));
-
-            xml_node<char> *rotationNode = modelNode->first_node("Rotation");
-            UTILASSERT(rotationNode);
-            std::string_view rotationStr(rotationNode->value());
-            std::vector<std::string> rotationData = split(rotationStr, ' ');
-            model->SetRotation(glm::vec3(std::stof(rotationData[0]), std::stof(rotationData[1]), std::stof(rotationData[2])));
-
-            xml_node<char> *scaleNode = modelNode->first_node("Scale");
-            UTILASSERT(scaleNode);
-            std::string_view scaleStr(scaleNode->value());
-            std::vector<std::string> scaleData = split(scaleStr, ' ');
-            model->SetScale(glm::vec3(std::stof(scaleData[0]), std::stof(scaleData[1]), std::stof(scaleData[2])));
-
-            for (xml_node<char> *meshNode = modelNode->first_node("Mesh"); meshNode; meshNode = meshNode->next_sibling("Mesh")) {
-                Mesh mesh;
-
-                xml_node<char> *diffuseNode = meshNode->first_node("Diffuse");
-                UTILASSERT(diffuseNode);
-                std::string_view diffuseStr(diffuseNode->value());
-                std::vector<std::string> diffuseData = split(diffuseStr, ' ');
-                mesh.diffuse = glm::vec3(std::stof(diffuseData[0]), std::stof(diffuseData[1]), std::stof(diffuseData[2]));
-
-                xml_node<char> *indicesNode = meshNode->first_node("Indices");
-                UTILASSERT(indicesNode);
-                std::string_view indicesStr(indicesNode->value());
-                std::vector<std::string> indicesData = split(indicesStr, ',');
-                mesh.indices.resize(indicesData.size());
-
-                size_t i = 0;
-                for (const std::string &str : indicesData) {
-                    mesh.indices[i] = std::stoi(str);
-                    i++;
-                }
-
-                xml_node<char> *diffuseMapPathNode = meshNode->first_node("DiffuseMap");
-                UTILASSERT(diffuseMapPathNode);
-                std::string_view diffuseMapPathStr(diffuseMapPathNode->value());
-                mesh.diffuseMapPath = diffuseMapPathStr;
-
-                for (xml_node<char> *vertexNode = meshNode->first_node("Vertex"); vertexNode; vertexNode = vertexNode->next_sibling("Vertex")) {
-                    Vertex vertex;
-
-                    xml_node<char> *vertexPositionNode = vertexNode->first_node("Position");
-                    UTILASSERT(vertexPositionNode);
-                    std::string_view vertexPositionStr(vertexPositionNode->value());
-                    std::vector<std::string> vertexPositionData = split(vertexPositionStr, ' ');
-                    vertex.Position = glm::vec3(std::stof(vertexPositionData[0]), std::stof(vertexPositionData[1]), std::stof(vertexPositionData[2]));
-
-                    xml_node<char> *vertexNormalNode = vertexNode->first_node("Normal");
-                    UTILASSERT(vertexNormalNode);
-                    std::string_view vertexNormalStr(vertexNormalNode->value());
-                    std::vector<std::string> vertexNormalData = split(vertexNormalStr, ' ');
-                    vertex.Normal = glm::vec3(std::stof(vertexNormalData[0]), std::stof(vertexNormalData[1]), std::stof(vertexNormalData[2]));
-
-                    xml_node<char> *vertexTexCoordNode = vertexNode->first_node("TexCoord");
-                    UTILASSERT(vertexTexCoordNode);
-                    std::string_view vertexTexCoordStr(vertexTexCoordNode->value());
-                    std::vector<std::string> vertexTexCoordData = split(vertexTexCoordStr, ' ');
-                    vertex.TexCoord = glm::vec2(std::stof(vertexTexCoordData[0]), std::stof(vertexTexCoordData[1]));
-
-                    glm::vec3 boundingBoxMin;
-                    glm::vec3 boundingBoxMax;
-
-                    std::array<glm::vec3, 2> modelBoundingBox = model->GetRawBoundingBox();
-
-                    boundingBoxMin.x = std::max(modelBoundingBox[0].x, vertex.Position.x);
-                    boundingBoxMin.y = std::max(modelBoundingBox[0].y, vertex.Position.y);
-                    boundingBoxMin.z = std::max(modelBoundingBox[0].z, vertex.Position.z);
-                    boundingBoxMax.x = std::min(modelBoundingBox[1].x, vertex.Position.x);
-                    boundingBoxMax.y = std::min(modelBoundingBox[1].y, vertex.Position.y);
-                    boundingBoxMax.z = std::min(modelBoundingBox[1].z, vertex.Position.z);
-
-                    model->SetBoundingBox({boundingBoxMin, boundingBoxMax});
-
-                    mesh.vertices.push_back(vertex);
-                }
-
-                model->meshes.push_back(mesh);
-            }
-
-            object->AddModelAttachment(model);
-
-            if (m_Renderer) {
-                m_Renderer->LoadModel(model);
-            }
-        }
+    for (Object *obj : rootObject->GetChildren()) {
+        m_Objects.push_back(obj);
     }
 
     m_ScenePath = path;
@@ -2855,97 +2725,98 @@ bool Engine::ImportScene(const std::string &path) {
     return true;
 }
 
-void Engine::ExportScene(const std::string &path) {
-    using namespace rapidxml;
+/* TODO: Implement with assimp */
+// void Engine::ExportScene(const std::string &path) {
+//     using namespace rapidxml;
 
-    xml_document<char> sceneXML;
+//     xml_document<char> sceneXML;
 
-    xml_node<char> *node = sceneXML.allocate_node(node_type::node_element, "Scene");
-    sceneXML.append_node(node);
+//     xml_node<char> *node = sceneXML.allocate_node(node_type::node_element, "Scene");
+//     sceneXML.append_node(node);
 
-    for (Object *object : m_Objects) {
-        xml_node<char> *objectNode = sceneXML.allocate_node(node_type::node_element, "Object");
-        node->append_node(objectNode);
+//     for (Object *object : m_Objects) {
+//         xml_node<char> *objectNode = sceneXML.allocate_node(node_type::node_element, "Object");
+//         node->append_node(objectNode);
 
-        xml_node<char> *objectIDNode = sceneXML.allocate_node(node_type::node_element, "ObjectID", fmt::to_string(object->GetObjectID()).c_str());
-        objectNode->append_node(objectIDNode);
+//         xml_node<char> *objectIDNode = sceneXML.allocate_node(node_type::node_element, "ObjectID", fmt::to_string(object->GetObjectID()).c_str());
+//         objectNode->append_node(objectIDNode);
         
-        glm::vec3 position = object->GetPosition();
-        glm::vec3 rotation = object->GetRotation();
-        glm::vec3 scale = object->GetScale();
+//         glm::vec3 position = object->GetPosition();
+//         glm::vec3 rotation = object->GetRotation();
+//         glm::vec3 scale = object->GetScale();
 
-        std::string positionStr = fmt::format("{} {} {}", position.x, position.y, position.z);
-        xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(positionStr.c_str()));
-        objectNode->append_node(positionNode);
+//         std::string positionStr = fmt::format("{} {} {}", position.x, position.y, position.z);
+//         xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(positionStr.c_str()));
+//         objectNode->append_node(positionNode);
 
-        std::string rotationStr = fmt::format("{} {} {}", rotation.x, rotation.y, rotation.z);
-        xml_node<char> *rotationNode = sceneXML.allocate_node(node_type::node_element, "Rotation", sceneXML.allocate_string(rotationStr.c_str()));
-        objectNode->append_node(rotationNode);
+//         std::string rotationStr = fmt::format("{} {} {}", rotation.x, rotation.y, rotation.z);
+//         xml_node<char> *rotationNode = sceneXML.allocate_node(node_type::node_element, "Rotation", sceneXML.allocate_string(rotationStr.c_str()));
+//         objectNode->append_node(rotationNode);
 
-        std::string scaleStr = fmt::format("{} {} {}", scale.x, scale.y, scale.z);
-        xml_node<char> *scaleNode = sceneXML.allocate_node(node_type::node_element, "Scale", sceneXML.allocate_string(scaleStr.c_str()));
-        objectNode->append_node(scaleNode);
+//         std::string scaleStr = fmt::format("{} {} {}", scale.x, scale.y, scale.z);
+//         xml_node<char> *scaleNode = sceneXML.allocate_node(node_type::node_element, "Scale", sceneXML.allocate_string(scaleStr.c_str()));
+//         objectNode->append_node(scaleNode);
 
-        for (Model *model : object->GetModelAttachments()) {
-            xml_node<char> *modelNode = sceneXML.allocate_node(node_type::node_element, "Model");
-            objectNode->append_node(modelNode);
+//         for (Model *model : object->GetModelAttachments()) {
+//             xml_node<char> *modelNode = sceneXML.allocate_node(node_type::node_element, "Model");
+//             objectNode->append_node(modelNode);
 
-            glm::vec3 position = model->GetPosition();
-            glm::vec3 rotation = model->GetRotation();
-            glm::vec3 scale = model->GetScale();
+//             glm::vec3 position = model->GetPosition();
+//             glm::vec3 rotation = model->GetRotation();
+//             glm::vec3 scale = model->GetScale();
 
-            std::string positionStr = fmt::format("{} {} {}", position.x, position.y, position.z);
-            xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(positionStr.c_str()));
-            modelNode->append_node(positionNode);
+//             std::string positionStr = fmt::format("{} {} {}", position.x, position.y, position.z);
+//             xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(positionStr.c_str()));
+//             modelNode->append_node(positionNode);
 
-            std::string rotationStr = fmt::format("{} {} {}", rotation.x, rotation.y, rotation.z);
-            xml_node<char> *rotationNode = sceneXML.allocate_node(node_type::node_element, "Rotation", sceneXML.allocate_string(rotationStr.c_str()));
-            modelNode->append_node(rotationNode);
+//             std::string rotationStr = fmt::format("{} {} {}", rotation.x, rotation.y, rotation.z);
+//             xml_node<char> *rotationNode = sceneXML.allocate_node(node_type::node_element, "Rotation", sceneXML.allocate_string(rotationStr.c_str()));
+//             modelNode->append_node(rotationNode);
 
-            std::string scaleStr = fmt::format("{} {} {}", scale.x, scale.y, scale.z);
-            xml_node<char> *scaleNode = sceneXML.allocate_node(node_type::node_element, "Scale", sceneXML.allocate_string(scaleStr.c_str()));
-            modelNode->append_node(scaleNode);
+//             std::string scaleStr = fmt::format("{} {} {}", scale.x, scale.y, scale.z);
+//             xml_node<char> *scaleNode = sceneXML.allocate_node(node_type::node_element, "Scale", sceneXML.allocate_string(scaleStr.c_str()));
+//             modelNode->append_node(scaleNode);
 
-            for (Mesh &mesh : model->meshes) {
-                xml_node<char> *meshNode = sceneXML.allocate_node(node_type::node_element, "Mesh");
-                modelNode->append_node(meshNode);
+//             for (Mesh &mesh : model->meshes) {
+//                 xml_node<char> *meshNode = sceneXML.allocate_node(node_type::node_element, "Mesh");
+//                 modelNode->append_node(meshNode);
 
-                std::string diffuseStr = fmt::format("{} {} {}", mesh.diffuse.x, mesh.diffuse.y, mesh.diffuse.z);
-                xml_node<char> *diffuseNode = sceneXML.allocate_node(node_type::node_element, "Diffuse", sceneXML.allocate_string(diffuseStr.c_str()));
-                meshNode->append_node(diffuseNode);
+//                 std::string diffuseStr = fmt::format("{} {} {}", mesh.diffuse.x, mesh.diffuse.y, mesh.diffuse.z);
+//                 xml_node<char> *diffuseNode = sceneXML.allocate_node(node_type::node_element, "Diffuse", sceneXML.allocate_string(diffuseStr.c_str()));
+//                 meshNode->append_node(diffuseNode);
 
-                std::string indicesStr = fmt::to_string(fmt::join(mesh.indices, ","));
-                xml_node<char> *indicesNode = sceneXML.allocate_node(node_type::node_element, "Indices", sceneXML.allocate_string(indicesStr.c_str()));
-                meshNode->append_node(indicesNode);
+//                 std::string indicesStr = fmt::to_string(fmt::join(mesh.indices, ","));
+//                 xml_node<char> *indicesNode = sceneXML.allocate_node(node_type::node_element, "Indices", sceneXML.allocate_string(indicesStr.c_str()));
+//                 meshNode->append_node(indicesNode);
 
-                xml_node<char> *diffuseMapPathNode = sceneXML.allocate_node(node_type::node_element, "DiffuseMap", mesh.diffuseMapPath.c_str());
-                meshNode->append_node(diffuseMapPathNode);
+//                 xml_node<char> *diffuseMapPathNode = sceneXML.allocate_node(node_type::node_element, "DiffuseMap", mesh.diffuseMapPath.c_str());
+//                 meshNode->append_node(diffuseMapPathNode);
 
-                for (Vertex vert : mesh.vertices) {
-                    xml_node<char> *vertexNode = sceneXML.allocate_node(node_type::node_element, "Vertex");
-                    meshNode->append_node(vertexNode);
+//                 for (Vertex vert : mesh.vertices) {
+//                     xml_node<char> *vertexNode = sceneXML.allocate_node(node_type::node_element, "Vertex");
+//                     meshNode->append_node(vertexNode);
 
-                    std::string vertPositionStr = fmt::format("{} {} {}", vert.Position.x, vert.Position.y, vert.Position.z);
-                    xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(vertPositionStr.c_str()));
-                    vertexNode->append_node(positionNode);
+//                     std::string vertPositionStr = fmt::format("{} {} {}", vert.Position.x, vert.Position.y, vert.Position.z);
+//                     xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(vertPositionStr.c_str()));
+//                     vertexNode->append_node(positionNode);
                     
-                    std::string vertNormalStr = fmt::format("{} {} {}", vert.Normal.x, vert.Normal.y, vert.Normal.z);
-                    xml_node<char> *normalNode = sceneXML.allocate_node(node_type::node_element, "Normal", sceneXML.allocate_string(vertNormalStr.c_str()));
-                    vertexNode->append_node(normalNode);
+//                     std::string vertNormalStr = fmt::format("{} {} {}", vert.Normal.x, vert.Normal.y, vert.Normal.z);
+//                     xml_node<char> *normalNode = sceneXML.allocate_node(node_type::node_element, "Normal", sceneXML.allocate_string(vertNormalStr.c_str()));
+//                     vertexNode->append_node(normalNode);
                     
-                    std::string vertTexCoordStr = fmt::format("{} {}", vert.TexCoord.x, vert.TexCoord.y);
-                    xml_node<char> *texCoordNode = sceneXML.allocate_node(node_type::node_element, "TexCoord", sceneXML.allocate_string(vertTexCoordStr.c_str()));
-                    vertexNode->append_node(texCoordNode);
-                }
-            }
-        }
-    }
+//                     std::string vertTexCoordStr = fmt::format("{} {}", vert.TexCoord.x, vert.TexCoord.y);
+//                     xml_node<char> *texCoordNode = sceneXML.allocate_node(node_type::node_element, "TexCoord", sceneXML.allocate_string(vertTexCoordStr.c_str()));
+//                     vertexNode->append_node(texCoordNode);
+//                 }
+//             }
+//         }
+//     }
 
-    std::ofstream targetFile(path);
-    targetFile << sceneXML;
+//     std::ofstream targetFile(path);
+//     targetFile << sceneXML;
 
-    sceneXML.clear();
-}
+//     sceneXML.clear();
+// }
 
 void Engine::ConnectToGameServer(SteamNetworkingIPAddr ipAddr) {
     SteamNetworkingConfigValue_t opt{};    
@@ -3126,26 +2997,19 @@ void Engine::NetworkingThreadClient_Main() {
                         fmt::println("New state packet just dropped! {} objects sent by server", packet.objects.size());
 
                         /* add a dummy type */
-                        Networking_Event event{NETWORKING_NULL, packet};
-
-                        if (m_ScenePath != packet.scenePath) {
-                            /* Fire event */
-                            event.type = NETWORKING_SCENE_CHANGED;
-
-                            m_NetworkingEvents.push_back(event);
-                        }
+                        Networking_Event event{NETWORKING_NULL, 0, packet};
 
                         for (Networking_Object &networkingObject : packet.objects) {
                             auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [networkingObject] (Object *obj) { return obj->GetObjectID() == networkingObject.ObjectID; });
 
                             /* If the scene changed, we should wait until the scene is properly loaded */
-                            if (it == m_Objects.end() && m_ScenePath == packet.scenePath) {
+                            if (it == m_Objects.end()) {
                                 event.type = NETWORKING_NEW_OBJECT;
 
                                 m_NetworkingEvents.push_back(event);
 
-                                continue;
-                            } else if (it == m_Objects.end()) {
+                                event.objectIdx++;
+
                                 continue;
                             }
 
@@ -3156,6 +3020,8 @@ void Engine::NetworkingThreadClient_Main() {
                             event.type = NETWORKING_UPDATE_OBJECT;
 
                             m_NetworkingEvents.push_back(event);
+
+                            event.objectIdx++;
                         }
                     }
                     
@@ -3281,13 +3147,29 @@ void Engine::ProcessNetworkEvents() {
     while (!m_NetworkingEvents.empty()) {
         Networking_Event &event = m_NetworkingEvents[0];
 
+        Object *object;
+        Networking_Object *objectPacket;
+
         switch (event.type) {
-            case NETWORKING_SCENE_CHANGED:
-                /* This is bad. No sanitization whatsoever. */
-                /* TODO: sanitize. */
-                if (m_ScenePath != event.packet.scenePath) {
-                    ImportScene(event.packet.scenePath);
+            case NETWORKING_NEW_OBJECT:
+                object = new Object();
+
+                objectPacket = &event.packet.objects[event.objectIdx];
+
+                if (objectPacket->isGeneratedFromFile && objectPacket->objectSourceFile != "") {
+                    /* TODO: Sanitize */
+                    object->ImportFromFile(objectPacket->objectSourceFile);
                 }
+
+                object->SetObjectID(objectPacket->ObjectID);
+
+                object->SetPosition(objectPacket->position);
+                object->SetRotation(objectPacket->rotation);
+                object->SetScale(objectPacket->scale);
+
+                /* TODO: inheritance */
+
+                break;
             default:
                 break;
         }
@@ -3298,8 +3180,6 @@ void Engine::ProcessNetworkEvents() {
 
 Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &serializedPacket) {
     Networking_StatePacket statePacket{};
-
-    Deserialize(serializedPacket, statePacket.scenePath);
 
     size_t objectsCount;
     Deserialize(serializedPacket, objectsCount);
@@ -3328,79 +3208,55 @@ void Engine::DeserializeNetworkingObject(std::vector<std::byte> &serializedObjec
     Deserialize(serializedObjectPacket, dest.rotation.x);
     Deserialize(serializedObjectPacket, dest.rotation.y);
     Deserialize(serializedObjectPacket, dest.rotation.z);
+    Deserialize(serializedObjectPacket, dest.rotation.w);
 
     Deserialize(serializedObjectPacket, dest.scale.x);
     Deserialize(serializedObjectPacket, dest.scale.y);
     Deserialize(serializedObjectPacket, dest.scale.z);
 
-    size_t modelAttachmentsSize;
-    Deserialize(serializedObjectPacket, modelAttachmentsSize);
+    Deserialize(serializedObjectPacket, dest.isGeneratedFromFile);
+    Deserialize(serializedObjectPacket, dest.objectSourceFile);
 
-    for (size_t i = 0; i < modelAttachmentsSize; i++) {
-        Networking_Model modelPacket{};
+    size_t childrenListSize;
+    Deserialize(serializedObjectPacket, childrenListSize);
 
-        DeserializeNetworkingModel(serializedObjectPacket, modelPacket);
+    for (size_t i = 0; i < childrenListSize; i++) {
+        int childObjectID;
+        Deserialize(serializedObjectPacket, childObjectID);
 
-        dest.modelAttachments.push_back(modelPacket);
+        dest.children.push_back(childObjectID);
     }
-}
-
-
-
-void Engine::DeserializeNetworkingModel(std::vector<std::byte> &serializedModelPacket, Networking_Model &dest) {
-    UTILASSERT(serializedModelPacket.size() >= sizeof(int) + (sizeof(float) * 9) + sizeof(size_t));
-
-    Deserialize(serializedModelPacket, dest.modelID);
-
-    Deserialize(serializedModelPacket, dest.position.x);
-    Deserialize(serializedModelPacket, dest.position.y);
-    Deserialize(serializedModelPacket, dest.position.z);
-
-    Deserialize(serializedModelPacket, dest.rotation.x);
-    Deserialize(serializedModelPacket, dest.rotation.y);
-    Deserialize(serializedModelPacket, dest.rotation.z);
-
-    Deserialize(serializedModelPacket, dest.scale.x);
-    Deserialize(serializedModelPacket, dest.scale.y);
-    Deserialize(serializedModelPacket, dest.scale.z);
-
-    Deserialize(serializedModelPacket, dest.modelName);
 }
 
 void Engine::SendFullUpdateToConnection(HSteamNetConnection connection) {
     Networking_StatePacket statePacket{};
-
-    statePacket.scenePath = m_ScenePath;
     
     for (Object *object : m_Objects) {
         Networking_Object objectPacket{};
 
-        objectPacket.ObjectID = object->GetObjectID();
-        
-        objectPacket.position = object->GetPosition();
-        objectPacket.rotation = object->GetRotation();
-        objectPacket.scale = object->GetScale();
+        /* list of objects to go through, expands for its children too. */
+        std::vector<Object *> objects;
 
-        for (Model *model : object->GetModelAttachments()) {
-            Networking_Model modelPacket{};
+        while (!objects.empty()) {
+            objectPacket.ObjectID = object->GetObjectID();
+            
+            objectPacket.position = object->GetPosition();
+            objectPacket.rotation = object->GetRotation();
+            objectPacket.scale = object->GetScale();
 
-            modelPacket.modelID = model->GetModelID();
+            objectPacket.objectSourceFile = object->GetSourceFile();
 
-            modelPacket.position = model->GetRawPosition();
-            modelPacket.rotation = model->GetRawRotation();
-            modelPacket.scale = model->GetRawScale();
+            /* ugly workaround over the fact we cant include objectPacket.children in a lambda */
+            std::vector<int> *childrenList = &objectPacket.children;
+            
+            std::for_each(object->GetChildren().begin(), object->GetChildren().end(), [childrenList] (Object *obj) { childrenList->push_back(obj->GetObjectID()); });
 
-            modelPacket.modelName = model->GetOriginalPath();
-
-            objectPacket.modelAttachments.push_back(modelPacket);
+            statePacket.objects.push_back(objectPacket);
         }
-
-        statePacket.objects.push_back(objectPacket);
     }
 
     std::vector<std::byte> serializedPacket;
 
-    Serialize(statePacket.scenePath, serializedPacket);
     Serialize(statePacket.objects.size(), serializedPacket);
     
     for (Networking_Object &objectPacket : statePacket.objects) {
@@ -3415,8 +3271,6 @@ void Engine::SendFullUpdateToConnection(HSteamNetConnection connection) {
 
 void Engine::SendUpdateToConnection(HSteamNetConnection connection) {
     Networking_StatePacket statePacket{};
-
-    statePacket.scenePath = m_ScenePath;
     
     for (Object *object : m_Objects) {
         Networking_Object objectPacket{};
@@ -3429,42 +3283,23 @@ void Engine::SendUpdateToConnection(HSteamNetConnection connection) {
         objectPacket.position = object->GetPosition();
         objectPacket.rotation = object->GetRotation();
         objectPacket.scale = object->GetScale();
+
+        objectPacket.isGeneratedFromFile = object->IsGeneratedFromFile();
+        objectPacket.objectSourceFile = object->GetSourceFile();
+
+        /* ugly workaround over the fact we cant include objectPacket.children in a lambda */
+        std::vector<int> *childrenList = &objectPacket.children;
+        
+        std::for_each(object->GetChildren().begin(), object->GetChildren().end(), [childrenList] (Object *obj) { childrenList->push_back(obj->GetObjectID()); });
         
         if (!anythingChanged && (
             objectPacket.position != lastPacketObjectEquivalent->position ||
             objectPacket.rotation != lastPacketObjectEquivalent->rotation ||
             objectPacket.scale != lastPacketObjectEquivalent->scale ||
-            object->GetModelAttachments().size() != lastPacketObjectEquivalent->modelAttachments.size()))
+            objectPacket.isGeneratedFromFile != lastPacketObjectEquivalent->isGeneratedFromFile ||
+            objectPacket.objectSourceFile != lastPacketObjectEquivalent->objectSourceFile ||
+            objectPacket.children.size() != lastPacketObjectEquivalent->children.size()))
             anythingChanged = true;
-
-        size_t i = 0;
-        
-        for (Model *model : object->GetModelAttachments()) {
-            Networking_Model modelPacket{};
-
-            modelPacket.modelID = model->GetModelID();
-
-            modelPacket.position = model->GetRawPosition();
-            modelPacket.rotation = model->GetRawRotation();
-            modelPacket.scale = model->GetRawScale();
-
-            modelPacket.modelName = model->GetOriginalPath();
-
-            if (!anythingChanged) {
-                auto lastPacketModelAttachmentEquivalent = std::find_if(lastPacketObjectEquivalent->modelAttachments.begin(), lastPacketObjectEquivalent->modelAttachments.end(), [model] (Networking_Model &lastModelPacket) { return model->GetModelID() == lastModelPacket.modelID; });
-                anythingChanged = lastPacketModelAttachmentEquivalent == lastPacketObjectEquivalent->modelAttachments.end();
-
-                if (modelPacket.position != lastPacketModelAttachmentEquivalent->position ||
-                    modelPacket.rotation != lastPacketModelAttachmentEquivalent->rotation ||
-                    modelPacket.scale != lastPacketModelAttachmentEquivalent->scale ||
-                    modelPacket.modelName != lastPacketModelAttachmentEquivalent->modelName)
-                    anythingChanged = true;
-            }
-
-            objectPacket.modelAttachments.push_back(modelPacket);
-
-            i++;
-        }
 
         if (anythingChanged) {
             statePacket.objects.push_back(objectPacket);
@@ -3474,7 +3309,6 @@ void Engine::SendUpdateToConnection(HSteamNetConnection connection) {
 
     std::vector<std::byte> serializedPacket;
 
-    Serialize(statePacket.scenePath, serializedPacket);
     Serialize(statePacket.objects.size(), serializedPacket);
     
     for (Networking_Object &objectPacket : statePacket.objects) {
@@ -3494,36 +3328,20 @@ void Engine::SerializeNetworkingObject(Networking_Object &objectPacket, std::vec
     Serialize(objectPacket.rotation.x, dest);
     Serialize(objectPacket.rotation.y, dest);
     Serialize(objectPacket.rotation.z, dest);
+    Serialize(objectPacket.rotation.w, dest);
 
     Serialize(objectPacket.scale.x, dest);
     Serialize(objectPacket.scale.y, dest);
     Serialize(objectPacket.scale.z, dest);
 
-    Serialize(objectPacket.modelAttachments.size(), dest);
+    Serialize(objectPacket.isGeneratedFromFile, dest);
+    Serialize(objectPacket.objectSourceFile, dest);
 
-    for (Networking_Model &modelPacket : objectPacket.modelAttachments) {
-        SerializeNetworkingModel(modelPacket, dest);
+    Serialize(objectPacket.children.size(), dest);
+
+    for (int &childObjectID : objectPacket.children) {
+        Serialize(childObjectID, dest);
     }
-}
-
-
-
-void Engine::SerializeNetworkingModel(Networking_Model &modelPacket, std::vector<std::byte> &dest) {
-    Serialize(modelPacket.modelID, dest);
-
-    Serialize(modelPacket.position.x, dest);
-    Serialize(modelPacket.position.y, dest);
-    Serialize(modelPacket.position.z, dest);
-
-    Serialize(modelPacket.rotation.x, dest);
-    Serialize(modelPacket.rotation.y, dest);
-    Serialize(modelPacket.rotation.z, dest);
-
-    Serialize(modelPacket.scale.x, dest);
-    Serialize(modelPacket.scale.y, dest);
-    Serialize(modelPacket.scale.z, dest);
-
-    Serialize(modelPacket.modelName, dest);
 }
 
 template<typename T>

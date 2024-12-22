@@ -8,6 +8,7 @@
 #include "ui.hpp"
 #include "ui/button.hpp"
 #include "object.hpp"
+
 #include <future>
 #include <mutex>
 #include <unordered_map>
@@ -41,6 +42,7 @@
 #define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include "fmt/core.h"
 #include "fmt/ranges.h"
@@ -375,30 +377,22 @@ private:
     std::vector<VkSampler> m_CreatedSamplers;
 };
 
-/* A representation of a Model to be transmitted over the network. */
-struct Networking_Model {
-    int modelID;
-
-    glm::vec3 position;
-    glm::vec3 rotation;
-    glm::vec3 scale;
-
-    std::string modelName;  /* the path */
-};
-
 /* A representation of an Object to be transmitted over the network. */
 struct Networking_Object {
     int ObjectID;
 
     glm::vec3 position;
-    glm::vec3 rotation;
+    glm::quat rotation;
     glm::vec3 scale;
 
-    std::vector<Networking_Model> modelAttachments;
+    bool isGeneratedFromFile;
+    std::string objectSourceFile;
+
+    /* List of objectIDs */
+    std::vector<int> children;
 };
 
 struct Networking_StatePacket {
-    std::string scenePath;
     std::vector<Networking_Object> objects;
 };
 
@@ -412,6 +406,9 @@ enum Networking_EventType {
 /* This isn't meant to be sent over the network, this is meant to be sent between the NetworkThread and the render thread */
 struct Networking_Event {
     Networking_EventType type;
+
+    /* Index of the object, only set if type == NETWORKING_NEW_OBJECT or NETWORKING_UPDATE_OBJECT*/
+    int objectIdx;
 
     Networking_StatePacket packet;
 };
@@ -480,6 +477,7 @@ private:
     std::thread m_NetworkingThread;
     
     Settings *m_Settings;
+    Camera *m_MainCamera;
 
     std::vector<Object *> m_Objects;
     std::vector<UI::GenericElement *> m_UIElements;
@@ -501,7 +499,6 @@ private:
 
     /* Deserialize the Networking_Object */
     void DeserializeNetworkingObject(std::vector<std::byte> &serializedObjectPacket, Networking_Object &dest);
-    void DeserializeNetworkingModel(std::vector<std::byte> &serializedModelPacket, Networking_Model &dest);
 
     /* Sends a full update to the connection. Sends every single object, regardless whether it has changed, to the client. Avoid sending this unless it's a clients first time connecting. */
     void SendFullUpdateToConnection(HSteamNetConnection);
@@ -511,7 +508,6 @@ private:
 
     /* Serialize the Networking_Object and append it to dest */
     void SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest);
-    void SerializeNetworkingModel(Networking_Model &modelPacket, std::vector<std::byte> &dest);
 
     /* Deserialize to dest */
     template<typename T>
