@@ -36,6 +36,7 @@
 #include <future>
 #include <glm/fwd.hpp>
 #include <iterator>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <algorithm>
@@ -3009,6 +3010,7 @@ void Engine::NetworkingThreadClient_Main() {
 
                         /* add a dummy type */
                         Networking_Event event{NETWORKING_NULL, 0, packet};
+                        std::lock_guard<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
 
                         for (Networking_Object &networkingObject : packet.objects) {
                             auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [networkingObject] (Object *obj) { return obj->GetObjectID() == networkingObject.ObjectID; });
@@ -3155,6 +3157,8 @@ void Engine::StopHostingGameServer() {
 }
 
 void Engine::ProcessNetworkEvents() {
+    std::lock_guard<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
+
     while (!m_NetworkingEvents.empty()) {
         Networking_Event &event = m_NetworkingEvents[0];
 

@@ -472,7 +472,9 @@ private:
     HSteamNetPollGroup m_NetPollGroup = k_HSteamNetPollGroup_Invalid;
 
     std::string m_ScenePath = "";
+
     std::vector<Networking_Event> m_NetworkingEvents;
+    std::mutex m_NetworkingEventsLock;
 
     int m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
 
