@@ -201,3 +201,5 @@ int Object::GetObjectID() {
 void Object::SetObjectID(int objectID) {
     m_ObjectID = objectID;
 }
+
+int Object::HighestObjectID = -1;
