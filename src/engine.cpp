@@ -2625,6 +2625,10 @@ void Engine::RegisterUIButtonListener(const std::function<void(std::string)> lis
     m_UIButtonListeners.push_back(listener);
 }
 
+void Engine::RegisterTickUpdateHandler(const std::function<void(int)> handler) {
+    m_TickUpdateHandlers.push_back(handler);
+}
+
 Renderer *Engine::GetRenderer() {
     return m_Renderer;
 }
@@ -2982,6 +2986,12 @@ void Engine::NetworkingThreadClient_Main() {
 
         accumulativeTickTime -= (1.0f / 64.0f);
 
+        m_TickNumberClient++;
+        
+        for (auto handler : m_TickUpdateHandlers) {
+            handler(m_TickNumberClient);
+        }
+
         m_CallbackInstance = this;
         m_NetworkingSockets->RunCallbacks();
 
@@ -3082,7 +3092,13 @@ void Engine::NetworkingThreadServer_Main() {
         }
 
         accumulativeTickTime -= (1.0f / 64.0f);
+
+        m_TickNumberServer++;
         
+        for (auto handler : m_TickUpdateHandlers) {
+            handler(m_TickNumberServer);
+        }
+
         m_CallbackInstance = this;
         m_NetworkingSockets->RunCallbacks();
 
@@ -3193,6 +3209,16 @@ void Engine::ProcessNetworkEvents() {
 
         m_NetworkingEvents.erase(m_NetworkingEvents.begin());
     }
+}
+
+Object *Engine::GetObjectByID(int ObjectID) {
+    auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [ObjectID] (Object *&obj) { return ObjectID == obj->GetObjectID(); });
+
+    if (it == m_Objects.end()) {
+        return nullptr;
+    }
+
+    return *it;
 }
 
 Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &serializedPacket) {

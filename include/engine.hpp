@@ -434,6 +434,8 @@ public:
     /* Due to how it works, this function can be called before the renderer is initialized. */
     void RegisterUIButtonListener(const std::function<void(std::string)> listener);
 
+    void RegisterTickUpdateHandler(const std::function<void(int)> handler);
+
     Renderer *GetRenderer();
 
     void StartRenderer();
@@ -456,6 +458,8 @@ public:
 
     void StopHostingGameServer();
     void ProcessNetworkEvents();
+
+    Object *GetObjectByID(int ObjectID);
 
     UI::GenericElement *GetElementByID(const std::string &id);
 
@@ -530,6 +534,12 @@ private:
 
     std::vector<std::function<void(std::string)>> m_UIButtonListeners;
     std::vector<UI::Button *> m_UIButtons;
+
+    /* TODO: seperate handlers for server & client or atleast provide an argument to clarify which part the tick update is handling */
+    std::vector<std::function<void(int)>> m_TickUpdateHandlers;
+
+    int m_TickNumberServer;
+    int m_TickNumberClient;
 };
 
 #endif
