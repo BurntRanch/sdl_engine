@@ -3319,6 +3319,12 @@ void Engine::SendUpdateToConnection(HSteamNetConnection connection) {
 
         if (anythingChanged) {
             statePacket.objects.push_back(objectPacket);
+
+            if (lastPacketObjectEquivalent != m_LastPacket.objects.end()) {
+                m_LastPacket.objects.at(std::distance(m_LastPacket.objects.begin(), lastPacketObjectEquivalent)) = objectPacket;
+            } else {
+                m_LastPacket.objects.push_back(objectPacket);
+            }
         }
     }
 
@@ -3331,8 +3337,6 @@ void Engine::SendUpdateToConnection(HSteamNetConnection connection) {
     }
 
     m_NetworkingSockets->SendMessageToConnection(connection, serializedPacket.data(), serializedPacket.size(), k_nSteamNetworkingSend_Reliable, nullptr);
-
-    m_LastPacket = statePacket;
 }
 
 void Engine::SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest) {
