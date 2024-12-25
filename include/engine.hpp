@@ -440,6 +440,8 @@ public:
 
     void LoadUIFile(const std::string &name);
 
+    void AddObject(Object *object);
+
     bool ImportScene(const std::string &path);
     void ExportScene(const std::string &path);
 

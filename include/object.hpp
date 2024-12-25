@@ -36,7 +36,9 @@ public:
     void SetParent(Object *parent);
     Object *GetParent();
 
+    /* Meant to be called by the child when SetParent is called. */
     void AddChild(Object *child);
+    
     std::vector<Object *> GetChildren();
     void RemoveChild(Object *child);
 

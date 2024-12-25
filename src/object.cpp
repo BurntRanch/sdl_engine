@@ -48,9 +48,10 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, Object *parent) {
     Object *obj = this;
     
     if (node != scene->mRootNode) {
-        obj = new Object(glm::vec3(0), glm::quat(), glm::vec3(0));
+        obj = new Object();
 
         obj->SetParent(parent);
+
         obj->SetIsGeneratedFromFile(true);
 
         fmt::println("Node {} is a child to {} object.", fmt::ptr(node), fmt::ptr(parent));
@@ -62,10 +63,10 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, Object *parent) {
     aiQuaternion rotation;
     aiVector3D scale;
 
-    node->mTransformation.Decompose(position, rotation, scale);
+    node->mTransformation.Decompose(scale, rotation, position);
 
     obj->SetPosition(glm::vec3(position.x, position.y, position.z));
-    obj->SetRotation(glm::quat(rotation.x, rotation.y, rotation.z, rotation.w));
+    obj->SetRotation(glm::quat(rotation.w, rotation.x, rotation.y, rotation.z));
     obj->SetScale(glm::vec3(scale.x, scale.y, scale.z));
 
     if (node->mNumMeshes > 0) {
@@ -78,6 +79,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, Object *parent) {
 
             model->meshes.push_back(model->processMesh(mesh, scene));
         }
+
         obj->AddModelAttachment(model);
     }
 
@@ -109,11 +111,21 @@ void Object::RemoveModelAttachment(Model *model) {
 }
 
 void Object::SetParent(Object *parent) {
+    if (parent == m_Parent) {
+        return;
+    }
+
     if (m_Parent != nullptr) {
+        /* This sounds like an infinite call, but RemoveChild searches for the child, so by this call it won't exist in m_Children anymore and it would just return early. */
         m_Parent->RemoveChild(this);
     }
 
     m_Parent = parent;
+
+    if (parent != nullptr) {
+        /* Same for the other comment above. */
+        parent->AddChild(this);
+    }
 }
 
 Object *Object::GetParent() {
@@ -121,6 +133,10 @@ Object *Object::GetParent() {
 }
 
 void Object::AddChild(Object *child) {
+    if (std::find(m_Children.begin(), m_Children.end(), child) != m_Children.end()) {
+        return;
+    }
+
     m_Children.push_back(child);
 
     child->SetParent(this);
@@ -134,8 +150,8 @@ void Object::RemoveChild(Object *child) {
     auto childIter = std::find(m_Children.begin(), m_Children.end(), child);
 
     if (childIter != m_Children.end()) {
-        child->SetParent(nullptr);
         m_Children.erase(childIter);
+        child->SetParent(nullptr);
     }
 
     return;

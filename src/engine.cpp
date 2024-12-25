@@ -495,7 +495,6 @@ void Renderer::SetMouseCaptureState(bool capturing) {
 void Renderer::LoadModel(Model *model) {
     std::vector<std::future<RenderModel>> tasks;
 
-    vkDeviceWaitIdle(m_EngineDevice);
     for (Mesh &mesh : model->meshes) {
         tasks.push_back(std::async(std::launch::deferred, &Renderer::LoadMesh, this, std::ref(mesh), model, true));
     }
@@ -2687,6 +2686,22 @@ void Engine::LoadUIFile(const std::string &name) {
     }
 }
 
+void Engine::AddObject(Object *object) {
+    fmt::println("Adding Object!");
+    
+    if (m_Renderer) {
+        for (Model *model : object->GetModelAttachments()) {
+            m_Renderer->LoadModel(model);
+        }
+    }
+
+    for (Object *child : object->GetChildren()) {
+        AddObject(child);
+    }
+
+    m_Objects.push_back(object);
+}
+
 /* Import an xml scene, overwriting the current one.
     * Throws std::runtime_error and rapidxml::parse_error
 
@@ -2710,15 +2725,11 @@ bool Engine::ImportScene(const std::string &path) {
     }
     m_Objects.clear();
 
-    Object *rootObject = new Object(glm::vec3(0), glm::quat(), glm::vec3(0));
+    Object *rootObject = new Object();
 
     rootObject->ImportFromFile(path);
 
-    m_Objects.push_back(rootObject);
-
-    for (Object *obj : rootObject->GetChildren()) {
-        m_Objects.push_back(obj);
-    }
+    AddObject(rootObject);
 
     m_ScenePath = path;
 
@@ -2985,7 +2996,7 @@ void Engine::NetworkingThreadClient_Main() {
                 for (int i = 0; i < msgCount; i++) {
                     ISteamNetworkingMessage *incomingMessage = incomingMessages + (i * sizeof(ISteamNetworkingMessage));
 
-                    if (incomingMessage->GetSize() <= sizeof(int) + sizeof(size_t)) {
+                    if (incomingMessage->GetSize() < sizeof(size_t)) {
                         fmt::println("Invalid packet!");
                     } else {
                         const void *data = incomingMessage->GetData();
@@ -3168,6 +3179,8 @@ void Engine::ProcessNetworkEvents() {
                 object->SetScale(objectPacket->scale);
 
                 /* TODO: inheritance */
+
+                AddObject(object);
 
                 break;
             default:
