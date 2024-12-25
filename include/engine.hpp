@@ -488,7 +488,7 @@ private:
 
     Networking_StatePacket m_LastPacket;
 
-    /* Thank you Valve for showing me this disgusting technique. I hate it. */
+    /* I'm starting to like this m_CallbackInstance method */
 
     static Engine *m_CallbackInstance;
 

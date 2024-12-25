@@ -10,6 +10,9 @@ Object::~Object() {
 }
 
 Object::Object(glm::vec3 position, glm::quat rotation, glm::vec3 scale) {
+    HighestObjectID++;
+    SetObjectID(HighestObjectID);
+
     SetPosition(position);
     SetRotation(rotation);
     SetScale(scale);
