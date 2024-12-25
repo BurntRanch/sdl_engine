@@ -3316,7 +3316,12 @@ void Engine::SendUpdateToConnection(HSteamNetConnection connection) {
 
         if (anythingChanged) {
             statePacket.objects.push_back(objectPacket);
-            m_LastPacket.objects.at(std::distance(m_LastPacket.objects.begin(), lastPacketObjectEquivalent)) = objectPacket;
+
+            if (lastPacketObjectEquivalent != m_LastPacket.objects.end()) {
+                m_LastPacket.objects.at(std::distance(m_LastPacket.objects.begin(), lastPacketObjectEquivalent)) = objectPacket;
+            } else {
+                m_LastPacket.objects.push_back(objectPacket);
+            }
         }
     }
 
