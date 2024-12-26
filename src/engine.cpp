@@ -3366,7 +3366,7 @@ std::optional<Networking_Object> Engine::AddObjectToStatePacket(Object *object, 
 
     if (includeChildren) {
         for (Object *child : object->GetChildren()) {
-            AddObjectToStatePacket(child, statePacket, true);
+            AddObjectToStatePacket(child, statePacket, true, true);
             objectPacket.children.push_back(child->GetObjectID());
         }
     }
@@ -3390,14 +3390,14 @@ void Engine::AddObjectToStatePacketIfChanged(Object *object, Networking_StatePac
         object->GetChildren().size() != lastPacketObjectEquivalent->children.size()))
         anythingChanged = true;
 
-    if (anythingChanged) {
-        if (includeChildren) {
-            for (Object *child : object->GetChildren()) {
-                AddObjectToStatePacketIfChanged(child, statePacket, includeChildren, true);
-            }
+    if (includeChildren) {
+        for (Object *child : object->GetChildren()) {
+            AddObjectToStatePacketIfChanged(child, statePacket, includeChildren, true);
         }
+    }
 
-        auto objectPacketOptional = AddObjectToStatePacket(object, statePacket, false);
+    if (anythingChanged) {
+        auto objectPacketOptional = AddObjectToStatePacket(object, statePacket, false, isRecursive);
 
         if (!objectPacketOptional.has_value()) {
             return;
