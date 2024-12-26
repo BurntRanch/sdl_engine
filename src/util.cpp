@@ -25,8 +25,8 @@ std::vector<std::string> split(const std::string_view text, const char delim) {
     return vec;
 }
 
-Object *DeepSearchObjectTree(Object &obj, std::function<bool(Object *)> pred) {
-    for (Object *child : obj.GetChildren()) {
+Object *DeepSearchObjectTree(Object *obj, std::function<bool(Object *)> pred) {
+    for (Object *child : obj->GetChildren()) {
         if (pred(child)) {
             return child;
         }
@@ -59,6 +59,8 @@ std::vector<Networking_Object *> FilterRelatedNetworkingObjects(std::vector<Netw
             continue;
         }
     }
+
+    return relatedObjects;
 }
 
 bool intersects(const glm::vec3 &origin, const glm::vec3 &front, const std::array<glm::vec3, 2> &boundingBox) {

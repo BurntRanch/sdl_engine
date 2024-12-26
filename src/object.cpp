@@ -109,7 +109,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
     for (Uint32 i = 0; i < node->mNumChildren; i++) {
         sourceID++;
-        ProcessNode(node->mChildren[i], scene, sourceID);
+        ProcessNode(node->mChildren[i], scene, sourceID, obj);
     }
 }
 
