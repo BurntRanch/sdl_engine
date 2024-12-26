@@ -473,7 +473,10 @@ private:
     Renderer *m_Renderer = nullptr;
     bool m_NetworkingThreadShouldQuit = false;
     ISteamNetworkingSockets *m_NetworkingSockets;
+
+    HSteamNetConnection m_ServerConnection;
     std::vector<HSteamNetConnection> m_NetConnections;
+    
     HSteamListenSocket m_NetListenSocket = k_HSteamListenSocket_Invalid;
     HSteamNetPollGroup m_NetPollGroup = k_HSteamNetPollGroup_Invalid;
 
