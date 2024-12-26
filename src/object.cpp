@@ -9,9 +9,17 @@ Object::~Object() {
     
 }
 
-Object::Object(glm::vec3 position, glm::quat rotation, glm::vec3 scale) {
-    HighestObjectID++;
-    SetObjectID(HighestObjectID);
+Object::Object(glm::vec3 position, glm::quat rotation, glm::vec3 scale, int objectID) {
+    if (objectID == -1) {
+        HighestObjectID++;
+        SetObjectID(HighestObjectID);
+    } else {
+        SetObjectID(objectID);
+
+        if (objectID > HighestObjectID) {
+            HighestObjectID = objectID;
+        }
+    }
 
     SetPosition(position);
     SetRotation(rotation);
@@ -28,12 +36,23 @@ void Object::ImportFromFile(const std::string &path) {
 
     m_SourceFile = path;
     m_GeneratedFromFile = true;
+    m_SourceID = 0;
 
-    ProcessNode(scene->mRootNode, scene);
+    int sourceID = 0;
+
+    ProcessNode(scene->mRootNode, scene, sourceID);
 }
 
 std::string Object::GetSourceFile() {
     return m_SourceFile;
+}
+
+int Object::GetSourceID() {
+    return m_SourceID;
+}
+
+void Object::SetSourceID(int sourceID) {
+    m_SourceID = sourceID;
 }
 
 void Object::SetIsGeneratedFromFile(bool isGeneratedFromFile) {
@@ -45,7 +64,7 @@ bool Object::IsGeneratedFromFile() {
 }
 
 /* if parent is nullptr, that must mean this is the rootNode. */
-void Object::ProcessNode(aiNode *node, const aiScene *scene, Object *parent) {
+void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Object *parent) {
     fmt::println("Processing node!");
 
     Object *obj = this;
@@ -56,6 +75,8 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, Object *parent) {
         obj->SetParent(parent);
 
         obj->SetIsGeneratedFromFile(true);
+
+        obj->SetSourceID(sourceID);
 
         fmt::println("Node {} is a child to {} object.", fmt::ptr(node), fmt::ptr(parent));
     }
@@ -87,7 +108,8 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, Object *parent) {
     }
 
     for (Uint32 i = 0; i < node->mNumChildren; i++) {
-        ProcessNode(node->mChildren[i], scene, obj);
+        sourceID++;
+        ProcessNode(node->mChildren[i], scene, sourceID);
     }
 }
 
@@ -161,8 +183,7 @@ void Object::RemoveChild(Object *child) {
 }
 
 void Object::SetCameraAttachment(Camera *camera) {
-    /* TODO: same as AddModelAttachment, also consider making it only 1 model attachment per object. */
-
+    /* TODO: make sure this camera is not attached to any other object first, also consider making it only 1 model attachment per object (unrelated to cameras). */
     m_CameraAttachment = camera;
 }
 

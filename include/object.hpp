@@ -8,7 +8,7 @@ class Object {
 public:
     ~Object();
 
-    Object(glm::vec3 position = glm::vec3(0.0f), glm::quat rotation = glm::quat(0.0f, 0.0f, 0.0f, 1.0f), glm::vec3 scale = glm::vec3(1.0f));
+    Object(glm::vec3 position = glm::vec3(0.0f), glm::quat rotation = glm::quat(0.0f, 0.0f, 0.0f, 1.0f), glm::vec3 scale = glm::vec3(1.0f), int objectID = -1);
 
     /* Loads a model/scene file with assimp, preferrably glTF 2.0 files.
         Nodes are converted to objects and their meshes are converted into a Model attachment. */
@@ -17,6 +17,10 @@ public:
     /* Gets the source path if the object had ImportFromFile called on it.
         Returns empty if the object didn't come from a file or is the child of an object that did. */
     std::string GetSourceFile();
+
+    /* If IsGeneratedFromFile is true, this will be a representation of the node in the 3D model. This can be used to link with a Networking_Object representation where the ObjectIDs might not match. */
+    int GetSourceID();
+    void SetSourceID(int sourceID);
 
     void AddModelAttachment(Model *model);
     std::vector<Model *> GetModelAttachments();
@@ -51,13 +55,14 @@ public:
     int GetObjectID();
     void SetObjectID(int objectID);
 private:
-    void ProcessNode(aiNode *node, const aiScene *scene, Object *parent = nullptr);
+    void ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Object *parent = nullptr);
 
     int m_ObjectID = -1;
 
     /* If the object was generated from a parent object importing, this will be true. */
     bool m_GeneratedFromFile = false;
     std::string m_SourceFile;
+    int m_SourceID = 0;
 
     Object *m_Parent = nullptr;
 

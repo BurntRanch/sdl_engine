@@ -3175,6 +3175,12 @@ void Engine::StopHostingGameServer() {
 void Engine::ProcessNetworkEvents() {
     std::lock_guard<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
 
+    /* Objects that were created as a result of ImportFromFile may not have the same ObjectIDs, and will be hard to track. So we store them to compare their SourceIDs */
+    std::vector<Networking_Object *> objectsFromImportedObject;
+
+    /* Doesn't include elements that belong in objectsFromImportedObject */
+    std::vector<Object *> previousObjects;
+
     while (!m_NetworkingEvents.empty()) {
         Networking_Event &event = m_NetworkingEvents[0];
 
@@ -3190,6 +3196,36 @@ void Engine::ProcessNetworkEvents() {
                 if (objectPacket->isGeneratedFromFile && objectPacket->objectSourceFile != "") {
                     /* TODO: Sanitize */
                     object->ImportFromFile(objectPacket->objectSourceFile);
+
+                    std::vector<Networking_Object *> relatedObjects = FilterRelatedNetworkingObjects(objectsFromImportedObject, objectPacket);
+
+                    for (Networking_Object *generatedObject : relatedObjects) {
+                        Object *childEquivalent = DeepSearchObjectTree(object, [generatedObject] (Object *child) { return child->GetSourceID() == generatedObject->objectSourceID; });
+                        UTILASSERT(childEquivalent);
+
+                        childEquivalent->SetObjectID(generatedObject->ObjectID);
+
+                        childEquivalent->SetPosition(generatedObject->position);
+                        childEquivalent->SetRotation(generatedObject->rotation);
+                        childEquivalent->SetScale(generatedObject->scale);
+
+                        /* assuming its not all generated */
+                        for (int &childID : generatedObject->children) {
+                            auto previousObjectPtr = std::find_if(previousObjects.begin(), previousObjects.end(), [childID] (Object *&packet) { return packet->GetObjectID() == childID; });
+
+                            if (previousObjectPtr == previousObjects.end()) {
+                                continue;
+                            }
+
+                            Object *previousObject = *previousObjectPtr;
+
+                            previousObject->SetParent(childEquivalent);
+                        }
+                    }
+                } else if (objectPacket->isGeneratedFromFile) {
+                    objectsFromImportedObject.push_back(objectPacket);
+                    
+                    continue;
                 }
 
                 object->SetObjectID(objectPacket->ObjectID);
@@ -3198,7 +3234,20 @@ void Engine::ProcessNetworkEvents() {
                 object->SetRotation(objectPacket->rotation);
                 object->SetScale(objectPacket->scale);
 
-                /* TODO: inheritance */
+                /* assuming its not all generated */
+                for (int &childID : objectPacket->children) {
+                    auto previousObjectPtr = std::find_if(previousObjects.begin(), previousObjects.end(), [childID] (Object *&packet) { return packet->GetObjectID() == childID; });
+
+                    if (previousObjectPtr == previousObjects.end()) {
+                        continue;
+                    }
+
+                    Object *previousObject = *previousObjectPtr;
+
+                    previousObject->SetParent(object);
+                }
+
+                previousObjects.push_back(object);
 
                 AddObject(object);
 
@@ -3239,7 +3288,7 @@ Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &seriali
 }
 
 void Engine::DeserializeNetworkingObject(std::vector<std::byte> &serializedObjectPacket, Networking_Object &dest) {
-    /* objectID + position/rotation/scale + modelAttachments size */
+    /* objectID + position/rotation/scale + children size */
     UTILASSERT(serializedObjectPacket.size() >= sizeof(int) + (sizeof(float) * 9) + sizeof(size_t));
 
     Deserialize(serializedObjectPacket, dest.ObjectID);
@@ -3258,7 +3307,11 @@ void Engine::DeserializeNetworkingObject(std::vector<std::byte> &serializedObjec
     Deserialize(serializedObjectPacket, dest.scale.z);
 
     Deserialize(serializedObjectPacket, dest.isGeneratedFromFile);
-    Deserialize(serializedObjectPacket, dest.objectSourceFile);
+
+    if (dest.isGeneratedFromFile) {
+        Deserialize(serializedObjectPacket, dest.objectSourceFile);
+        Deserialize(serializedObjectPacket, dest.objectSourceID);
+    }
 
     size_t childrenListSize;
     Deserialize(serializedObjectPacket, childrenListSize);
@@ -3271,31 +3324,79 @@ void Engine::DeserializeNetworkingObject(std::vector<std::byte> &serializedObjec
     }
 }
 
+std::optional<Networking_Object> Engine::AddObjectToStatePacket(Object *object, Networking_StatePacket &statePacket, bool includeChildren, bool isRecursive) {
+    if (object->GetParent() != nullptr && !isRecursive) {
+        return {};
+    }
+
+    Networking_Object objectPacket{};
+
+    objectPacket.ObjectID = object->GetObjectID();
+            
+    objectPacket.position = object->GetPosition();
+    objectPacket.rotation = object->GetRotation();
+    objectPacket.scale = object->GetScale();
+
+    objectPacket.objectSourceFile = object->GetSourceFile();
+    objectPacket.isGeneratedFromFile = object->IsGeneratedFromFile();
+    objectPacket.objectSourceID = object->GetSourceID();
+
+    /* Put children before the parent. */
+
+    if (includeChildren) {
+        for (Object *child : object->GetChildren()) {
+            AddObjectToStatePacket(child, statePacket, true);
+            objectPacket.children.push_back(child->GetObjectID());
+        }
+    }
+
+    statePacket.objects.push_back(objectPacket);
+
+    return objectPacket;
+}
+
+void Engine::AddObjectToStatePacketIfChanged(Object *object, Networking_StatePacket &statePacket, bool includeChildren, bool isRecursive) {
+    auto lastPacketObjectEquivalent = std::find_if(m_LastPacket.objects.begin(), m_LastPacket.objects.end(), [object] (Networking_Object &obj) { return obj.ObjectID == object->GetObjectID(); });
+    bool anythingChanged = lastPacketObjectEquivalent == m_LastPacket.objects.end();
+
+    if (!anythingChanged && (
+        object->GetPosition() != lastPacketObjectEquivalent->position ||
+        object->GetRotation() != lastPacketObjectEquivalent->rotation ||
+        object->GetScale() != lastPacketObjectEquivalent->scale ||
+        object->IsGeneratedFromFile() != lastPacketObjectEquivalent->isGeneratedFromFile ||
+        object->GetSourceFile() != lastPacketObjectEquivalent->objectSourceFile ||
+        object->GetSourceID() != lastPacketObjectEquivalent->objectSourceID ||
+        object->GetChildren().size() != lastPacketObjectEquivalent->children.size()))
+        anythingChanged = true;
+
+    if (anythingChanged) {
+        if (includeChildren) {
+            for (Object *child : object->GetChildren()) {
+                AddObjectToStatePacketIfChanged(child, statePacket, includeChildren, true);
+            }
+        }
+
+        auto objectPacketOptional = AddObjectToStatePacket(object, statePacket, false);
+
+        if (!objectPacketOptional.has_value()) {
+            return;
+        }
+
+        Networking_Object objectPacket = objectPacketOptional.value();
+
+        if (lastPacketObjectEquivalent != m_LastPacket.objects.end()) {
+            m_LastPacket.objects.at(std::distance(m_LastPacket.objects.begin(), lastPacketObjectEquivalent)) = objectPacket;
+        } else {
+            m_LastPacket.objects.push_back(objectPacket);
+        }
+    }
+}
+
 void Engine::SendFullUpdateToConnection(HSteamNetConnection connection) {
     Networking_StatePacket statePacket{};
     
     for (Object *object : m_Objects) {
-        Networking_Object objectPacket{};
-
-        /* list of objects to go through, expands for its children too. */
-        std::vector<Object *> objects;
-
-        while (!objects.empty()) {
-            objectPacket.ObjectID = object->GetObjectID();
-            
-            objectPacket.position = object->GetPosition();
-            objectPacket.rotation = object->GetRotation();
-            objectPacket.scale = object->GetScale();
-
-            objectPacket.objectSourceFile = object->GetSourceFile();
-
-            /* ugly workaround over the fact we cant include objectPacket.children in a lambda */
-            std::vector<int> *childrenList = &objectPacket.children;
-            
-            std::for_each(object->GetChildren().begin(), object->GetChildren().end(), [childrenList] (Object *obj) { childrenList->push_back(obj->GetObjectID()); });
-
-            statePacket.objects.push_back(objectPacket);
-        }
+        AddObjectToStatePacket(object, statePacket);
     }
 
     std::vector<std::byte> serializedPacket;
@@ -3316,42 +3417,7 @@ void Engine::SendUpdateToConnection(HSteamNetConnection connection) {
     Networking_StatePacket statePacket{};
     
     for (Object *object : m_Objects) {
-        Networking_Object objectPacket{};
-
-        auto lastPacketObjectEquivalent = std::find_if(m_LastPacket.objects.begin(), m_LastPacket.objects.end(), [object] (Networking_Object &obj) { return obj.ObjectID == object->GetObjectID(); });
-        bool anythingChanged = lastPacketObjectEquivalent == m_LastPacket.objects.end();
-
-        objectPacket.ObjectID = object->GetObjectID();
-        
-        objectPacket.position = object->GetPosition();
-        objectPacket.rotation = object->GetRotation();
-        objectPacket.scale = object->GetScale();
-
-        objectPacket.isGeneratedFromFile = object->IsGeneratedFromFile();
-        objectPacket.objectSourceFile = object->GetSourceFile();
-
-        for (Object *obj : object->GetChildren()) { 
-            objectPacket.children.push_back(obj->GetObjectID()); 
-        }
-        
-        if (!anythingChanged && (
-            objectPacket.position != lastPacketObjectEquivalent->position ||
-            objectPacket.rotation != lastPacketObjectEquivalent->rotation ||
-            objectPacket.scale != lastPacketObjectEquivalent->scale ||
-            objectPacket.isGeneratedFromFile != lastPacketObjectEquivalent->isGeneratedFromFile ||
-            objectPacket.objectSourceFile != lastPacketObjectEquivalent->objectSourceFile ||
-            objectPacket.children.size() != lastPacketObjectEquivalent->children.size()))
-            anythingChanged = true;
-
-        if (anythingChanged) {
-            statePacket.objects.push_back(objectPacket);
-
-            if (lastPacketObjectEquivalent != m_LastPacket.objects.end()) {
-                m_LastPacket.objects.at(std::distance(m_LastPacket.objects.begin(), lastPacketObjectEquivalent)) = objectPacket;
-            } else {
-                m_LastPacket.objects.push_back(objectPacket);
-            }
-        }
+        AddObjectToStatePacketIfChanged(object, statePacket);
     }
 
     std::vector<std::byte> serializedPacket;
@@ -3382,7 +3448,11 @@ void Engine::SerializeNetworkingObject(Networking_Object &objectPacket, std::vec
     Serialize(objectPacket.scale.z, dest);
 
     Serialize(objectPacket.isGeneratedFromFile, dest);
-    Serialize(objectPacket.objectSourceFile, dest);
+
+    if (objectPacket.isGeneratedFromFile) {
+        Serialize(objectPacket.objectSourceFile, dest);
+        Serialize(objectPacket.objectSourceID, dest);
+    }
 
     Serialize(objectPacket.children.size(), dest);
 

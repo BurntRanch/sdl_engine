@@ -387,6 +387,7 @@ struct Networking_Object {
 
     bool isGeneratedFromFile;
     std::string objectSourceFile;
+    int objectSourceID;
 
     /* List of objectIDs */
     std::vector<int> children;
@@ -500,7 +501,13 @@ private:
         m_CallbackInstance->ConnectionStatusChanged(callbackInfo);
     }
 
-    void ExecutePacket(Networking_StatePacket &packet);
+    /* Do not set isRecursive to true, This is only there to recursively add objs children BEFORE obj. This is a requirement in the protocol.
+     * The return is optional but that doesn't mean you have to put it in the statePacket yourself. It's just there incase you want it.
+    */
+    std::optional<Networking_Object> AddObjectToStatePacket(Object *obj, Networking_StatePacket &statePacket, bool includeChildren = true, bool isRecursive = false);
+
+    /* Do not set isRecursive to true, This is only there to recursively add objs children BEFORE obj. This is a requirement in the protocol. */
+    void AddObjectToStatePacketIfChanged(Object *obj, Networking_StatePacket &statePacket, bool includeChildren = true, bool isRecursive = false);
 
     /* Deserialization */
     Networking_StatePacket DeserializePacket(std::vector<std::byte> &serializedPacket);
