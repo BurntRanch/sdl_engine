@@ -3036,9 +3036,9 @@ void Engine::NetworkingThreadClient_Main() {
                                 continue;
                             }
 
-                            Object *obj = m_Objects.at(std::distance(m_Objects.begin(), it));
+                            // Object *obj = m_Objects.at(std::distance(m_Objects.begin(), it));
 
-                            UTILASSERT(obj);
+                            // UTILASSERT(obj);
 
                             event.type = NETWORKING_UPDATE_OBJECT;
 
@@ -3250,6 +3250,20 @@ void Engine::ProcessNetworkEvents() {
                 previousObjects.push_back(object);
 
                 AddObject(object);
+
+                break;
+            case NETWORKING_UPDATE_OBJECT:
+                objectPacket = &event.packet.objects[event.objectIdx];
+
+                object = GetObjectByID(objectPacket->ObjectID);
+                UTILASSERT(object);
+
+                object->SetPosition(objectPacket->position);
+                object->SetRotation(objectPacket->rotation);
+                object->SetScale(objectPacket->scale);
+
+                /* TODO: inheritance, and tons of other stuff to synchronize. */
+                /* note to self: this doesn't seem to end at all.. so many things to synchronize in so many different ways.... */
 
                 break;
             default:

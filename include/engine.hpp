@@ -404,6 +404,7 @@ enum Networking_EventType {
     NETWORKING_UPDATE_OBJECT,
 };
 
+/* TODO: Stop duplicating the packet so many times and instead consider passing the Networking_Object directly. */
 /* This isn't meant to be sent over the network, this is meant to be sent between the NetworkThread and the render thread */
 struct Networking_Event {
     Networking_EventType type;
