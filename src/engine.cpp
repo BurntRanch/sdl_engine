@@ -2608,7 +2608,7 @@ void Engine::InitRenderer(Settings &settings, const Camera *primaryCamera) {
     m_Renderer->Init();
 
     m_Renderer->RegisterSDLEventListener(std::bind(&Engine::CheckButtonClicks, this, std::placeholders::_1), SDL_EVENT_MOUSE_BUTTON_UP);
-    m_Renderer->RegisterUpdateFunction(std::bind(&Engine::ProcessNetworkEvents, this));
+    m_Renderer->RegisterUpdateFunction(std::bind(&Engine::ProcessNetworkEvents, this, m_NetworkingEvents));
 }
 
 void Engine::InitNetworking() {
@@ -2625,8 +2625,24 @@ void Engine::RegisterUIButtonListener(const std::function<void(std::string)> lis
     m_UIButtonListeners.push_back(listener);
 }
 
-void Engine::RegisterTickUpdateHandler(const std::function<void(int)> handler) {
-    m_TickUpdateHandlers.push_back(handler);
+void Engine::RegisterTickUpdateHandler(const std::function<void(int)> handler, NetworkingThreadStatus status) {
+    NetworkingThreadState *state = nullptr;
+
+    switch (status) {
+        case NETWORKING_THREAD_ACTIVE_CLIENT:
+            state = &m_NetworkingThreadStates[0];
+            break;
+        case NETWORKING_THREAD_ACTIVE_SERVER:
+            state = &m_NetworkingThreadStates[1];
+            break;
+        case NETWORKING_THREAD_INACTIVE:
+        default:
+            break;
+    }
+
+    if (state != nullptr) {
+        state->tickUpdateHandlers.push_back(handler);
+    }
 }
 
 Renderer *Engine::GetRenderer() {
@@ -2881,16 +2897,21 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
         case k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
             if (callbackInfo->m_eOldState == k_ESteamNetworkingConnectionState_Connected)
 			{
-                if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_SERVER) {
-                    auto conn = std::find(m_NetConnections.begin(), m_NetConnections.end(), callbackInfo->m_hConn);
-                    UTILASSERT(conn != m_NetConnections.end());
+                if (m_NetworkingThreadStates[1].status & NETWORKING_THREAD_ACTIVE_SERVER) {
+                    NetworkingThreadState &state = m_NetworkingThreadStates[1];
 
-                    m_NetConnections.erase(conn);
+                    auto conn = std::find(state.netConnections.begin(), state.netConnections.end(), callbackInfo->m_hConn);
+                    UTILASSERT(conn != state.netConnections.end());
+
+                    state.netConnections.erase(conn);
                 /* if its a client */
                 } else {
-                    UTILASSERT(m_ServerConnection == callbackInfo->m_hConn);
+                    UTILASSERT(m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT);
 
-                    m_ServerConnection = k_HSteamNetConnection_Invalid;
+                    NetworkingThreadState &state = m_NetworkingThreadStates[0];
+                    UTILASSERT(state.netConnections.size() == 1 && state.netConnections[0] == callbackInfo->m_hConn);
+
+                    state.netConnections.erase(state.netConnections.begin());
                 }
 
                 m_NetworkingSockets->CloseConnection(callbackInfo->m_hConn, 0, nullptr, false);
@@ -2898,11 +2919,13 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
 
             break;
         case k_ESteamNetworkingConnectionState_Connecting:
-            if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_SERVER) {
+            if (m_NetworkingThreadStates[1].status & NETWORKING_THREAD_ACTIVE_SERVER) {
                 fmt::println("We're getting a connection!");
 
+                NetworkingThreadState &state = m_NetworkingThreadStates[1];
+
                 /* This callback only happens when a new client is connecting. */
-                UTILASSERT(std::find(m_NetConnections.begin(), m_NetConnections.end(), callbackInfo->m_hConn) == m_NetConnections.end());
+                UTILASSERT(std::find(state.netConnections.begin(), state.netConnections.end(), callbackInfo->m_hConn) == state.netConnections.end());
 
                 if (m_NetworkingSockets->AcceptConnection(callbackInfo->m_hConn) != k_EResultOK) {
                     m_NetworkingSockets->CloseConnection(callbackInfo->m_hConn, 0, nullptr, false);
@@ -2916,11 +2939,14 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                     break;
                 }
 
-                SendFullUpdateToConnection(callbackInfo->m_hConn);
+                SendFullUpdateToConnection(callbackInfo->m_hConn, state.tickNumber);
 
-                m_NetConnections.push_back(callbackInfo->m_hConn);
+                state.netConnections.push_back(callbackInfo->m_hConn);
             } else {
-                m_ServerConnection = callbackInfo->m_hConn;
+                UTILASSERT(m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT);
+                UTILASSERT(m_NetworkingThreadStates[0].netConnections.size() < 1);
+
+                m_NetworkingThreadStates[0].netConnections.push_back(callbackInfo->m_hConn);
             }
 
             break;
@@ -2958,29 +2984,38 @@ void Engine::UnregisterUIButton(UI::Button *button) {
 }
 
 void Engine::InitNetworkingThread(NetworkingThreadStatus status) {
-    if (m_NetworkingThreadStatus != NETWORKING_THREAD_INACTIVE) {
-        return;
-    }
 
     fmt::println("Initializing network thread to {}!", (int)status);
 
     if (status == NETWORKING_THREAD_ACTIVE_CLIENT) {
-        m_NetworkingThread = std::thread(&Engine::NetworkingThreadClient_Main, this);
+        NetworkingThreadState &state = m_NetworkingThreadStates[0];
+
+        if (state.status != NETWORKING_THREAD_INACTIVE) {
+            return;
+        }
+
+        state.thread = std::thread(&Engine::NetworkingThreadClient_Main, this);
     } else if (status == NETWORKING_THREAD_ACTIVE_SERVER) {
-        m_NetworkingThread = std::thread(&Engine::NetworkingThreadServer_Main, this);
+        NetworkingThreadState &state = m_NetworkingThreadStates[1];
+
+        if (state.status != NETWORKING_THREAD_INACTIVE) {
+            return;
+        }
+
+        state.thread = std::thread(&Engine::NetworkingThreadServer_Main, this);
     }
 }
 
-void Engine::NetworkingThreadClient_Main() {
+void Engine::NetworkingThreadClient_Main(NetworkingThreadState &state) {
     fmt::println("Started client networking thread!");
-    m_NetworkingThreadStatus |= NETWORKING_THREAD_ACTIVE_CLIENT;
+    state.status |= NETWORKING_THREAD_ACTIVE_CLIENT;
 
     using namespace std::chrono;
 
     high_resolution_clock::time_point lastTickTime = high_resolution_clock::now();
     double accumulativeTickTime = 0;
 
-    while (!m_NetworkingThreadShouldQuit) {
+    while (!state.shouldQuit) {
         high_resolution_clock::time_point now = high_resolution_clock::now();
 
         double tickDeltaTime = (duration_cast<duration<double>>(now - lastTickTime).count());
@@ -2995,10 +3030,10 @@ void Engine::NetworkingThreadClient_Main() {
 
         accumulativeTickTime -= (1.0f / 64.0f);
 
-        m_TickNumberClient++;
+        state.tickNumber++;
         
-        for (auto handler : m_TickUpdateHandlers) {
-            handler(m_TickNumberClient);
+        for (auto handler : state.tickUpdateHandlers) {
+            handler(state.tickNumber);
         }
 
         m_CallbackInstance = this;
@@ -3006,7 +3041,7 @@ void Engine::NetworkingThreadClient_Main() {
 
         /* Receiving */
         ISteamNetworkingMessage *incomingMessages;
-        int msgCount = m_NetworkingSockets->ReceiveMessagesOnConnection(m_ServerConnection, &incomingMessages, 1);
+        int msgCount = m_NetworkingSockets->ReceiveMessagesOnConnection(state.netConnections[0], &incomingMessages, 1);
 
         if (msgCount < 0) {
             throw std::runtime_error("Error receiving messages from server!");
@@ -3027,33 +3062,43 @@ void Engine::NetworkingThreadClient_Main() {
                     fmt::println("New state packet just dropped! {} objects sent by server", packet.objects.size());
 
                     /* add a dummy type */
-                    Networking_Event event{NETWORKING_NULL, 0, packet};
+                    Networking_Event event{NETWORKING_NULL, {}, {}};
                     std::lock_guard<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
 
-                    for (Networking_Object &networkingObject : packet.objects) {
-                        auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [networkingObject] (Object *obj) { return obj->GetObjectID() == networkingObject.ObjectID; });
+                    if (state.lastSyncedTickNumber == -1) {
+                        event.type = NETWORKING_INITIAL_UPDATE;
+                        event.packet = packet;
 
-                        /* If the scene changed, we should wait until the scene is properly loaded */
-                        if (it == m_Objects.end()) {
-                            event.type = NETWORKING_NEW_OBJECT;
-
-                            m_NetworkingEvents.push_back(event);
-
-                            event.objectIdx++;
-
-                            continue;
-                        }
-
-                        // Object *obj = m_Objects.at(std::distance(m_Objects.begin(), it));
-
-                        // UTILASSERT(obj);
-
-                        event.type = NETWORKING_UPDATE_OBJECT;
+                        /* Don't forget this, this could be used for prediction in the future. */
+                        state.tickNumber = packet.tickNumber;
 
                         m_NetworkingEvents.push_back(event);
+                    } else {
+                        for (Networking_Object &networkingObject : packet.objects) {
+                            auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [networkingObject] (Object *obj) { return obj->GetObjectID() == networkingObject.ObjectID; });
 
-                        event.objectIdx++;
+                            event.object = networkingObject;
+
+                            /* If the scene changed, we should wait until the scene is properly loaded */
+                            if (it == m_Objects.end()) {
+                                event.type = NETWORKING_NEW_OBJECT;
+
+                                m_NetworkingEvents.push_back(event);
+
+                                continue;
+                            }
+
+                            // Object *obj = m_Objects.at(std::distance(m_Objects.begin(), it));
+
+                            // UTILASSERT(obj);
+
+                            event.type = NETWORKING_UPDATE_OBJECT;
+
+                            m_NetworkingEvents.push_back(event);
+                        }
                     }
+
+                    state.lastSyncedTickNumber = packet.tickNumber;
                 }
                 
                 incomingMessage->Release();
@@ -3067,25 +3112,29 @@ void Engine::NetworkingThreadClient_Main() {
 
     fmt::println("Stopping client networking thread!");
 
-    m_NetworkingThreadStatus &= ~NETWORKING_THREAD_ACTIVE_CLIENT;
+    DisconnectFromServer();
+    state.status &= ~NETWORKING_THREAD_ACTIVE_CLIENT;
+    state.lastSyncedTickNumber = -1;
+    state.tickNumber = -1;
+    state.shouldQuit = false;
 }
 
 
 
-void Engine::NetworkingThreadServer_Main() {
+void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
     if (!m_NetListenSocket) {
         throw std::runtime_error("Networking Thread initialized with no networking connection!");
     }
 
     fmt::println("Started server networking thread!");
-    m_NetworkingThreadStatus |= NETWORKING_THREAD_ACTIVE_SERVER;
+    state.status |= NETWORKING_THREAD_ACTIVE_SERVER;
 
     using namespace std::chrono;
 
     high_resolution_clock::time_point lastTickTime = high_resolution_clock::now();
     double accumulativeTickTime = 0;
 
-    while (!m_NetworkingThreadShouldQuit) {
+    while (!state.shouldQuit) {
         high_resolution_clock::time_point now = high_resolution_clock::now();
 
         double tickDeltaTime = (duration_cast<duration<double>>(now - lastTickTime).count());
@@ -3100,10 +3149,10 @@ void Engine::NetworkingThreadServer_Main() {
 
         accumulativeTickTime -= (1.0f / 64.0f);
 
-        m_TickNumberServer++;
+        state.tickNumber++;
         
-        for (auto handler : m_TickUpdateHandlers) {
-            handler(m_TickNumberServer);
+        for (auto handler : state.tickUpdateHandlers) {
+            handler(state.tickNumber);
         }
 
         m_CallbackInstance = this;
@@ -3129,8 +3178,8 @@ void Engine::NetworkingThreadServer_Main() {
             }
         }
 
-        for (HSteamNetConnection &netConnection : m_NetConnections) {
-            SendUpdateToConnection(netConnection);
+        for (HSteamNetConnection &netConnection : state.netConnections) {
+            SendUpdateToConnection(netConnection, state.tickNumber);
         }
 
         lastTickTime = now;
@@ -3138,38 +3187,39 @@ void Engine::NetworkingThreadServer_Main() {
 
     fmt::println("Stopping server networking thread!");
 
-    m_NetworkingThreadStatus &= ~NETWORKING_THREAD_ACTIVE_SERVER;
+    StopHostingGameServer();
+    state.status &= ~NETWORKING_THREAD_ACTIVE_SERVER;
+    state.lastSyncedTickNumber = -1;
+    state.tickNumber = -1;
+    state.shouldQuit = false;
 }
 
 void Engine::DisconnectFromServer() {
-    if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_CLIENT) {
-        m_NetworkingThreadShouldQuit = true;
+    NetworkingThreadState &state = m_NetworkingThreadStates[0];
 
-        m_NetworkingThread.join();
+    UTILASSERT(state.netConnections.size() == 1);
 
-        /* TODO: send a goodbye message */
-        m_NetworkingSockets->CloseConnection(m_ServerConnection, 0, nullptr, true);
-        m_ServerConnection = k_HSteamNetConnection_Invalid;
-    }
+    /* TODO: send a goodbye message */
+    m_NetworkingSockets->CloseConnection(state.netConnections[0], 0, nullptr, true);
 }
 
 void Engine::DisconnectClientFromServer(HSteamNetConnection connection) {
-    auto it = std::find(m_NetConnections.begin(), m_NetConnections.end(), connection);
-    UTILASSERT(it != m_NetConnections.end());
+    NetworkingThreadState &state = m_NetworkingThreadStates[1];
+
+    auto it = std::find(state.netConnections.begin(), state.netConnections.end(), connection);
+    UTILASSERT(it != state.netConnections.end());
 
     m_NetworkingSockets->CloseConnection(connection, 0, nullptr, true);
 
-    m_NetConnections.erase(it);
+    state.netConnections.erase(it);
 }
 
 void Engine::StopHostingGameServer() {
-    if (m_NetworkingThreadStatus & NETWORKING_THREAD_ACTIVE_SERVER) {
-        m_NetworkingThreadShouldQuit = true;
+    NetworkingThreadState &state = m_NetworkingThreadStates[1];
 
-        m_NetworkingThread.join();
-
-        while (m_NetConnections.size() != 0) {
-            DisconnectClientFromServer(m_NetConnections[0]);
+    if (state.status & NETWORKING_THREAD_ACTIVE_SERVER) {
+        while (state.netConnections.size() != 0) {
+            DisconnectClientFromServer(state.netConnections[0]);
         }
 
         if (m_NetListenSocket != k_HSteamListenSocket_Invalid) {
@@ -3178,7 +3228,7 @@ void Engine::StopHostingGameServer() {
     }
 }
 
-void Engine::ProcessNetworkEvents() {
+void Engine::ProcessNetworkEvents(std::vector<Networking_Event> &networkingEvents) {
     std::lock_guard<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
 
     /* Objects that were created as a result of ImportFromFile may not have the same ObjectIDs, and will be hard to track. So we store them to compare their SourceIDs */
@@ -3187,17 +3237,32 @@ void Engine::ProcessNetworkEvents() {
     /* Doesn't include elements that belong in objectsFromImportedObject */
     std::vector<Object *> previousObjects;
 
-    while (!m_NetworkingEvents.empty()) {
-        Networking_Event &event = m_NetworkingEvents[0];
+    /* only for initial updates */
+    std::vector<Networking_Event> newEvents;
+
+    while (!networkingEvents.empty()) {
+        Networking_Event &event = networkingEvents[0];
 
         Object *object;
         Networking_Object *objectPacket;
 
         switch (event.type) {
+            case NETWORKING_INITIAL_UPDATE:
+                /* event.packet MUST be set, This will automatically error out for us in the rare case of it not actually being set. */
+                for (Networking_Object &object : event.packet.value().objects) {
+                    Networking_Event event;
+
+                    event.type = NETWORKING_NEW_OBJECT;
+                    event.object = object;
+
+                    newEvents.push_back(event);
+                }
+
+                ProcessNetworkEvents(newEvents);
             case NETWORKING_NEW_OBJECT:
                 object = new Object();
 
-                objectPacket = &event.packet.objects[event.objectIdx];
+                objectPacket = &event.object.value();
 
                 if (objectPacket->isGeneratedFromFile && objectPacket->objectSourceFile != "") {
                     /* TODO: Sanitize */
@@ -3260,7 +3325,7 @@ void Engine::ProcessNetworkEvents() {
 
                 break;
             case NETWORKING_UPDATE_OBJECT:
-                objectPacket = &event.packet.objects[event.objectIdx];
+                objectPacket = &event.object.value();
 
                 object = GetObjectByID(objectPacket->ObjectID);
                 UTILASSERT(object);
@@ -3277,7 +3342,7 @@ void Engine::ProcessNetworkEvents() {
                 break;
         }
 
-        m_NetworkingEvents.erase(m_NetworkingEvents.begin());
+        networkingEvents.erase(networkingEvents.begin());
     }
 }
 
@@ -3293,6 +3358,8 @@ Object *Engine::GetObjectByID(int ObjectID) {
 
 Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &serializedPacket) {
     Networking_StatePacket statePacket{};
+
+    Deserialize(serializedPacket, statePacket.tickNumber);
 
     size_t objectsCount;
     Deserialize(serializedPacket, objectsCount);
@@ -3413,14 +3480,18 @@ void Engine::AddObjectToStatePacketIfChanged(Object *object, Networking_StatePac
     }
 }
 
-void Engine::SendFullUpdateToConnection(HSteamNetConnection connection) {
+void Engine::SendFullUpdateToConnection(HSteamNetConnection connection, int tickNumber) {
     Networking_StatePacket statePacket{};
     
+    statePacket.tickNumber = tickNumber;
+
     for (Object *object : m_Objects) {
         AddObjectToStatePacket(object, statePacket);
     }
 
     std::vector<std::byte> serializedPacket;
+    
+    Serialize(statePacket.tickNumber, serializedPacket);
 
     Serialize(statePacket.objects.size(), serializedPacket);
     
@@ -3434,14 +3505,18 @@ void Engine::SendFullUpdateToConnection(HSteamNetConnection connection) {
 }
 
 
-void Engine::SendUpdateToConnection(HSteamNetConnection connection) {
+void Engine::SendUpdateToConnection(HSteamNetConnection connection, int tickNumber) {
     Networking_StatePacket statePacket{};
+
+    statePacket.tickNumber = tickNumber;
     
     for (Object *object : m_Objects) {
         AddObjectToStatePacketIfChanged(object, statePacket);
     }
 
     std::vector<std::byte> serializedPacket;
+
+    Serialize(statePacket.tickNumber, serializedPacket);
 
     Serialize(statePacket.objects.size(), serializedPacket);
     

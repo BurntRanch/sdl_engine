@@ -394,12 +394,14 @@ struct Networking_Object {
 };
 
 struct Networking_StatePacket {
+    int tickNumber;
+
     std::vector<Networking_Object> objects;
 };
 
 enum Networking_EventType {
     NETWORKING_NULL,
-    NETWORKING_SCENE_CHANGED,
+    NETWORKING_INITIAL_UPDATE,  /* If we just connected to the server */
     NETWORKING_NEW_OBJECT,
     NETWORKING_UPDATE_OBJECT,
 };
@@ -409,10 +411,13 @@ enum Networking_EventType {
 struct Networking_Event {
     Networking_EventType type;
 
-    /* Index of the object, only set if type == NETWORKING_NEW_OBJECT or NETWORKING_UPDATE_OBJECT*/
-    int objectIdx;
+    // /* Index of the object, only set if type == NETWORKING_NEW_OBJECT or NETWORKING_UPDATE_OBJECT*/
+    // int objectIdx;
+    /* The object that's involved in the event, only set if type == NETWORKING_NEW_OBJECT or NETWORKING_UPDATE_OBJECT */
+    std::optional<Networking_Object> object;
 
-    Networking_StatePacket packet;
+    /* if type == NETWORKING_INITIAL_UPDATE, this will be set instead of .object. */
+    std::optional<Networking_StatePacket> packet;
 };
 
 enum NetworkingThreadStatus {
@@ -420,6 +425,23 @@ enum NetworkingThreadStatus {
     NETWORKING_THREAD_ACTIVE_SERVER = 1,
     NETWORKING_THREAD_ACTIVE_CLIENT = 2,
     NETWORKING_THREAD_ACTIVE_BOTH = 3
+};
+
+/* The state stored for every NetworkingThread */
+struct NetworkingThreadState {
+    int status = NETWORKING_THREAD_INACTIVE;
+
+    std::vector<HSteamNetConnection> netConnections;
+
+    int tickNumber = -1;
+    
+    /* if this value is set to -1, then the thread hadn't received a packet yet. */
+    int lastSyncedTickNumber = -1;  /* always -1 for the server because the server doesn't really sync with the client, it's a server-authoritative model. */
+
+    std::vector<std::function<void(int)>> tickUpdateHandlers;
+
+    bool shouldQuit = false;
+    std::thread thread;
 };
 
 class Engine {
@@ -436,7 +458,8 @@ public:
     /* Due to how it works, this function can be called before the renderer is initialized. */
     void RegisterUIButtonListener(const std::function<void(std::string)> listener);
 
-    void RegisterTickUpdateHandler(const std::function<void(int)> handler);
+    /* status is an indicator of which NetworkingThread should accept it, if it's set to NETWORKING_THREAD_ACTIVE_SERVER, it will register to the server, so on. */
+    void RegisterTickUpdateHandler(const std::function<void(int)> handler, NetworkingThreadStatus status);
 
     Renderer *GetRenderer();
 
@@ -459,7 +482,7 @@ public:
     void DisconnectClientFromServer(HSteamNetConnection connection);  // Disconnects a client from your server, Call this only if you're hosting a server.
 
     void StopHostingGameServer();
-    void ProcessNetworkEvents();
+    void ProcessNetworkEvents(std::vector<Networking_Event> &networkingEvents);
 
     Object *GetObjectByID(int ObjectID);
 
@@ -471,11 +494,10 @@ public:
 private:
 /*  Systems   */
     Renderer *m_Renderer = nullptr;
-    bool m_NetworkingThreadShouldQuit = false;
     ISteamNetworkingSockets *m_NetworkingSockets;
 
-    HSteamNetConnection m_ServerConnection;
-    std::vector<HSteamNetConnection> m_NetConnections;
+    /* [0] = client, [1] = server. */
+    std::array<NetworkingThreadState, 2> m_NetworkingThreadStates;
     
     HSteamListenSocket m_NetListenSocket = k_HSteamListenSocket_Invalid;
     HSteamNetPollGroup m_NetPollGroup = k_HSteamNetPollGroup_Invalid;
@@ -484,10 +506,6 @@ private:
 
     std::vector<Networking_Event> m_NetworkingEvents;
     std::mutex m_NetworkingEventsLock;
-
-    int m_NetworkingThreadStatus = NETWORKING_THREAD_INACTIVE;
-
-    std::thread m_NetworkingThread;
     
     Settings *m_Settings;
     Camera *m_MainCamera;
@@ -520,10 +538,10 @@ private:
     void DeserializeNetworkingObject(std::vector<std::byte> &serializedObjectPacket, Networking_Object &dest);
 
     /* Sends a full update to the connection. Sends every single object, regardless whether it has changed, to the client. Avoid sending this unless it's a clients first time connecting. */
-    void SendFullUpdateToConnection(HSteamNetConnection);
+    void SendFullUpdateToConnection(HSteamNetConnection connection, int tickNumber);
 
     /* Send an update to the client, Keep in mind the server won't send objects that haven't changed to the client. */
-    void SendUpdateToConnection(HSteamNetConnection connection);
+    void SendUpdateToConnection(HSteamNetConnection connection, int tickNumber);
 
     /* Serialize the Networking_Object and append it to dest */
     void SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest);
@@ -540,17 +558,11 @@ private:
 
     void InitNetworkingThread(NetworkingThreadStatus status);
 
-    void NetworkingThreadClient_Main();
-    void NetworkingThreadServer_Main();
+    void NetworkingThreadClient_Main(NetworkingThreadState &state);
+    void NetworkingThreadServer_Main(NetworkingThreadState &state);
 
     std::vector<std::function<void(std::string)>> m_UIButtonListeners;
     std::vector<UI::Button *> m_UIButtons;
-
-    /* TODO: seperate handlers for server & client or atleast provide an argument to clarify which part the tick update is handling */
-    std::vector<std::function<void(int)>> m_TickUpdateHandlers;
-
-    int m_TickNumberServer;
-    int m_TickNumberClient;
 };
 
 #endif
