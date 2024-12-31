@@ -2608,7 +2608,7 @@ void Engine::InitRenderer(Settings &settings, const Camera *primaryCamera) {
     m_Renderer->Init();
 
     m_Renderer->RegisterSDLEventListener(std::bind(&Engine::CheckButtonClicks, this, std::placeholders::_1), SDL_EVENT_MOUSE_BUTTON_UP);
-    m_Renderer->RegisterUpdateFunction(std::bind(&Engine::ProcessNetworkEvents, this, m_NetworkingEvents));
+    m_Renderer->RegisterUpdateFunction(std::bind(&Engine::ProcessNetworkEvents, this, &m_NetworkingEvents));
 }
 
 void Engine::InitNetworking() {
@@ -2642,6 +2642,10 @@ void Engine::RegisterTickUpdateHandler(const std::function<void(int)> handler, N
 
     if (state != nullptr) {
         state->tickUpdateHandlers.push_back(handler);
+    } else if (status == NETWORKING_THREAD_ACTIVE_BOTH) {
+        for (NetworkingThreadState &state : m_NetworkingThreadStates) {
+            state.tickUpdateHandlers.push_back(handler);
+        }
     }
 }
 
@@ -2984,7 +2988,6 @@ void Engine::UnregisterUIButton(UI::Button *button) {
 }
 
 void Engine::InitNetworkingThread(NetworkingThreadStatus status) {
-
     fmt::println("Initializing network thread to {}!", (int)status);
 
     if (status == NETWORKING_THREAD_ACTIVE_CLIENT) {
@@ -3228,8 +3231,8 @@ void Engine::StopHostingGameServer() {
     }
 }
 
-void Engine::ProcessNetworkEvents(std::vector<Networking_Event> &networkingEvents) {
-    std::lock_guard<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
+void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvents) {
+    std::unique_lock<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
 
     /* Objects that were created as a result of ImportFromFile may not have the same ObjectIDs, and will be hard to track. So we store them to compare their SourceIDs */
     std::vector<Networking_Object *> objectsFromImportedObject;
@@ -3240,8 +3243,8 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> &networkingEvent
     /* only for initial updates */
     std::vector<Networking_Event> newEvents;
 
-    while (!networkingEvents.empty()) {
-        Networking_Event &event = networkingEvents[0];
+    while (!networkingEvents->empty()) {
+        Networking_Event &event = (*networkingEvents)[0];
 
         Object *object;
         Networking_Object *objectPacket;
@@ -3258,7 +3261,9 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> &networkingEvent
                     newEvents.push_back(event);
                 }
 
-                ProcessNetworkEvents(newEvents);
+                networkingEventsLockGuard.unlock();
+                ProcessNetworkEvents(&newEvents);
+                networkingEventsLockGuard.lock();
 
                 break;
             case NETWORKING_NEW_OBJECT:
@@ -3298,7 +3303,7 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> &networkingEvent
                 } else if (objectPacket->isGeneratedFromFile) {
                     objectsFromImportedObject.push_back(objectPacket);
                     
-                    m_NetworkingEvents.erase(m_NetworkingEvents.begin());
+                    networkingEvents->erase(networkingEvents->begin());
                     continue;
                 }
 
@@ -3344,7 +3349,7 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> &networkingEvent
                 break;
         }
 
-        networkingEvents.erase(networkingEvents.begin());
+        networkingEvents->erase(networkingEvents->begin());
     }
 }
 

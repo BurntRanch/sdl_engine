@@ -482,7 +482,8 @@ public:
     void DisconnectClientFromServer(HSteamNetConnection connection);  // Disconnects a client from your server, Call this only if you're hosting a server.
 
     void StopHostingGameServer();
-    void ProcessNetworkEvents(std::vector<Networking_Event> &networkingEvents);
+
+    void ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvents);
 
     Object *GetObjectByID(int ObjectID);
 
