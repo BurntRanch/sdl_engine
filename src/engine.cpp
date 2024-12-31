@@ -2994,7 +2994,7 @@ void Engine::InitNetworkingThread(NetworkingThreadStatus status) {
             return;
         }
 
-        state.thread = std::thread(&Engine::NetworkingThreadClient_Main, this);
+        state.thread = std::thread(&Engine::NetworkingThreadClient_Main, this, std::ref(state));
     } else if (status == NETWORKING_THREAD_ACTIVE_SERVER) {
         NetworkingThreadState &state = m_NetworkingThreadStates[1];
 
@@ -3002,7 +3002,7 @@ void Engine::InitNetworkingThread(NetworkingThreadStatus status) {
             return;
         }
 
-        state.thread = std::thread(&Engine::NetworkingThreadServer_Main, this);
+        state.thread = std::thread(&Engine::NetworkingThreadServer_Main, this, std::ref(state));
     }
 }
 
@@ -3259,6 +3259,8 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> &networkingEvent
                 }
 
                 ProcessNetworkEvents(newEvents);
+
+                break;
             case NETWORKING_NEW_OBJECT:
                 object = new Object();
 
