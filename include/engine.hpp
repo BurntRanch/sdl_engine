@@ -391,11 +391,24 @@ struct Networking_Object {
 
     /* List of objectIDs */
     std::vector<int> children;
+
+    /* index in cameras array */
+    int cameraAttachment = -1;
+};
+
+struct Networking_Camera {
+    int cameraID;
+    float pitch;
+    float yaw;
+    glm::vec3 up;
+    float fov;
+    bool isMainCamera = false;
 };
 
 struct Networking_StatePacket {
     int tickNumber;
 
+    std::vector<Networking_Camera> cameras;
     std::vector<Networking_Object> objects;
 };
 
@@ -414,6 +427,7 @@ enum Networking_EventType {
     NETWORKING_NULL,
     NETWORKING_INITIAL_UPDATE,  /* If we just connected to the server */
     NETWORKING_NEW_OBJECT,
+    NETWORKING_NEW_CAMERA,
     NETWORKING_UPDATE_OBJECT,
 };
 
@@ -423,8 +437,12 @@ struct Networking_Event {
 
     // /* Index of the object, only set if type == NETWORKING_NEW_OBJECT or NETWORKING_UPDATE_OBJECT*/
     // int objectIdx;
+
     /* The object that's involved in the event, only set if type == NETWORKING_NEW_OBJECT or NETWORKING_UPDATE_OBJECT */
     std::optional<Networking_Object> object;
+
+    /* The camera that's involved in the event, only set if type == NETWORKING_NEW_CAMERA (or, in the future, NETWORKING_UPDATE_CAMERA)*/
+    std::optional<Networking_Camera> camera;
 
     /* if type == NETWORKING_INITIAL_UPDATE, this will be set instead of .object. */
     std::optional<Networking_StatePacket> packet;
@@ -490,6 +508,8 @@ public:
     bool ImportScene(const std::string &path);
     void ExportScene(const std::string &path);
 
+    void AttachCameraToConnection(Camera *cam, HSteamNetConnection conn);
+
     void ConnectToGameServer(SteamNetworkingIPAddr ipAddr);
     void HostGameServer(SteamNetworkingIPAddr ipAddr);
 
@@ -526,6 +546,7 @@ private:
     std::string m_ScenePath = "";
 
     std::unordered_map<NetworkingEventType, std::vector<std::function<void(HSteamNetConnection)>>> m_EventTypeToListenerMap;
+    std::unordered_map<HSteamNetConnection, Camera *> m_ConnToCameraAttachment;
 
     std::vector<Networking_Event> m_NetworkingEvents;
     std::mutex m_NetworkingEventsLock;
@@ -540,6 +561,7 @@ private:
     /* Doesn't include elements that belong in objectsFromImportedObject */
     std::vector<Object *> m_PreviousObjects;
 
+    std::vector<Camera *> m_Cameras;
     std::vector<Object *> m_Objects;
     std::vector<UI::GenericElement *> m_UIElements;
 
@@ -554,18 +576,27 @@ private:
     }
 
     /* Do not set isRecursive to true, This is only there to recursively add objs children BEFORE obj. This is a requirement in the protocol.
-     * The return is optional but that doesn't mean you have to put it in the statePacket yourself. It's just there incase you want it.
+     * The return is optional (empty if obj is a child and isRecursive == false) but that doesn't mean you have to put it in the statePacket yourself. It's just there incase you want it.
     */
     std::optional<Networking_Object> AddObjectToStatePacket(Object *obj, Networking_StatePacket &statePacket, bool includeChildren = true, bool isRecursive = false);
 
     /* Do not set isRecursive to true, This is only there to recursively add objs children BEFORE obj. This is a requirement in the protocol. */
     void AddObjectToStatePacketIfChanged(Object *obj, Networking_StatePacket &statePacket, bool includeChildren = true, bool isRecursive = false);
 
+    /* Very similar to the Object equivalent, difference is Cameras don't have children. Make sure isMainCamera is set to true based off of m_ConnToCameraAttachment. */
+    Networking_Camera AddCameraToStatePacket(Camera *cam, Networking_StatePacket &statePacket, bool isMainCamera = false);
+
+    /* Very similar to the Object equivalent, difference is Cameras don't have children. Make sure isMainCamera is set to true based off of m_ConnToCameraAttachment. */
+    void AddCameraToStatePacketIfChanged(Camera *cam, Networking_StatePacket &statePacket, bool isMainCamera = false);
+
     /* Deserialization */
     Networking_StatePacket DeserializePacket(std::vector<std::byte> &serializedPacket);
 
     /* Deserialize the Networking_Object */
     void DeserializeNetworkingObject(std::vector<std::byte> &serializedObjectPacket, Networking_Object &dest);
+
+    /* Deserialize the Networking_Camera */
+    void DeserializeNetworkingCamera(std::vector<std::byte> &serializedCameraPacket, Networking_Camera &dest);
 
     /* Sends a full update to the connection. Sends every single object, regardless whether it has changed, to the client. Avoid sending this unless it's a clients first time connecting. */
     void SendFullUpdateToConnection(HSteamNetConnection connection, int tickNumber);
@@ -575,6 +606,9 @@ private:
 
     /* Serialize the Networking_Object and append it to dest */
     void SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest);
+
+    /* Serialize the Networking_Camera and append it to dest */
+    void SerializeNetworkingCamera(Networking_Camera &cameraPacket, std::vector<std::byte> &dest);
 
     void SerializeClientRequest(Networking_ClientRequest &clientRequest, std::vector<std::byte> &dest);
 

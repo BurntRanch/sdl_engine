@@ -2724,6 +2724,10 @@ void Engine::AddObject(Object *object) {
         }
     }
 
+    if (object->GetCameraAttachment()) {
+        m_Cameras.push_back(object->GetCameraAttachment());
+    }
+
     for (Object *child : object->GetChildren()) {
         AddObject(child);
     }
@@ -2857,6 +2861,10 @@ bool Engine::ImportScene(const std::string &path) {
 
 //     sceneXML.clear();
 // }
+
+void Engine::AttachCameraToConnection(Camera *cam, HSteamNetConnection conn) {
+    m_ConnToCameraAttachment[conn] = cam;
+}
 
 void Engine::ConnectToGameServer(SteamNetworkingIPAddr ipAddr) {
     SteamNetworkingConfigValue_t opt{};    
@@ -3313,11 +3321,23 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
         Networking_Event &event = (*networkingEvents)[0];
 
         Object *object;
+        Camera *camera;
+
         Networking_Object objectPacket;
+        Networking_Camera cameraPacket;
 
         switch (event.type) {
             case NETWORKING_INITIAL_UPDATE:
                 /* event.packet MUST be set, This will automatically error out for us in the rare case of it not actually being set. */
+                for (Networking_Camera &camera : event.packet.value().cameras) {
+                    Networking_Event event;
+
+                    event.type = NETWORKING_NEW_CAMERA;
+                    event.camera = camera;
+
+                    newEvents.push_back(event);
+                }
+
                 for (Networking_Object &object : event.packet.value().objects) {
                     Networking_Event event;
 
@@ -3330,6 +3350,28 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
                 networkingEventsLockGuard.unlock();
                 ProcessNetworkEvents(&newEvents);
                 networkingEventsLockGuard.lock();
+
+                break;
+            case NETWORKING_NEW_CAMERA:
+                camera = new Camera(glm::vec3(0.0f, 0.0f, 1.0f));
+
+                cameraPacket = event.camera.value();
+
+                camera->SetCameraID(cameraPacket.cameraID);
+                
+                camera->Pitch = cameraPacket.pitch;
+                camera->Yaw = cameraPacket.yaw;
+                
+                camera->Up = cameraPacket.up;
+
+                camera->FOV = cameraPacket.fov;
+                
+                if (cameraPacket.isMainCamera && !m_MainCamera) {
+                    m_MainCamera = camera;
+                    m_Renderer->SetPrimaryCamera(*camera);
+                }
+
+                m_Cameras.push_back(camera);
 
                 break;
             case NETWORKING_NEW_OBJECT:
@@ -3371,6 +3413,21 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
 
                             m_PreviousObjects.erase(previousObjectPtr);
                         }
+
+                        if (childEquivalent->GetCameraAttachment() != nullptr) {
+                            for (Camera *cam : m_Cameras) {
+                                if (cam->GetCameraID() == generatedObject->cameraAttachment) {
+                                    Camera *oldCamera = childEquivalent->GetCameraAttachment();
+
+                                    childEquivalent->SetCameraAttachment(cam);
+
+                                    /* TODO: Create RemoveObject and RemoveCamera */
+                                    m_Cameras.erase(std::find(m_Cameras.begin(), m_Cameras.end(), oldCamera));
+
+                                    delete oldCamera;
+                                }
+                            }
+                        }
                     }
                 } else if (objectPacket.isGeneratedFromFile) {
                     m_ObjectsFromImportedObject.push_back(objectPacket);
@@ -3398,6 +3455,14 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
                     previousObject->SetParent(object);
 
                     m_PreviousObjects.erase(previousObjectPtr);
+                }
+
+                if (object->GetCameraAttachment() != nullptr) {
+                    for (Camera *cam : m_Cameras) {
+                        if (cam->GetCameraID() == objectPacket.cameraAttachment) {
+                            object->SetCameraAttachment(cam);
+                        }
+                    }
                 }
 
                 m_PreviousObjects.push_back(object);
@@ -3442,6 +3507,17 @@ Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &seriali
 
     Deserialize(serializedPacket, statePacket.tickNumber);
 
+    size_t camerasCount;
+    Deserialize(serializedPacket, camerasCount);
+
+    for (size_t i = 0; i < camerasCount; i++) {
+        Networking_Camera cameraPacket;
+
+        DeserializeNetworkingCamera(serializedPacket, cameraPacket);
+
+        statePacket.cameras.push_back(cameraPacket);
+    }
+
     size_t objectsCount;
     Deserialize(serializedPacket, objectsCount);
 
@@ -3457,9 +3533,6 @@ Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &seriali
 }
 
 void Engine::DeserializeNetworkingObject(std::vector<std::byte> &serializedObjectPacket, Networking_Object &dest) {
-    /* objectID + position/rotation/scale + children size */
-    UTILASSERT(serializedObjectPacket.size() >= sizeof(int) + (sizeof(float) * 9) + sizeof(size_t));
-
     Deserialize(serializedObjectPacket, dest.ObjectID);
 
     Deserialize(serializedObjectPacket, dest.position.x);
@@ -3491,6 +3564,21 @@ void Engine::DeserializeNetworkingObject(std::vector<std::byte> &serializedObjec
 
         dest.children.push_back(childObjectID);
     }
+
+    Deserialize(serializedObjectPacket, dest.cameraAttachment);
+}
+
+void Engine::DeserializeNetworkingCamera(std::vector<std::byte> &serializedCameraPacket, Networking_Camera &dest) {
+    Deserialize(serializedCameraPacket, dest.cameraID);
+
+    Deserialize(serializedCameraPacket, dest.pitch);
+    Deserialize(serializedCameraPacket, dest.yaw);
+
+    Deserialize(serializedCameraPacket, dest.up.x);
+    Deserialize(serializedCameraPacket, dest.up.y);
+
+    Deserialize(serializedCameraPacket, dest.fov);
+    Deserialize(serializedCameraPacket, dest.isMainCamera);
 }
 
 std::optional<Networking_Object> Engine::AddObjectToStatePacket(Object *object, Networking_StatePacket &statePacket, bool includeChildren, bool isRecursive) {
@@ -3501,7 +3589,7 @@ std::optional<Networking_Object> Engine::AddObjectToStatePacket(Object *object, 
     Networking_Object objectPacket{};
 
     objectPacket.ObjectID = object->GetObjectID();
-            
+    
     objectPacket.position = object->GetPosition();
     objectPacket.rotation = object->GetRotation();
     objectPacket.scale = object->GetScale();
@@ -3510,8 +3598,11 @@ std::optional<Networking_Object> Engine::AddObjectToStatePacket(Object *object, 
     objectPacket.isGeneratedFromFile = object->IsGeneratedFromFile();
     objectPacket.objectSourceID = object->GetSourceID();
 
-    /* Put children before the parent. */
+    if (object->GetCameraAttachment()) {
+        objectPacket.cameraAttachment = object->GetCameraAttachment()->GetCameraID();
+    }
 
+    /* Put children before the parent. */
     if (includeChildren) {
         for (Object *child : object->GetChildren()) {
             AddObjectToStatePacket(child, statePacket, true, true);
@@ -3528,6 +3619,9 @@ void Engine::AddObjectToStatePacketIfChanged(Object *object, Networking_StatePac
     auto lastPacketObjectEquivalent = std::find_if(m_LastPacket.objects.begin(), m_LastPacket.objects.end(), [object] (Networking_Object &obj) { return obj.ObjectID == object->GetObjectID(); });
     bool anythingChanged = lastPacketObjectEquivalent == m_LastPacket.objects.end();
 
+    auto it = std::find(m_Cameras.begin(), m_Cameras.end(), object->GetCameraAttachment());
+    UTILASSERT(it != m_Cameras.end());
+
     if (!anythingChanged && (
         object->GetPosition() != lastPacketObjectEquivalent->position ||
         object->GetRotation() != lastPacketObjectEquivalent->rotation ||
@@ -3535,7 +3629,8 @@ void Engine::AddObjectToStatePacketIfChanged(Object *object, Networking_StatePac
         object->IsGeneratedFromFile() != lastPacketObjectEquivalent->isGeneratedFromFile ||
         object->GetSourceFile() != lastPacketObjectEquivalent->objectSourceFile ||
         object->GetSourceID() != lastPacketObjectEquivalent->objectSourceID ||
-        object->GetChildren().size() != lastPacketObjectEquivalent->children.size()))
+        object->GetChildren().size() != lastPacketObjectEquivalent->children.size() ||
+        object->GetCameraAttachment()->GetCameraID() != lastPacketObjectEquivalent->cameraAttachment))
         anythingChanged = true;
 
     if (includeChildren) {
@@ -3561,10 +3656,57 @@ void Engine::AddObjectToStatePacketIfChanged(Object *object, Networking_StatePac
     }
 }
 
+Networking_Camera Engine::AddCameraToStatePacket(Camera *cam, Networking_StatePacket &statePacket, bool isMainCamera) {
+    Networking_Camera cameraPacket{};
+
+    cameraPacket.cameraID = cam->GetCameraID();
+    cameraPacket.pitch = cam->Pitch;
+    cameraPacket.yaw = cam->Yaw;
+    cameraPacket.up = cam->Up;
+    cameraPacket.fov = cam->FOV;
+    cameraPacket.isMainCamera = isMainCamera;
+
+    statePacket.cameras.push_back(cameraPacket);
+
+    return cameraPacket;
+}
+
+void Engine::AddCameraToStatePacketIfChanged(Camera *cam, Networking_StatePacket &statePacket, bool isMainCamera) {
+    auto lastPacketCameraEquivalent = std::find_if(m_LastPacket.cameras.begin(), m_LastPacket.cameras.end(), [cam] (Networking_Camera &cameraPacket) { return cameraPacket.cameraID == cam->GetCameraID(); });
+    bool anythingChanged = lastPacketCameraEquivalent == m_LastPacket.cameras.end();
+
+    if (!anythingChanged && (
+        cam->Pitch != lastPacketCameraEquivalent->pitch ||
+        cam->Yaw != lastPacketCameraEquivalent->yaw ||
+        cam->Up != lastPacketCameraEquivalent->up ||
+        cam->FOV != lastPacketCameraEquivalent->fov ||
+        isMainCamera != lastPacketCameraEquivalent->isMainCamera))
+        anythingChanged = true;
+
+    if (anythingChanged) {
+        Networking_Camera cameraPacket = AddCameraToStatePacket(cam, statePacket, isMainCamera);
+
+        if (lastPacketCameraEquivalent != m_LastPacket.cameras.end()) {
+            m_LastPacket.cameras.at(std::distance(m_LastPacket.cameras.begin(), lastPacketCameraEquivalent)) = cameraPacket;
+        } else {
+            m_LastPacket.cameras.push_back(cameraPacket);
+        }
+    }
+}
+
 void Engine::SendFullUpdateToConnection(HSteamNetConnection connection, int tickNumber) {
     Networking_StatePacket statePacket{};
     
     statePacket.tickNumber = tickNumber;
+
+    for (Camera *cam : m_Cameras) {
+        bool isMainCamera = false;
+        if (m_ConnToCameraAttachment.find(connection) != m_ConnToCameraAttachment.end() && m_ConnToCameraAttachment[connection] == cam) {
+            isMainCamera = true;
+        }
+
+        AddCameraToStatePacket(cam, statePacket, isMainCamera);
+    }
 
     for (Object *object : m_Objects) {
         AddObjectToStatePacket(object, statePacket);
@@ -3573,6 +3715,12 @@ void Engine::SendFullUpdateToConnection(HSteamNetConnection connection, int tick
     std::vector<std::byte> serializedPacket;
     
     Serialize(statePacket.tickNumber, serializedPacket);
+
+    Serialize(statePacket.cameras.size(), serializedPacket);
+
+    for (Networking_Camera &cameraPacket : statePacket.cameras) {
+        SerializeNetworkingCamera(cameraPacket, serializedPacket);
+    }
 
     Serialize(statePacket.objects.size(), serializedPacket);
     
@@ -3590,6 +3738,15 @@ void Engine::SendUpdateToConnection(HSteamNetConnection connection, int tickNumb
     Networking_StatePacket statePacket{};
 
     statePacket.tickNumber = tickNumber;
+
+    for (Camera *camera : m_Cameras) {
+        bool isMainCamera = false;
+        if (m_ConnToCameraAttachment.find(connection) != m_ConnToCameraAttachment.end() && m_ConnToCameraAttachment[connection] == camera) {
+            isMainCamera = true;
+        }
+
+        AddCameraToStatePacketIfChanged(camera, statePacket, isMainCamera);
+    }
     
     for (Object *object : m_Objects) {
         AddObjectToStatePacketIfChanged(object, statePacket);
@@ -3598,6 +3755,12 @@ void Engine::SendUpdateToConnection(HSteamNetConnection connection, int tickNumb
     std::vector<std::byte> serializedPacket;
 
     Serialize(statePacket.tickNumber, serializedPacket);
+
+    Serialize(statePacket.cameras.size(), serializedPacket);
+
+    for (Networking_Camera &cameraPacket : statePacket.cameras) {
+        SerializeNetworkingCamera(cameraPacket, serializedPacket);
+    }
 
     Serialize(statePacket.objects.size(), serializedPacket);
     
@@ -3636,6 +3799,21 @@ void Engine::SerializeNetworkingObject(Networking_Object &objectPacket, std::vec
     for (int &childObjectID : objectPacket.children) {
         Serialize(childObjectID, dest);
     }
+
+    Serialize(objectPacket.cameraAttachment, dest);
+}
+
+void Engine::SerializeNetworkingCamera(Networking_Camera &cameraPacket, std::vector<std::byte> &dest) {
+    Serialize(cameraPacket.cameraID, dest);
+
+    Serialize(cameraPacket.pitch, dest);
+    Serialize(cameraPacket.yaw, dest);
+
+    Serialize(cameraPacket.up.x, dest);
+    Serialize(cameraPacket.up.y, dest);
+
+    Serialize(cameraPacket.fov, dest);
+    Serialize(cameraPacket.isMainCamera, dest);
 }
 
 void Engine::SerializeClientRequest(Networking_ClientRequest &clientRequest, std::vector<std::byte> &dest) {

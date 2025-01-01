@@ -1,9 +1,11 @@
 #include "object.hpp"
+#include "camera.hpp"
 #include "util.hpp"
 #include <assimp/Importer.hpp>
 #include <assimp/quaternion.h>
 #include <assimp/scene.h>
 #include <assimp/vector3.h>
+#include <functional>
 
 Object::~Object() {
     
@@ -26,7 +28,7 @@ Object::Object(glm::vec3 position, glm::quat rotation, glm::vec3 scale, int obje
     SetScale(scale);
 }
 
-void Object::ImportFromFile(const std::string &path) {
+void Object::ImportFromFile(const std::string &path, std::optional<std::reference_wrapper<Camera *>> primaryCamOutput) {
     Assimp::Importer importer;
     const aiScene *scene = importer.ReadFile(path.data(), aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_ForceGenNormals | /*aiProcess_GenSmoothNormals |*/ aiProcess_FlipUVs/* | aiProcess_CalcTangentSpace*/);
 
@@ -40,7 +42,7 @@ void Object::ImportFromFile(const std::string &path) {
 
     int sourceID = 0;
 
-    ProcessNode(scene->mRootNode, scene, sourceID);
+    ProcessNode(scene->mRootNode, scene, sourceID, nullptr, primaryCamOutput);
 }
 
 std::string Object::GetSourceFile() {
@@ -64,7 +66,7 @@ bool Object::IsGeneratedFromFile() {
 }
 
 /* if parent is nullptr, that must mean this is the rootNode. */
-void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Object *parent) {
+void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Object *parent, std::optional<std::reference_wrapper<Camera *>> primaryCamOutput) {
     fmt::println("Processing node!");
 
     Object *obj = this;
@@ -93,6 +95,34 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
     obj->SetRotation(glm::quat(rotation.w, rotation.x, rotation.y, rotation.z));
     obj->SetScale(glm::vec3(scale.x, scale.y, scale.z));
 
+    /* Check if this node is/has a camera. */
+    for (Uint32 i = 0; i < scene->mNumCameras; i++) {
+        /* Found the camera! */
+        if (scene->mCameras[i]->mName == node->mName) {
+            aiCamera *sceneCam = scene->mCameras[i];
+
+            aiVector3D direction = aiVector3D(-node->mTransformation.a3, -node->mTransformation.b3, -node->mTransformation.c3);
+            direction.Normalize();
+
+            float pitch = std::asin(-direction.y);
+            float yaw = std::atan2(direction.x, direction.z);
+
+            fmt::println("{} {}", yaw, pitch);
+
+            Camera *cam = new Camera(glm::vec3(sceneCam->mUp.x, sceneCam->mUp.y, sceneCam->mUp.z), yaw, pitch);
+
+            cam->FOV = sceneCam->mHorizontalFOV;
+
+            obj->SetCameraAttachment(cam);
+
+            if (primaryCamOutput.has_value() && primaryCamOutput.value() == nullptr) {
+                primaryCamOutput.value() = cam;
+            }
+
+            break;
+        }
+    }
+
     if (node->mNumMeshes > 0) {
         Model *model = new Model();
 
@@ -109,7 +139,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
     for (Uint32 i = 0; i < node->mNumChildren; i++) {
         sourceID++;
-        ProcessNode(node->mChildren[i], scene, sourceID, obj);
+        ProcessNode(node->mChildren[i], scene, sourceID, obj, primaryCamOutput);
     }
 }
 
@@ -183,7 +213,14 @@ void Object::RemoveChild(Object *child) {
 }
 
 void Object::SetCameraAttachment(Camera *camera) {
-    /* TODO: make sure this camera is not attached to any other object first, also consider making it only 1 model attachment per object (unrelated to cameras). */
+    if (camera != nullptr) {
+        camera->SetObjectAttachment(this);
+    }
+
+    if (m_CameraAttachment != nullptr) {
+        m_CameraAttachment->SetObjectAttachment(nullptr);
+    }
+
     m_CameraAttachment = camera;
 }
 

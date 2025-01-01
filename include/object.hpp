@@ -2,7 +2,9 @@
 
 #include "camera.hpp"
 #include "model.hpp"
+#include <functional>
 #include <glm/gtc/quaternion.hpp>
+#include <optional>
 
 class Object {
 public:
@@ -11,8 +13,9 @@ public:
     Object(glm::vec3 position = glm::vec3(0.0f), glm::quat rotation = glm::quat(0.0f, 0.0f, 0.0f, 1.0f), glm::vec3 scale = glm::vec3(1.0f), int objectID = -1);
 
     /* Loads a model/scene file with assimp, preferrably glTF 2.0 files.
-        Nodes are converted to objects and their meshes are converted into a Model attachment. */
-    void ImportFromFile(const std::string &path);
+        Nodes are converted to objects and their meshes are converted into a Model attachment.
+        If there's atleast 1 camera, and if primaryCamOutput is set, it will set primaryCamOutput to the first camera it sees. primaryCamOutput MUST be null!! */
+    void ImportFromFile(const std::string &path, std::optional<std::reference_wrapper<Camera *>> primaryCamOutput = {});
 
     /* Gets the source path if the object had ImportFromFile called on it.
         Returns empty if the object didn't come from a file or is the child of an object that did. */
@@ -55,7 +58,7 @@ public:
     int GetObjectID();
     void SetObjectID(int objectID);
 private:
-    void ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Object *parent = nullptr);
+    void ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Object *parent = nullptr, std::optional<std::reference_wrapper<Camera *>> primaryCamOutput = {});
 
     int m_ObjectID = -1;
 
