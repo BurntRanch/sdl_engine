@@ -7,6 +7,7 @@
 #include "fmt/format.h"
 #include "isteamnetworkingsockets.h"
 #include "object.hpp"
+#include "steamclientpublic.h"
 #include "steamnetworkingsockets.h"
 #include "model.hpp"
 #include "steamnetworkingtypes.h"
@@ -2593,9 +2594,12 @@ void Renderer::Start() {
 }
 
 Engine::~Engine() {
-    DisconnectFromServer();
-
-    StopHostingGameServer();
+    for (NetworkingThreadState &state : m_NetworkingThreadStates) {
+        if (state.status != NETWORKING_THREAD_INACTIVE) {
+            state.shouldQuit = true;
+            state.thread.join();
+        }
+    }
 
     GameNetworkingSockets_Kill();
 }
@@ -3214,11 +3218,17 @@ void Engine::DisconnectFromServer() {
 
     UTILASSERT(state.netConnections.size() == 1);
 
-    /* TODO: send a goodbye message */
+    /* TODO: this should work but idk why the server doesn't receive anything. */
     std::vector<std::byte> serializedDisconnectRequest;
     Networking_ClientRequest clientRequest{CLIENT_REQUEST_DISCONNECT};
     SerializeClientRequest(clientRequest, serializedDisconnectRequest);
-    m_NetworkingSockets->SendMessageToConnection(state.netConnections[0], serializedDisconnectRequest.data(), serializedDisconnectRequest.size(), k_nSteamNetworkingSend_Reliable, nullptr);
+    EResult result = m_NetworkingSockets->SendMessageToConnection(state.netConnections[0], serializedDisconnectRequest.data(), serializedDisconnectRequest.size(), k_nSteamNetworkingSend_Reliable, nullptr);
+    if (result != k_EResultOK) {
+        fmt::println("Couldn't send disconnect to server! {}", (int)result);
+    } else {
+        fmt::println("Sent disconnect request to server!");
+    }
+
     m_NetworkingSockets->CloseConnection(state.netConnections[0], 0, nullptr, true);
 }
 
