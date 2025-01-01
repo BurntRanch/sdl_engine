@@ -437,6 +437,14 @@ enum NetworkingThreadStatus {
     NETWORKING_THREAD_ACTIVE_BOTH = 3
 };
 
+/* I know the name is confusing, this is to be used by applications to listen for specific events like clients disconnecting and such. */
+enum NetworkingEventType {
+    EVENT_CLIENT_DISCONNECTED,  /* The client disconnected from us */
+    EVENT_DISCONNECTED_FROM_SERVER,   /* We (client) disconnected from a remote server */
+    EVENT_CLIENT_CONNECTED, /* A new client has connected */
+    EVENT_CONNECTED_TO_SERVER, /* We have connected to a server. */
+};
+
 /* The state stored for every NetworkingThread */
 struct NetworkingThreadState {
     int status = NETWORKING_THREAD_INACTIVE;
@@ -487,6 +495,8 @@ public:
 
     void ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *callbackInfo);
 
+    void RegisterNetworkListener(const std::function<void(HSteamNetConnection)> listener, NetworkingEventType listenerTarget);
+
     void DisconnectFromServer();    // Disconnects you from a game server, Safe to call in any situation but wont do anything if you aren't connected to a server.
 
     void DisconnectClientFromServer(HSteamNetConnection connection);  // Disconnects a client from your server, Call this only if you're hosting a server.
@@ -514,6 +524,8 @@ private:
     HSteamNetPollGroup m_NetPollGroup = k_HSteamNetPollGroup_Invalid;
 
     std::string m_ScenePath = "";
+
+    std::unordered_map<NetworkingEventType, std::vector<std::function<void(HSteamNetConnection)>>> m_EventTypeToListenerMap;
 
     std::vector<Networking_Event> m_NetworkingEvents;
     std::mutex m_NetworkingEventsLock;

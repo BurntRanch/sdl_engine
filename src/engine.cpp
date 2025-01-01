@@ -2912,6 +2912,12 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                     UTILASSERT(conn != state.netConnections.end());
 
                     state.netConnections.erase(conn);
+
+                    if (m_EventTypeToListenerMap.find(EVENT_CLIENT_DISCONNECTED) != m_EventTypeToListenerMap.end()) {
+                        for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
+                            listener(callbackInfo->m_hConn);
+                        }
+                    }
                 /* if its a client */
                 } else {
                     UTILASSERT(m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT);
@@ -2920,6 +2926,12 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                     UTILASSERT(state.netConnections.size() == 1 && state.netConnections[0] == callbackInfo->m_hConn);
 
                     state.netConnections.erase(state.netConnections.begin());
+
+                    if (m_EventTypeToListenerMap.find(EVENT_DISCONNECTED_FROM_SERVER) != m_EventTypeToListenerMap.end()) {
+                        for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
+                            listener(callbackInfo->m_hConn);
+                        }
+                    }
                 }
 
                 m_NetworkingSockets->CloseConnection(callbackInfo->m_hConn, 0, nullptr, false);
@@ -2950,11 +2962,23 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                 SendFullUpdateToConnection(callbackInfo->m_hConn, state.tickNumber);
 
                 state.netConnections.push_back(callbackInfo->m_hConn);
+
+                if (m_EventTypeToListenerMap.find(EVENT_CLIENT_CONNECTED) != m_EventTypeToListenerMap.end()) {
+                    for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
+                        listener(callbackInfo->m_hConn);
+                    }
+                }
             } else {
                 UTILASSERT(m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT);
                 UTILASSERT(m_NetworkingThreadStates[0].netConnections.size() < 1);
 
                 m_NetworkingThreadStates[0].netConnections.push_back(callbackInfo->m_hConn);
+
+                if (m_EventTypeToListenerMap.find(EVENT_CONNECTED_TO_SERVER) != m_EventTypeToListenerMap.end()) {
+                    for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
+                        listener(callbackInfo->m_hConn);
+                    }
+                }
             }
 
             break;
@@ -2965,6 +2989,14 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
         default:
             break;
     }
+}
+
+void Engine::RegisterNetworkListener(const std::function<void(HSteamNetConnection)> listener, NetworkingEventType listenerTarget) {
+    if (m_EventTypeToListenerMap.find(listenerTarget) == m_EventTypeToListenerMap.end()) {
+        m_EventTypeToListenerMap[listenerTarget] = std::vector<std::function<void(HSteamNetConnection)>>();
+    }
+
+    m_EventTypeToListenerMap[listenerTarget].push_back(listener);
 }
 
 UI::GenericElement *Engine::GetElementByID(const std::string &id) {
@@ -3220,6 +3252,12 @@ void Engine::DisconnectFromServer() {
 
     UTILASSERT(state.netConnections.size() == 1);
 
+    if (m_EventTypeToListenerMap.find(EVENT_DISCONNECTED_FROM_SERVER) != m_EventTypeToListenerMap.end()) {
+        for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
+            listener(state.netConnections[0]);
+        }
+    }
+
     /* TODO: this should work but idk why the server doesn't receive anything. */
     std::vector<std::byte> serializedDisconnectRequest;
     Networking_ClientRequest clientRequest{CLIENT_REQUEST_DISCONNECT};
@@ -3239,6 +3277,12 @@ void Engine::DisconnectClientFromServer(HSteamNetConnection connection) {
 
     auto it = std::find(state.netConnections.begin(), state.netConnections.end(), connection);
     UTILASSERT(it != state.netConnections.end());
+
+    if (m_EventTypeToListenerMap.find(EVENT_CLIENT_DISCONNECTED) != m_EventTypeToListenerMap.end()) {
+        for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
+            listener(connection);
+        }
+    }
 
     m_NetworkingSockets->CloseConnection(connection, 0, nullptr, true);
 
