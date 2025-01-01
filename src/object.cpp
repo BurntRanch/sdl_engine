@@ -105,12 +105,12 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
             aiVector3D direction = aiVector3D(-node->mTransformation.a3, -node->mTransformation.b3, -node->mTransformation.c3);
             direction.Normalize();
 
-            float pitch = std::asin(-direction.y);
-            float yaw = std::atan2(direction.x, direction.z);
+            float pitch = glm::degrees(std::asin(-direction.z));
+            float yaw = glm::degrees(std::atan2(direction.x, direction.y));
 
-            fmt::println("{} {}", yaw, pitch);
+            fmt::println("{} {}", pitch, yaw);
 
-            Camera *cam = new Camera(glm::vec3(sceneCam->mUp.x, sceneCam->mUp.y, sceneCam->mUp.z), yaw, pitch);
+            Camera *cam = new Camera(glm::vec3(sceneCam->mUp.x, sceneCam->mUp.z, sceneCam->mUp.y), -90.0f, -90.0f);
 
             cam->FOV = glm::degrees(sceneCam->mHorizontalFOV);
 

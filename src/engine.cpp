@@ -2971,15 +2971,15 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                     break;
                 }
 
-                SendFullUpdateToConnection(callbackInfo->m_hConn, state.tickNumber);
-
-                state.netConnections.push_back(callbackInfo->m_hConn);
-
                 if (m_EventTypeToListenerMap.find(EVENT_CLIENT_CONNECTED) != m_EventTypeToListenerMap.end()) {
                     for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_CONNECTED]) {
                         listener(callbackInfo->m_hConn);
                     }
                 }
+
+                SendFullUpdateToConnection(callbackInfo->m_hConn, state.tickNumber);
+
+                state.netConnections.push_back(callbackInfo->m_hConn);
             } else {
                 UTILASSERT(m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT);
                 UTILASSERT(m_NetworkingThreadStates[0].netConnections.size() < 1);
