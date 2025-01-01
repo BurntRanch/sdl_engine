@@ -494,6 +494,10 @@ void Renderer::SetMouseCaptureState(bool capturing) {
     SDL_SetWindowRelativeMouseMode(m_EngineWindow, capturing);
 }
 
+void Renderer::SetPrimaryCamera(const Camera *cam) {
+    m_PrimaryCamera = cam;
+}
+
 void Renderer::LoadModel(Model *model) {
     std::vector<std::future<RenderModel>> tasks;
 
@@ -3109,7 +3113,7 @@ void Engine::NetworkingThreadClient_Main(NetworkingThreadState &state) {
                     fmt::println("New state packet just dropped! {} objects sent by server", packet.objects.size());
 
                     /* add a dummy type */
-                    Networking_Event event{NETWORKING_NULL, {}, {}};
+                    Networking_Event event{NETWORKING_NULL, {}, {}, {}};
                     std::lock_guard<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
 
                     if (state.lastSyncedTickNumber == -1) {
@@ -3368,7 +3372,7 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
                 
                 if (cameraPacket.isMainCamera && !m_MainCamera) {
                     m_MainCamera = camera;
-                    m_Renderer->SetPrimaryCamera(*camera);
+                    m_Renderer->SetPrimaryCamera(camera);
                 }
 
                 m_Cameras.push_back(camera);

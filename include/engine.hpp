@@ -229,7 +229,7 @@ public:
     /* DO NOT 'OR' MULTIPLE EVENT TYPES, REGISTER THE SAME FUNCTION WITH A DIFFERENT TYPE IF YOU WANT THAT. */
     void RegisterSDLEventListener(const std::function<void(SDL_Event *)> &func, SDL_EventType types);
 
-    void SetPrimaryCamera(Camera &cam);
+    void SetPrimaryCamera(const Camera *cam);
 
     Glyph GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, char c, float &x, float &y, float depth);
 
