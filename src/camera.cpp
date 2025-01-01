@@ -1,4 +1,5 @@
 #include "camera.hpp"
+#include "fmt/format.h"
 #include "object.hpp"
 
 Camera::Camera(glm::vec3 up, float yaw, float pitch) : Front(glm::vec3(0.0f, 1.0f, 0.0f)), MovementSpeed(SPEED), MouseSensitivity(SENSITIVITY), FOV(FIELDOFVIEW)
@@ -15,6 +16,9 @@ Camera::Camera(glm::vec3 up, float yaw, float pitch) : Front(glm::vec3(0.0f, 1.0
 // constructor with scalar values
 Camera::Camera(float upX, float upY, float upZ, float yaw, float pitch) : Front(glm::vec3(0.0f, 1.0f, 0.0f)), MovementSpeed(SPEED), MouseSensitivity(SENSITIVITY), FOV(FIELDOFVIEW)
 {
+    HighestCameraID++;
+    SetCameraID(HighestCameraID);
+
     WorldUp = glm::vec3(upX, upY, upZ);
     Yaw = yaw;
     Pitch = pitch;
@@ -22,12 +26,10 @@ Camera::Camera(float upX, float upY, float upZ, float yaw, float pitch) : Front(
 }
 
 // returns the view matrix calculated using Euler Angles and the LookAt Matrix
-glm::mat4 Camera::GetViewMatrix() const
+glm::mat4 Camera::GetViewMatrix()
 {
     glm::vec3 position = (m_ObjectAttachment != nullptr ? m_ObjectAttachment->GetPosition() : glm::vec3(0.0f, 0.0f, 0.0f));
-    fmt::println("{} {} {}", position.x, position.y, position.z);
-    fmt::println("{} {} {}", Front.x, Front.y, Front.z);
-    return glm::lookAt(position, position + Front, Up);
+    return glm::lookAt(position, position + glm::vec3(0.0f, 1.0f, 0.0f), Up);
 }
 
 // // processes input received from any keyboard-like input system. Accepts input parameter in the form of camera defined ENUM (to abstract it from windowing systems)

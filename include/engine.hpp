@@ -185,7 +185,7 @@ struct RenderPass {
 
 class Renderer {
 public:
-    Renderer(Settings &settings, const Camera *primaryCam) : m_PrimaryCamera(primaryCam), m_Settings(settings) {};
+    Renderer(Settings &settings, Camera *primaryCam) : m_PrimaryCamera(primaryCam), m_Settings(settings) {};
     ~Renderer();
 
     void SetMouseCaptureState(bool capturing);
@@ -229,7 +229,7 @@ public:
     /* DO NOT 'OR' MULTIPLE EVENT TYPES, REGISTER THE SAME FUNCTION WITH A DIFFERENT TYPE IF YOU WANT THAT. */
     void RegisterSDLEventListener(const std::function<void(SDL_Event *)> &func, SDL_EventType types);
 
-    void SetPrimaryCamera(const Camera *cam);
+    void SetPrimaryCamera(Camera *cam);
 
     Glyph GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, char c, float &x, float &y, float depth);
 
@@ -277,7 +277,7 @@ private:
     inline bool HasStencilAttachment(VkFormat format) {return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;};
 
     /* Cameras, high-level stuff. */
-    const Camera *m_PrimaryCamera;
+    Camera *m_PrimaryCamera;
     Settings &m_Settings;
 
     std::unordered_map<SDL_EventType, std::vector<std::function<void(SDL_Event *)>>> m_SDLEventListeners;
@@ -486,7 +486,7 @@ public:
 
     Engine() = default;
 
-    void InitRenderer(Settings &settings, const Camera *primaryCamera);
+    void InitRenderer(Settings &settings, Camera *primaryCamera);
 
     void InitNetworking();
 

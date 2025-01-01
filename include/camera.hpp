@@ -1,6 +1,7 @@
 #ifndef CAMERA_HPP
 #define CAMERA_HPP
 
+#include "fmt/base.h"
 #define CAMERA_NEAR 0.1f
 #define CAMERA_FAR 100.0f
 
@@ -52,7 +53,7 @@ public:
     Camera(float upX = 0.0f, float upY = 0.0f, float upZ = 1.0f, float yaw = YAW, float pitch = PITCH);
 
     // returns the view matrix calculated using Euler Angles and the LookAt Matrix
-    glm::mat4 GetViewMatrix() const;
+    glm::mat4 GetViewMatrix();
 
     // // processes input received from any keyboard-like input system. Accepts input parameter in the form of camera defined ENUM (to abstract it from windowing systems)
     // void ProcessKeyboard(const Camera_Movement& direction, float deltaTime);

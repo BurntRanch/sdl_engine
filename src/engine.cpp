@@ -494,7 +494,7 @@ void Renderer::SetMouseCaptureState(bool capturing) {
     SDL_SetWindowRelativeMouseMode(m_EngineWindow, capturing);
 }
 
-void Renderer::SetPrimaryCamera(const Camera *cam) {
+void Renderer::SetPrimaryCamera(Camera *cam) {
     m_PrimaryCamera = cam;
 }
 
@@ -2608,7 +2608,7 @@ Engine::~Engine() {
     GameNetworkingSockets_Kill();
 }
 
-void Engine::InitRenderer(Settings &settings, const Camera *primaryCamera) {
+void Engine::InitRenderer(Settings &settings, Camera *primaryCamera) {
     m_Settings = &settings;
 
     m_Renderer = new Renderer(settings, primaryCamera);
@@ -3357,9 +3357,9 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
 
                 break;
             case NETWORKING_NEW_CAMERA:
-                camera = new Camera(glm::vec3(0.0f, 0.0f, 1.0f));
-
                 cameraPacket = event.camera.value();
+
+                camera = new Camera(cameraPacket.up, cameraPacket.yaw, cameraPacket.pitch);
 
                 camera->SetCameraID(cameraPacket.cameraID);
                 

@@ -92,6 +92,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
     node->mTransformation.Decompose(scale, rotation, position);
 
+    /* This was designed with Blender in mind, which for some damn reason just doesn't put the values in the objectively correct places. */
     obj->SetPosition(glm::vec3(position.x, -position.z, position.y));
     obj->SetRotation(glm::quat(rotation.w, rotation.x, rotation.y, rotation.z));
     obj->SetScale(glm::vec3(scale.x, scale.y, scale.z));
@@ -107,8 +108,6 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
             float pitch = glm::degrees(std::asin(-direction.z));
             float yaw = glm::degrees(std::atan2(direction.x, -direction.y));
-
-            fmt::println("{} {}", pitch, yaw);
 
             Camera *cam = new Camera(glm::vec3(sceneCam->mUp.x, sceneCam->mUp.y, sceneCam->mUp.z), yaw, pitch);
 
