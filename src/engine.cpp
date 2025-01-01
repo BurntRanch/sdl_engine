@@ -3166,8 +3166,10 @@ void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
         m_NetworkingSockets->RunCallbacks();
 
         ISteamNetworkingMessage *incomingMessages;
+        
+        /* TODO: This stupid thing doesn't receive client requests. */
         int msgCount = m_NetworkingSockets->ReceiveMessagesOnPollGroup(m_NetPollGroup, &incomingMessages, 1);
-
+        
         if (msgCount < 0) {
             throw std::runtime_error("Error receiving messages from a client!");
         }
@@ -3175,7 +3177,7 @@ void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
             for (int i = 0; i < msgCount; i++) {
                 ISteamNetworkingMessage *incomingMessage = incomingMessages + (i * sizeof(ISteamNetworkingMessage));
 
-                if (incomingMessage->GetSize() <= sizeof(int)) {
+                if (incomingMessage->GetSize() < sizeof(int)) {
                     fmt::println("Invalid packet!");
                 } else {
                     const void *data = incomingMessage->GetData();
