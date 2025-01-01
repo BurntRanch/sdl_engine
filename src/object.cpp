@@ -6,6 +6,7 @@
 #include <assimp/scene.h>
 #include <assimp/vector3.h>
 #include <functional>
+#include <glm/trigonometric.hpp>
 
 Object::~Object() {
     
@@ -111,7 +112,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
             Camera *cam = new Camera(glm::vec3(sceneCam->mUp.x, sceneCam->mUp.y, sceneCam->mUp.z), yaw, pitch);
 
-            cam->FOV = sceneCam->mHorizontalFOV;
+            cam->FOV = glm::degrees(sceneCam->mHorizontalFOV);
 
             obj->SetCameraAttachment(cam);
 
