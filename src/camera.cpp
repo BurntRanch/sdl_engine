@@ -94,7 +94,9 @@ void Camera::SetObjectAttachment(Object *obj) {
 
     m_ObjectAttachment = obj;
 
-    obj->SetCameraAttachment(this);
+    if (obj != nullptr) {
+        obj->SetCameraAttachment(this);
+    }
 }
 
 int Camera::HighestCameraID = -1;

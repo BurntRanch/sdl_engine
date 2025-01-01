@@ -2940,7 +2940,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                     state.netConnections.erase(state.netConnections.begin());
 
                     if (m_EventTypeToListenerMap.find(EVENT_DISCONNECTED_FROM_SERVER) != m_EventTypeToListenerMap.end()) {
-                        for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
+                        for (auto &listener : m_EventTypeToListenerMap[EVENT_DISCONNECTED_FROM_SERVER]) {
                             listener(callbackInfo->m_hConn);
                         }
                     }
@@ -2976,7 +2976,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                 state.netConnections.push_back(callbackInfo->m_hConn);
 
                 if (m_EventTypeToListenerMap.find(EVENT_CLIENT_CONNECTED) != m_EventTypeToListenerMap.end()) {
-                    for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
+                    for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_CONNECTED]) {
                         listener(callbackInfo->m_hConn);
                     }
                 }
@@ -2987,7 +2987,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                 m_NetworkingThreadStates[0].netConnections.push_back(callbackInfo->m_hConn);
 
                 if (m_EventTypeToListenerMap.find(EVENT_CONNECTED_TO_SERVER) != m_EventTypeToListenerMap.end()) {
-                    for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
+                    for (auto &listener : m_EventTypeToListenerMap[EVENT_CONNECTED_TO_SERVER]) {
                         listener(callbackInfo->m_hConn);
                     }
                 }
@@ -3265,7 +3265,7 @@ void Engine::DisconnectFromServer() {
     UTILASSERT(state.netConnections.size() == 1);
 
     if (m_EventTypeToListenerMap.find(EVENT_DISCONNECTED_FROM_SERVER) != m_EventTypeToListenerMap.end()) {
-        for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
+        for (auto &listener : m_EventTypeToListenerMap[EVENT_DISCONNECTED_FROM_SERVER]) {
             listener(state.netConnections[0]);
         }
     }
@@ -3623,9 +3623,6 @@ void Engine::AddObjectToStatePacketIfChanged(Object *object, Networking_StatePac
     auto lastPacketObjectEquivalent = std::find_if(m_LastPacket.objects.begin(), m_LastPacket.objects.end(), [object] (Networking_Object &obj) { return obj.ObjectID == object->GetObjectID(); });
     bool anythingChanged = lastPacketObjectEquivalent == m_LastPacket.objects.end();
 
-    auto it = std::find(m_Cameras.begin(), m_Cameras.end(), object->GetCameraAttachment());
-    UTILASSERT(it != m_Cameras.end());
-
     if (!anythingChanged && (
         object->GetPosition() != lastPacketObjectEquivalent->position ||
         object->GetRotation() != lastPacketObjectEquivalent->rotation ||
@@ -3633,9 +3630,12 @@ void Engine::AddObjectToStatePacketIfChanged(Object *object, Networking_StatePac
         object->IsGeneratedFromFile() != lastPacketObjectEquivalent->isGeneratedFromFile ||
         object->GetSourceFile() != lastPacketObjectEquivalent->objectSourceFile ||
         object->GetSourceID() != lastPacketObjectEquivalent->objectSourceID ||
-        object->GetChildren().size() != lastPacketObjectEquivalent->children.size() ||
-        object->GetCameraAttachment()->GetCameraID() != lastPacketObjectEquivalent->cameraAttachment))
+        object->GetChildren().size() != lastPacketObjectEquivalent->children.size()))
         anythingChanged = true;
+    
+    if (!anythingChanged && object->GetCameraAttachment() != nullptr && object->GetCameraAttachment()->GetCameraID() != lastPacketObjectEquivalent->cameraAttachment) {
+        anythingChanged = true;
+    }
 
     if (includeChildren) {
         for (Object *child : object->GetChildren()) {
@@ -3652,8 +3652,9 @@ void Engine::AddObjectToStatePacketIfChanged(Object *object, Networking_StatePac
 
         Networking_Object objectPacket = objectPacketOptional.value();
 
-        if (lastPacketObjectEquivalent != m_LastPacket.objects.end()) {
-            m_LastPacket.objects.at(std::distance(m_LastPacket.objects.begin(), lastPacketObjectEquivalent)) = objectPacket;
+        /* Why is there a nullptr check? I don't know!! I don't care!! */
+        if (lastPacketObjectEquivalent.base() != nullptr && lastPacketObjectEquivalent != m_LastPacket.objects.end()) {
+            *lastPacketObjectEquivalent = objectPacket;
         } else {
             m_LastPacket.objects.push_back(objectPacket);
         }

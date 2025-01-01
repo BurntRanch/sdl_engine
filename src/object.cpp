@@ -115,8 +115,8 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
             obj->SetCameraAttachment(cam);
 
-            if (primaryCamOutput.has_value() && primaryCamOutput.value() == nullptr) {
-                primaryCamOutput.value() = cam;
+            if (primaryCamOutput.has_value() && primaryCamOutput.value().get() == nullptr) {
+                primaryCamOutput.value().get() = cam;
             }
 
             break;
@@ -213,8 +213,8 @@ void Object::RemoveChild(Object *child) {
 }
 
 void Object::SetCameraAttachment(Camera *camera) {
-    if (camera != nullptr) {
-        camera->SetObjectAttachment(this);
+    if (m_CameraAttachment == camera) {
+        return;
     }
 
     if (m_CameraAttachment != nullptr) {
@@ -222,6 +222,10 @@ void Object::SetCameraAttachment(Camera *camera) {
     }
 
     m_CameraAttachment = camera;
+
+    if (camera != nullptr) {
+        camera->SetObjectAttachment(this);
+    }
 }
 
 Camera *Object::GetCameraAttachment() {
