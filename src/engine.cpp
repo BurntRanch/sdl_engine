@@ -3365,7 +3365,7 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
                 
                 camera->Pitch = cameraPacket.pitch;
                 camera->Yaw = cameraPacket.yaw;
-                
+
                 camera->Up = cameraPacket.up;
 
                 camera->FOV = cameraPacket.fov;

@@ -88,11 +88,13 @@ void Camera::SetObjectAttachment(Object *obj) {
         return;
     }
 
-    if (m_ObjectAttachment != nullptr) {
-        m_ObjectAttachment->SetCameraAttachment(nullptr);
-    }
+    Object *oldObjectAttachment = m_ObjectAttachment;
 
     m_ObjectAttachment = obj;
+
+    if (oldObjectAttachment != nullptr) {
+        oldObjectAttachment->SetCameraAttachment(nullptr);
+    }
 
     if (obj != nullptr) {
         obj->SetCameraAttachment(this);
