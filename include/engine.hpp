@@ -399,6 +399,17 @@ struct Networking_StatePacket {
     std::vector<Networking_Object> objects;
 };
 
+enum Networking_ClientRequestType {
+    CLIENT_REQUEST_DISCONNECT
+};
+
+/* in the future, inputs could go here! */
+struct Networking_ClientRequest {
+    Networking_ClientRequestType requestType;
+
+    /* for now, we only have the DISCONNECT type, so there isn't much data we need to put here. */
+};
+
 enum Networking_EventType {
     NETWORKING_NULL,
     NETWORKING_INITIAL_UPDATE,  /* If we just connected to the server */
@@ -406,7 +417,6 @@ enum Networking_EventType {
     NETWORKING_UPDATE_OBJECT,
 };
 
-/* TODO: Stop duplicating the packet so many times and instead consider passing the Networking_Object directly. */
 /* This isn't meant to be sent over the network, this is meant to be sent between the NetworkThread and the render thread */
 struct Networking_Event {
     Networking_EventType type;
@@ -511,6 +521,13 @@ private:
     Settings *m_Settings;
     Camera *m_MainCamera;
 
+    /* Next 2 variables are for ProcessNetworkEvents */
+    /* Objects that were created as a result of ImportFromFile may not have the same ObjectIDs, and will be hard to track. So we store them to compare their SourceIDs */
+    std::vector<Networking_Object> m_ObjectsFromImportedObject;
+
+    /* Doesn't include elements that belong in objectsFromImportedObject */
+    std::vector<Object *> m_PreviousObjects;
+
     std::vector<Object *> m_Objects;
     std::vector<UI::GenericElement *> m_UIElements;
 
@@ -546,6 +563,10 @@ private:
 
     /* Serialize the Networking_Object and append it to dest */
     void SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest);
+
+    void SerializeClientRequest(Networking_ClientRequest &clientRequest, std::vector<std::byte> &dest);
+
+    void DeserializeClientRequest(std::vector<std::byte> &serializedClientRequest, Networking_ClientRequest &dest);
 
     /* Deserialize to dest */
     template<typename T>
