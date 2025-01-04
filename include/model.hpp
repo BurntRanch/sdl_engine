@@ -168,6 +168,8 @@ public:
         // this->metallic = metallic;
 
         for (Vertex &vertex : vertices) {
+            fmt::println("{} {} {}", vertex.Position.x, vertex.Position.y, vertex.Position.z);
+
             m_BoundingBox[0].x = glm::max(vertex.Position.x, m_BoundingBox[0].x);
             m_BoundingBox[1].x = glm::min(vertex.Position.x, m_BoundingBox[1].x);
 

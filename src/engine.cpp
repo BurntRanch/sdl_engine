@@ -2173,6 +2173,12 @@ void Renderer::Start() {
 
             vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderScissor);
 
+        #ifdef LOG_FRAME
+            afterRenderInitTime = high_resolution_clock::now();
+
+            fmt::println("Time spent initializing render and calling update functions: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderInitTime - afterAcquireImageResultTime).count()));
+        #endif
+
             glm::mat4 viewMatrix;
             glm::mat4 projectionMatrix;
 
@@ -2377,6 +2383,12 @@ void Renderer::Start() {
             vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayViewport);
 
             vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayScissor);
+
+    #ifdef LOG_FRAME
+            afterRenderInitTime = high_resolution_clock::now();
+
+            fmt::println("Time spent initializing render and calling update functions: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderInitTime - afterAcquireImageResultTime).count()));
+    #endif
 
             // vertex buffer binding!!
             VkDeviceSize mainOffsets[] = {0};
