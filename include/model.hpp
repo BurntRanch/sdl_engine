@@ -11,6 +11,7 @@
 #include <glm/ext/vector_float2.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
@@ -105,48 +106,9 @@ class Model
 public:
     vector<Mesh> meshes;
 
-    std::vector<Model *> children;
-
-    ~Model() {
-        if (m_Parent) {
-            auto iter = std::find(m_Parent->children.begin(), m_Parent->children.end(), this);
-
-            if (iter < m_Parent->children.end()) {
-                m_Parent->children.erase(iter);
-            }
-        }
-    }
-
     Model() = default;
 
-    Model(const string_view path, glm::vec3 position = glm::vec3(0, 0, 0), glm::vec3 rotation = glm::vec3(0, 0, 0), glm::vec3 scale = glm::vec3(1, 1, 1));
-
-    void SetPosition(glm::vec3 pos) { 
-        m_Position = pos;
-        m_NeedsUpdate = true;
-    };
-
-    void SetRotation(glm::vec3 rot) { 
-        m_Rotation = rot;
-        m_NeedsUpdate = true;
-    };
-
-    void SetScale(glm::vec3 scale)  { 
-        m_Scale = scale;
-        m_NeedsUpdate = true;
-    };
-
-    void SetParent(Model *parent) { m_Parent = parent; parent->children.push_back(this); SetPosition(GetPosition()); SetRotation(GetRotation()); SetScale(GetScale()); };
-
-    constexpr glm::vec3 GetPosition() { return m_Position + (m_Parent != nullptr ? m_Parent->GetPosition() : glm::vec3(0)); };
-    constexpr glm::vec3 GetRotation() { return m_Rotation + (m_Parent != nullptr ? m_Parent->GetRotation() : glm::vec3(0)); };
-    constexpr glm::vec3 GetScale()    { return m_Scale * (m_Parent != nullptr ? m_Parent->GetScale() : glm::vec3(1)); };
-    constexpr Model *GetParent()      { return m_Parent; };
-
-    /* Set of functions to give position/rotation/scale without parent inheritance */
-    constexpr glm::vec3 GetRawPosition() { return m_Position; };
-    constexpr glm::vec3 GetRawRotation() { return m_Rotation; };
-    constexpr glm::vec3 GetRawScale()    { return m_Scale; };
+    Mesh processMesh(aiMesh *mesh, const aiScene *scene);
 
     /* Return the models Bounding Box, also transforms the bounding box with the Model Matrix. */
     std::array<glm::vec3, 2> GetBoundingBox() { return {glm::vec4(m_BoundingBox[0], 0.0f) * GetModelMatrix(), glm::vec4(m_BoundingBox[1], 0.0f) * GetModelMatrix()}; };
@@ -158,6 +120,7 @@ public:
 
     /* Only 1 object can be attached at a time. */
     void SetObjectAttachment(Object *object);
+    Object *GetObjectAttachment();
 
     glm::mat4 GetModelMatrix();
 
@@ -172,24 +135,7 @@ private:
     // [1] = lower
     std::array<glm::vec3, 2> m_BoundingBox;
 
-    // model data
-    //vector<Texture> textures_loaded;
-    string m_Directory;
-
-    Model *m_Parent = nullptr;
-
-    glm::vec3 m_Position;
-    glm::vec3 m_Rotation;
-    glm::vec3 m_Scale;
-
-    glm::mat4 m_ModelMatrix;
-    bool m_NeedsUpdate = false;   // flag, set to true when Position and Rotation are updated, set to false when GetModelMatrix is called.
-
-    void loadModel(string_view path);
-
-    void processNode(aiNode *node, const aiScene *scene);
-
-    Mesh processMesh(aiMesh *mesh, const aiScene *scene);
+    glm::mat4 m_ModelMatrix = glm::mat4(1.0f);
 
     //Texture loadDefaultTexture(string typeName);
 };

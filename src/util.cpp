@@ -1,10 +1,13 @@
 #include "util.hpp"
 #include "camera.hpp"
+#include "engine.hpp"
+#include "isteamnetworkingsockets.h"
 #include "rapidxml.hpp"
 #include "ui/label.hpp"
 #include "common.hpp"
 #include <algorithm>
 #include <sstream>
+#include <stdexcept>
 
 bool endsWith(const std::string_view fullString, const std::string_view ending) {
     if (ending.length() > fullString.length())
@@ -20,6 +23,44 @@ std::vector<std::string> split(const std::string_view text, const char delim) {
         vec.push_back(line);
     }
     return vec;
+}
+
+Object *DeepSearchObjectTree(Object *obj, std::function<bool(Object *)> pred) {
+    for (Object *child : obj->GetChildren()) {
+        if (pred(child)) {
+            return child;
+        }
+
+        Object *deepSearchResult = DeepSearchObjectTree(child, pred);
+        if (deepSearchResult != nullptr) {
+            return deepSearchResult;
+        }
+    }
+
+    return nullptr;
+}
+
+std::vector<std::pair<Networking_Object *, int>> FilterRelatedNetworkingObjects(std::vector<Networking_Object> &candidates, Networking_Object *object) {
+    std::vector<std::pair<Networking_Object *, int>> relatedObjects;
+
+    for (size_t i = 0; i < candidates.size(); i++) {
+        if (std::find(object->children.begin(), object->children.end(), candidates[i].ObjectID) != object->children.end()) {
+            relatedObjects.push_back(std::make_pair(&candidates[i], i));
+
+            /* Go over any candidates that we may have missed. */
+            std::vector<Networking_Object> previousCandidates{candidates.begin(), candidates.begin() + i};
+
+            std::vector<std::pair<Networking_Object *, int>> relatedPreviousCandidates = FilterRelatedNetworkingObjects(previousCandidates, &candidates[i]);
+
+            if (!relatedPreviousCandidates.empty()) {
+                relatedObjects.insert(relatedObjects.end(), relatedPreviousCandidates.begin(), relatedPreviousCandidates.end());
+            }
+
+            continue;
+        }
+    }
+
+    return relatedObjects;
 }
 
 bool intersects(const glm::vec3 &origin, const glm::vec3 &front, const std::array<glm::vec3, 2> &boundingBox) {

@@ -1,10 +1,17 @@
 #include "engine.hpp"
 
+#include "camera.hpp"
 #include "common.hpp"
 #include "fmt/base.h"
 #include "error.hpp"
 #include "fmt/format.h"
+#include "isteamnetworkingsockets.h"
+#include "object.hpp"
+#include "steamclientpublic.h"
+#include "steamnetworkingsockets.h"
 #include "model.hpp"
+#include "steamnetworkingtypes.h"
+#include "steamtypes.h"
 #include "ui/arrows.hpp"
 #include "ui/button.hpp"
 #include "ui/label.hpp"
@@ -26,11 +33,17 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <future>
+#include <glm/fwd.hpp>
+#include <iterator>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <algorithm>
 #include <thread>
+#include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 #include <vulkan/vulkan_core.h>
@@ -481,11 +494,15 @@ void Renderer::SetMouseCaptureState(bool capturing) {
     SDL_SetWindowRelativeMouseMode(m_EngineWindow, capturing);
 }
 
+void Renderer::SetPrimaryCamera(Camera *cam) {
+    m_PrimaryCamera = cam;
+}
+
 void Renderer::LoadModel(Model *model) {
     std::vector<std::future<RenderModel>> tasks;
 
     for (Mesh &mesh : model->meshes) {
-        tasks.push_back(std::async(std::launch::async, &Renderer::LoadMesh, this, std::ref(mesh), model, true));
+        tasks.push_back(std::async(std::launch::deferred, &Renderer::LoadMesh, this, std::ref(mesh), model, true));
     }
 
     // Any exception here is going to just happen and get caught like a regular engine error.
@@ -669,9 +686,10 @@ void Renderer::AddUIArrows(UI::Arrows *arrows) {
 
     renderUIArrows.arrows = arrows;
 
-    renderUIArrows.arrowRenderModels[0] = LoadMesh(arrows->arrowsModel->meshes[0], arrows->arrowsModel, false);
-    renderUIArrows.arrowRenderModels[1] = LoadMesh(arrows->arrowsModel->meshes[1], arrows->arrowsModel, false);
-    renderUIArrows.arrowRenderModels[2] = LoadMesh(arrows->arrowsModel->meshes[2], arrows->arrowsModel, false);
+    /* probably broken but UI::Arrows is basically dead as we aren't planning on making our own map editor. */
+    renderUIArrows.arrowRenderModels[0] = LoadMesh(arrows->arrowsObject->GetModelAttachments()[0]->meshes[0], arrows->arrowsObject->GetModelAttachments()[0], false);
+    renderUIArrows.arrowRenderModels[1] = LoadMesh(arrows->arrowsObject->GetModelAttachments()[0]->meshes[1], arrows->arrowsObject->GetModelAttachments()[0], false);
+    renderUIArrows.arrowRenderModels[2] = LoadMesh(arrows->arrowsObject->GetModelAttachments()[0]->meshes[2], arrows->arrowsObject->GetModelAttachments()[0], false);
 
     for (auto &arrowBuffer : renderUIArrows.arrowBuffers) {
         // matrices UBO
@@ -2006,13 +2024,23 @@ void Renderer::Start() {
     using namespace std::chrono;
 
     high_resolution_clock::time_point lastFrameTime, frameTime;
-    high_resolution_clock::time_point afterFenceTime, afterAcquireImageResultTime, afterRenderInitTime, afterRenderTime, postRenderTime;
+    high_resolution_clock::time_point afterEventsTime, afterFenceTime, afterAcquireImageResultTime, afterUpdateTime, afterRenderTime, postRenderTime;
 
     double accumulative = 0.0;
 
     lastFrameTime = high_resolution_clock::now();
 
     while (!shouldQuit) {
+        frameTime = high_resolution_clock::now();
+
+        double deltaTime = (duration_cast<duration<double>>(frameTime - lastFrameTime).count());
+
+        if (m_Settings.ReportFPS) {
+            fmt::println("{:.0f} FPS, Render Time: {:.5f}s", 1.0/deltaTime, deltaTime);
+        }
+
+        lastFrameTime = frameTime;
+
         SDL_Event event;
 
         while (SDL_PollEvent(&event)) {
@@ -2039,23 +2067,23 @@ void Renderer::Start() {
             }
         }
 
-        frameTime = high_resolution_clock::now();
+#ifdef LOG_FRAME
+            afterEventsTime = high_resolution_clock::now();
 
-        double deltaTime = (duration_cast<duration<double>>(frameTime - lastFrameTime).count());
-
-        if (m_Settings.ReportFPS) {
-            fmt::println("{:.0f} FPS, Render Time: {:.5f}s", 1.0/deltaTime, deltaTime);
-        }
-
-        lastFrameTime = frameTime;
+            fmt::println("Time spent processing events: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterEventsTime - frameTime).count()));
+#endif
 
         // we got (MAX_FRAMES_IN_FLIGHT) "slots" to use, we can write frames as long as the current frame slot we're using isn't occupied.
-        vkWaitForFences(m_EngineDevice, 1, &m_InFlightFences[currentFrameIndex], true, UINT64_MAX);
+        VkResult waitForFencesResult = vkWaitForFences(m_EngineDevice, 1, &m_InFlightFences[currentFrameIndex], true, UINT64_MAX);
+
+        if (waitForFencesResult != VK_SUCCESS) {
+            throw std::runtime_error(fmt::format(engineError::WAIT_FOR_FENCES_FAILED, string_VkResult(waitForFencesResult)));
+        }
 
 #ifdef LOG_FRAME
         afterFenceTime = high_resolution_clock::now();
 
-        fmt::println("Time spent waiting for fences: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterFenceTime - frameTime).count()));
+        fmt::println("Time spent waiting for fences: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterFenceTime - afterEventsTime).count()));
 #endif
 
         Uint32 imageIndex = 0;
@@ -2101,6 +2129,12 @@ void Renderer::Start() {
 
         for (auto &updateFunction : m_UpdateFunctions)
             updateFunction();
+
+        #ifdef LOG_FRAME
+            afterUpdateTime = high_resolution_clock::now();
+
+            fmt::println("Time spent calling update functions: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterUpdateTime - afterAcquireImageResultTime).count()));
+        #endif
 
         // "ight im available, if i wasn't already"
         vkResetFences(m_EngineDevice, 1, &m_InFlightFences[currentFrameIndex]);
@@ -2524,7 +2558,7 @@ void Renderer::Start() {
 #ifdef LOG_FRAME
         afterRenderTime = high_resolution_clock::now();
 
-        fmt::println("Time spent rendering: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderTime - afterRenderInitTime).count()));
+        fmt::println("Time spent rendering: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderTime - afterUpdateTime).count()));
 #endif
 
         if (vkEndCommandBuffer(m_CommandBuffers[currentFrameIndex]) != VK_SUCCESS)
@@ -2543,8 +2577,9 @@ void Renderer::Start() {
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &m_RenderFinishedSemaphores[currentFrameIndex];
 
-        if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFences[currentFrameIndex]) != VK_SUCCESS)
-            throw std::runtime_error(engineError::QUEUE_SUBMIT_FAILURE);
+        VkResult queueSubmitResult = vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFences[currentFrameIndex]);
+        if (queueSubmitResult != VK_SUCCESS)
+            throw std::runtime_error(fmt::format(engineError::QUEUE_SUBMIT_FAILURE, string_VkResult(queueSubmitResult)));
 
         // we finished, now we should present the frame.
         VkPresentInfoKHR presentInfo{};
@@ -2574,7 +2609,18 @@ void Renderer::Start() {
     //fixedUpdateThread.join();
 }
 
-void Engine::InitRenderer(Settings &settings, const Camera *primaryCamera) {
+Engine::~Engine() {
+    for (NetworkingThreadState &state : m_NetworkingThreadStates) {
+        if (state.status != NETWORKING_THREAD_INACTIVE) {
+            state.shouldQuit = true;
+            state.thread.join();
+        }
+    }
+
+    GameNetworkingSockets_Kill();
+}
+
+void Engine::InitRenderer(Settings &settings, Camera *primaryCamera) {
     m_Settings = &settings;
 
     m_Renderer = new Renderer(settings, primaryCamera);
@@ -2582,10 +2628,45 @@ void Engine::InitRenderer(Settings &settings, const Camera *primaryCamera) {
     m_Renderer->Init();
 
     m_Renderer->RegisterSDLEventListener(std::bind(&Engine::CheckButtonClicks, this, std::placeholders::_1), SDL_EVENT_MOUSE_BUTTON_UP);
+    m_Renderer->RegisterUpdateFunction(std::bind(&Engine::ProcessNetworkEvents, this, &m_NetworkingEvents));
+}
+
+void Engine::InitNetworking() {
+    SteamDatagramErrMsg errMsg;
+
+    if (!GameNetworkingSockets_Init(nullptr, errMsg)) {
+        throw std::runtime_error(fmt::format("Failed to initialize networking! {}", errMsg));
+    }
+
+    m_NetworkingSockets = SteamNetworkingSockets();
 }
 
 void Engine::RegisterUIButtonListener(const std::function<void(std::string)> listener) {
     m_UIButtonListeners.push_back(listener);
+}
+
+void Engine::RegisterTickUpdateHandler(const std::function<void(int)> handler, NetworkingThreadStatus status) {
+    NetworkingThreadState *state = nullptr;
+
+    switch (status) {
+        case NETWORKING_THREAD_ACTIVE_CLIENT:
+            state = &m_NetworkingThreadStates[0];
+            break;
+        case NETWORKING_THREAD_ACTIVE_SERVER:
+            state = &m_NetworkingThreadStates[1];
+            break;
+        case NETWORKING_THREAD_INACTIVE:
+        default:
+            break;
+    }
+
+    if (state != nullptr) {
+        state->tickUpdateHandlers.push_back(handler);
+    } else if (status == NETWORKING_THREAD_ACTIVE_BOTH) {
+        for (NetworkingThreadState &state : m_NetworkingThreadStates) {
+            state.tickUpdateHandlers.push_back(handler);
+        }
+    }
 }
 
 Renderer *Engine::GetRenderer() {
@@ -2650,6 +2731,26 @@ void Engine::LoadUIFile(const std::string &name) {
     }
 }
 
+void Engine::AddObject(Object *object) {
+    fmt::println("Adding Object!");
+    
+    if (m_Renderer) {
+        for (Model *model : object->GetModelAttachments()) {
+            m_Renderer->LoadModel(model);
+        }
+    }
+
+    if (object->GetCameraAttachment()) {
+        m_Cameras.push_back(object->GetCameraAttachment());
+    }
+
+    for (Object *child : object->GetChildren()) {
+        AddObject(child);
+    }
+
+    m_Objects.push_back(object);
+}
+
 /* Import an xml scene, overwriting the current one.
     * Throws std::runtime_error and rapidxml::parse_error
 
@@ -2662,7 +2763,9 @@ Output:
 bool Engine::ImportScene(const std::string &path) {
     for (Object *object : m_Objects) {
         for (Model *model : object->GetModelAttachments()) {
-            m_Renderer->UnloadModel(model);
+            if (m_Renderer) {
+                m_Renderer->UnloadModel(model);
+            }
 
             delete model;
         }
@@ -2671,241 +2774,253 @@ bool Engine::ImportScene(const std::string &path) {
     }
     m_Objects.clear();
 
-    using namespace rapidxml;
+    Object *rootObject = new Object();
 
-    std::ifstream sceneFile(path.data(), std::ios::binary | std::ios::ate);
+    rootObject->ImportFromFile(path);
 
-    if (!sceneFile.good())
-        return false;
+    AddObject(rootObject);
 
-    std::vector<char> sceneRawXML(static_cast<int>(sceneFile.tellg()) + 1);
-    
-    sceneFile.seekg(0);
-    sceneFile.read(sceneRawXML.data(), sceneRawXML.size());
-
-    xml_document<char> sceneXML;
-
-    sceneXML.parse<0>(sceneRawXML.data());
-
-    xml_node<char> *sceneNode = sceneXML.first_node("Scene");
-
-    for (xml_node <char> *objectNode = sceneNode->first_node("Object"); objectNode; objectNode = objectNode->next_sibling("Object")) {
-        
-        xml_node<char> *positionNode = objectNode->first_node("Position");
-        UTILASSERT(positionNode);
-        std::string_view positionStr(positionNode->value());
-        std::vector<std::string> positionData = split(positionStr, ' ');
-        
-        glm::vec3 position = glm::vec3(std::stof(positionData[0]), std::stof(positionData[1]), std::stof(positionData[2]));
-
-        xml_node<char> *rotationNode = objectNode->first_node("Rotation");
-        UTILASSERT(rotationNode);
-        std::string_view rotationStr(rotationNode->value());
-        std::vector<std::string> rotationData = split(rotationStr, ' ');
-        glm::vec3 rotation = glm::vec3(std::stof(rotationData[0]), std::stof(rotationData[1]), std::stof(rotationData[2]));
-
-        xml_node<char> *scaleNode = objectNode->first_node("Scale");
-        UTILASSERT(scaleNode);
-        std::string_view scaleStr(scaleNode->value());
-        std::vector<std::string> scaleData = split(scaleStr, ' ');
-        glm::vec3 scale = glm::vec3(std::stof(scaleData[0]), std::stof(scaleData[1]), std::stof(scaleData[2]));
-
-        Object *object = new Object(position, rotation, scale);
-
-        xml_node<char> *objectIDNode = objectNode->first_node("ObjectID");
-        UTILASSERT(objectIDNode);
-        std::string objectIDStr(rotationNode->value());
-        
-        object->SetObjectID(std::stoi(objectIDStr));
-
-        m_Objects.push_back(object);
-
-        for (xml_node<char> *modelNode = objectNode->first_node("Model"); modelNode; modelNode = modelNode->next_sibling("Model")) {
-            Model *model = new Model();
-
-            xml_node<char> *positionNode = modelNode->first_node("Position");
-            UTILASSERT(positionNode);
-            std::string_view positionStr(positionNode->value());
-            std::vector<std::string> positionData = split(positionStr, ' ');
-            model->SetPosition(glm::vec3(std::stof(positionData[0]), std::stof(positionData[1]), std::stof(positionData[2])));
-
-            xml_node<char> *rotationNode = modelNode->first_node("Rotation");
-            UTILASSERT(rotationNode);
-            std::string_view rotationStr(rotationNode->value());
-            std::vector<std::string> rotationData = split(rotationStr, ' ');
-            model->SetRotation(glm::vec3(std::stof(rotationData[0]), std::stof(rotationData[1]), std::stof(rotationData[2])));
-
-            xml_node<char> *scaleNode = modelNode->first_node("Scale");
-            UTILASSERT(scaleNode);
-            std::string_view scaleStr(scaleNode->value());
-            std::vector<std::string> scaleData = split(scaleStr, ' ');
-            model->SetScale(glm::vec3(std::stof(scaleData[0]), std::stof(scaleData[1]), std::stof(scaleData[2])));
-
-            for (xml_node<char> *meshNode = modelNode->first_node("Mesh"); meshNode; meshNode = meshNode->next_sibling("Mesh")) {
-                Mesh mesh;
-
-                xml_node<char> *diffuseNode = meshNode->first_node("Diffuse");
-                UTILASSERT(diffuseNode);
-                std::string_view diffuseStr(diffuseNode->value());
-                std::vector<std::string> diffuseData = split(diffuseStr, ' ');
-                mesh.diffuse = glm::vec3(std::stof(diffuseData[0]), std::stof(diffuseData[1]), std::stof(diffuseData[2]));
-
-                xml_node<char> *indicesNode = meshNode->first_node("Indices");
-                UTILASSERT(indicesNode);
-                std::string_view indicesStr(indicesNode->value());
-                std::vector<std::string> indicesData = split(indicesStr, ',');
-                mesh.indices.resize(indicesData.size());
-
-                size_t i = 0;
-                for (const std::string &str : indicesData) {
-                    mesh.indices[i] = std::stoi(str);
-                    i++;
-                }
-
-                xml_node<char> *diffuseMapPathNode = meshNode->first_node("DiffuseMap");
-                UTILASSERT(diffuseMapPathNode);
-                std::string_view diffuseMapPathStr(diffuseMapPathNode->value());
-                mesh.diffuseMapPath = diffuseMapPathStr;
-
-                for (xml_node<char> *vertexNode = meshNode->first_node("Vertex"); vertexNode; vertexNode = vertexNode->next_sibling("Vertex")) {
-                    Vertex vertex;
-
-                    xml_node<char> *vertexPositionNode = vertexNode->first_node("Position");
-                    UTILASSERT(vertexPositionNode);
-                    std::string_view vertexPositionStr(vertexPositionNode->value());
-                    std::vector<std::string> vertexPositionData = split(vertexPositionStr, ' ');
-                    vertex.Position = glm::vec3(std::stof(vertexPositionData[0]), std::stof(vertexPositionData[1]), std::stof(vertexPositionData[2]));
-
-                    xml_node<char> *vertexNormalNode = vertexNode->first_node("Normal");
-                    UTILASSERT(vertexNormalNode);
-                    std::string_view vertexNormalStr(vertexNormalNode->value());
-                    std::vector<std::string> vertexNormalData = split(vertexNormalStr, ' ');
-                    vertex.Normal = glm::vec3(std::stof(vertexNormalData[0]), std::stof(vertexNormalData[1]), std::stof(vertexNormalData[2]));
-
-                    xml_node<char> *vertexTexCoordNode = vertexNode->first_node("TexCoord");
-                    UTILASSERT(vertexTexCoordNode);
-                    std::string_view vertexTexCoordStr(vertexTexCoordNode->value());
-                    std::vector<std::string> vertexTexCoordData = split(vertexTexCoordStr, ' ');
-                    vertex.TexCoord = glm::vec2(std::stof(vertexTexCoordData[0]), std::stof(vertexTexCoordData[1]));
-
-                    glm::vec3 boundingBoxMin;
-                    glm::vec3 boundingBoxMax;
-
-                    std::array<glm::vec3, 2> modelBoundingBox = model->GetRawBoundingBox();
-
-                    boundingBoxMin.x = std::max(modelBoundingBox[0].x, vertex.Position.x);
-                    boundingBoxMin.y = std::max(modelBoundingBox[0].y, vertex.Position.y);
-                    boundingBoxMin.z = std::max(modelBoundingBox[0].z, vertex.Position.z);
-                    boundingBoxMax.x = std::min(modelBoundingBox[1].x, vertex.Position.x);
-                    boundingBoxMax.y = std::min(modelBoundingBox[1].y, vertex.Position.y);
-                    boundingBoxMax.z = std::min(modelBoundingBox[1].z, vertex.Position.z);
-
-                    model->SetBoundingBox({boundingBoxMin, boundingBoxMax});
-
-                    mesh.vertices.push_back(vertex);
-                }
-
-                model->meshes.push_back(mesh);
-            }
-
-            object->AddModelAttachment(model);
-            m_Renderer->LoadModel(model);
-        }
-    }
+    m_ScenePath = path;
 
     return true;
 }
 
-void Engine::ExportScene(const std::string &path) {
-    using namespace rapidxml;
+/* TODO: Implement with assimp */
+// void Engine::ExportScene(const std::string &path) {
+//     using namespace rapidxml;
 
-    xml_document<char> sceneXML;
+//     xml_document<char> sceneXML;
 
-    xml_node<char> *node = sceneXML.allocate_node(node_type::node_element, "Scene");
-    sceneXML.append_node(node);
+//     xml_node<char> *node = sceneXML.allocate_node(node_type::node_element, "Scene");
+//     sceneXML.append_node(node);
 
-    for (Object *object : m_Objects) {
-        xml_node<char> *objectNode = sceneXML.allocate_node(node_type::node_element, "Object");
-        node->append_node(objectNode);
+//     for (Object *object : m_Objects) {
+//         xml_node<char> *objectNode = sceneXML.allocate_node(node_type::node_element, "Object");
+//         node->append_node(objectNode);
 
-        xml_node<char> *objectIDNode = sceneXML.allocate_node(node_type::node_element, "ObjectID", fmt::to_string(object->GetObjectID()).c_str());
-        objectNode->append_node(objectIDNode);
+//         xml_node<char> *objectIDNode = sceneXML.allocate_node(node_type::node_element, "ObjectID", fmt::to_string(object->GetObjectID()).c_str());
+//         objectNode->append_node(objectIDNode);
         
-        glm::vec3 position = object->GetPosition();
-        glm::vec3 rotation = object->GetRotation();
-        glm::vec3 scale = object->GetScale();
+//         glm::vec3 position = object->GetPosition();
+//         glm::vec3 rotation = object->GetRotation();
+//         glm::vec3 scale = object->GetScale();
 
-        std::string positionStr = fmt::format("{} {} {}", position.x, position.y, position.z);
-        xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(positionStr.c_str()));
-        objectNode->append_node(positionNode);
+//         std::string positionStr = fmt::format("{} {} {}", position.x, position.y, position.z);
+//         xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(positionStr.c_str()));
+//         objectNode->append_node(positionNode);
 
-        std::string rotationStr = fmt::format("{} {} {}", rotation.x, rotation.y, rotation.z);
-        xml_node<char> *rotationNode = sceneXML.allocate_node(node_type::node_element, "Rotation", sceneXML.allocate_string(rotationStr.c_str()));
-        objectNode->append_node(rotationNode);
+//         std::string rotationStr = fmt::format("{} {} {}", rotation.x, rotation.y, rotation.z);
+//         xml_node<char> *rotationNode = sceneXML.allocate_node(node_type::node_element, "Rotation", sceneXML.allocate_string(rotationStr.c_str()));
+//         objectNode->append_node(rotationNode);
 
-        std::string scaleStr = fmt::format("{} {} {}", scale.x, scale.y, scale.z);
-        xml_node<char> *scaleNode = sceneXML.allocate_node(node_type::node_element, "Scale", sceneXML.allocate_string(scaleStr.c_str()));
-        objectNode->append_node(scaleNode);
+//         std::string scaleStr = fmt::format("{} {} {}", scale.x, scale.y, scale.z);
+//         xml_node<char> *scaleNode = sceneXML.allocate_node(node_type::node_element, "Scale", sceneXML.allocate_string(scaleStr.c_str()));
+//         objectNode->append_node(scaleNode);
 
-        for (Model *model : object->GetModelAttachments()) {
-            xml_node<char> *modelNode = sceneXML.allocate_node(node_type::node_element, "Model");
-            objectNode->append_node(modelNode);
+//         for (Model *model : object->GetModelAttachments()) {
+//             xml_node<char> *modelNode = sceneXML.allocate_node(node_type::node_element, "Model");
+//             objectNode->append_node(modelNode);
 
-            glm::vec3 position = model->GetPosition();
-            glm::vec3 rotation = model->GetRotation();
-            glm::vec3 scale = model->GetScale();
+//             glm::vec3 position = model->GetPosition();
+//             glm::vec3 rotation = model->GetRotation();
+//             glm::vec3 scale = model->GetScale();
 
-            std::string positionStr = fmt::format("{} {} {}", position.x, position.y, position.z);
-            xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(positionStr.c_str()));
-            modelNode->append_node(positionNode);
+//             std::string positionStr = fmt::format("{} {} {}", position.x, position.y, position.z);
+//             xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(positionStr.c_str()));
+//             modelNode->append_node(positionNode);
 
-            std::string rotationStr = fmt::format("{} {} {}", rotation.x, rotation.y, rotation.z);
-            xml_node<char> *rotationNode = sceneXML.allocate_node(node_type::node_element, "Rotation", sceneXML.allocate_string(rotationStr.c_str()));
-            modelNode->append_node(rotationNode);
+//             std::string rotationStr = fmt::format("{} {} {}", rotation.x, rotation.y, rotation.z);
+//             xml_node<char> *rotationNode = sceneXML.allocate_node(node_type::node_element, "Rotation", sceneXML.allocate_string(rotationStr.c_str()));
+//             modelNode->append_node(rotationNode);
 
-            std::string scaleStr = fmt::format("{} {} {}", scale.x, scale.y, scale.z);
-            xml_node<char> *scaleNode = sceneXML.allocate_node(node_type::node_element, "Scale", sceneXML.allocate_string(scaleStr.c_str()));
-            modelNode->append_node(scaleNode);
+//             std::string scaleStr = fmt::format("{} {} {}", scale.x, scale.y, scale.z);
+//             xml_node<char> *scaleNode = sceneXML.allocate_node(node_type::node_element, "Scale", sceneXML.allocate_string(scaleStr.c_str()));
+//             modelNode->append_node(scaleNode);
 
-            for (Mesh &mesh : model->meshes) {
-                xml_node<char> *meshNode = sceneXML.allocate_node(node_type::node_element, "Mesh");
-                modelNode->append_node(meshNode);
+//             for (Mesh &mesh : model->meshes) {
+//                 xml_node<char> *meshNode = sceneXML.allocate_node(node_type::node_element, "Mesh");
+//                 modelNode->append_node(meshNode);
 
-                std::string diffuseStr = fmt::format("{} {} {}", mesh.diffuse.x, mesh.diffuse.y, mesh.diffuse.z);
-                xml_node<char> *diffuseNode = sceneXML.allocate_node(node_type::node_element, "Diffuse", sceneXML.allocate_string(diffuseStr.c_str()));
-                meshNode->append_node(diffuseNode);
+//                 std::string diffuseStr = fmt::format("{} {} {}", mesh.diffuse.x, mesh.diffuse.y, mesh.diffuse.z);
+//                 xml_node<char> *diffuseNode = sceneXML.allocate_node(node_type::node_element, "Diffuse", sceneXML.allocate_string(diffuseStr.c_str()));
+//                 meshNode->append_node(diffuseNode);
 
-                std::string indicesStr = fmt::to_string(fmt::join(mesh.indices, ","));
-                xml_node<char> *indicesNode = sceneXML.allocate_node(node_type::node_element, "Indices", sceneXML.allocate_string(indicesStr.c_str()));
-                meshNode->append_node(indicesNode);
+//                 std::string indicesStr = fmt::to_string(fmt::join(mesh.indices, ","));
+//                 xml_node<char> *indicesNode = sceneXML.allocate_node(node_type::node_element, "Indices", sceneXML.allocate_string(indicesStr.c_str()));
+//                 meshNode->append_node(indicesNode);
 
-                xml_node<char> *diffuseMapPathNode = sceneXML.allocate_node(node_type::node_element, "DiffuseMap", mesh.diffuseMapPath.c_str());
-                meshNode->append_node(diffuseMapPathNode);
+//                 xml_node<char> *diffuseMapPathNode = sceneXML.allocate_node(node_type::node_element, "DiffuseMap", mesh.diffuseMapPath.c_str());
+//                 meshNode->append_node(diffuseMapPathNode);
 
-                for (Vertex vert : mesh.vertices) {
-                    xml_node<char> *vertexNode = sceneXML.allocate_node(node_type::node_element, "Vertex");
-                    meshNode->append_node(vertexNode);
+//                 for (Vertex vert : mesh.vertices) {
+//                     xml_node<char> *vertexNode = sceneXML.allocate_node(node_type::node_element, "Vertex");
+//                     meshNode->append_node(vertexNode);
 
-                    std::string vertPositionStr = fmt::format("{} {} {}", vert.Position.x, vert.Position.y, vert.Position.z);
-                    xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(vertPositionStr.c_str()));
-                    vertexNode->append_node(positionNode);
+//                     std::string vertPositionStr = fmt::format("{} {} {}", vert.Position.x, vert.Position.y, vert.Position.z);
+//                     xml_node<char> *positionNode = sceneXML.allocate_node(node_type::node_element, "Position", sceneXML.allocate_string(vertPositionStr.c_str()));
+//                     vertexNode->append_node(positionNode);
                     
-                    std::string vertNormalStr = fmt::format("{} {} {}", vert.Normal.x, vert.Normal.y, vert.Normal.z);
-                    xml_node<char> *normalNode = sceneXML.allocate_node(node_type::node_element, "Normal", sceneXML.allocate_string(vertNormalStr.c_str()));
-                    vertexNode->append_node(normalNode);
+//                     std::string vertNormalStr = fmt::format("{} {} {}", vert.Normal.x, vert.Normal.y, vert.Normal.z);
+//                     xml_node<char> *normalNode = sceneXML.allocate_node(node_type::node_element, "Normal", sceneXML.allocate_string(vertNormalStr.c_str()));
+//                     vertexNode->append_node(normalNode);
                     
-                    std::string vertTexCoordStr = fmt::format("{} {}", vert.TexCoord.x, vert.TexCoord.y);
-                    xml_node<char> *texCoordNode = sceneXML.allocate_node(node_type::node_element, "TexCoord", sceneXML.allocate_string(vertTexCoordStr.c_str()));
-                    vertexNode->append_node(texCoordNode);
-                }
-            }
-        }
+//                     std::string vertTexCoordStr = fmt::format("{} {}", vert.TexCoord.x, vert.TexCoord.y);
+//                     xml_node<char> *texCoordNode = sceneXML.allocate_node(node_type::node_element, "TexCoord", sceneXML.allocate_string(vertTexCoordStr.c_str()));
+//                     vertexNode->append_node(texCoordNode);
+//                 }
+//             }
+//         }
+//     }
+
+//     std::ofstream targetFile(path);
+//     targetFile << sceneXML;
+
+//     sceneXML.clear();
+// }
+
+void Engine::AttachCameraToConnection(Camera *cam, HSteamNetConnection conn) {
+    m_ConnToCameraAttachment[conn] = cam;
+}
+
+void Engine::ConnectToGameServer(SteamNetworkingIPAddr ipAddr) {
+    SteamNetworkingConfigValue_t opt{};    
+
+    opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, (void *)onConnectionStatusChangedCallback);
+
+    HSteamNetConnection netConnection = m_NetworkingSockets->ConnectByIPAddress(ipAddr, 1, &opt);
+    
+    if (netConnection == k_HSteamNetConnection_Invalid) {
+        throw std::runtime_error("Failed to connect to server!");
     }
 
-    std::ofstream targetFile(path);
-    targetFile << sceneXML;
+    InitNetworkingThread(NETWORKING_THREAD_ACTIVE_CLIENT);
+}
 
-    sceneXML.clear();
+void Engine::HostGameServer(SteamNetworkingIPAddr ipAddr) {
+    SteamNetworkingConfigValue_t opt{};
+    
+    opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, (void *)(onConnectionStatusChangedCallback));
+
+    m_NetListenSocket = m_NetworkingSockets->CreateListenSocketIP(ipAddr, 1, &opt);
+
+    if (m_NetListenSocket == k_HSteamListenSocket_Invalid) {
+        throw std::runtime_error("Failed to create listen socket!");
+    }
+
+    m_NetPollGroup = m_NetworkingSockets->CreatePollGroup();
+
+    if (m_NetPollGroup == k_HSteamNetPollGroup_Invalid) {
+        throw std::runtime_error("Failed to create poll group!");
+    }
+
+    fmt::println("Created a listen socket!");
+
+    InitNetworkingThread(NETWORKING_THREAD_ACTIVE_SERVER);
+}
+
+void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *callbackInfo) {
+    fmt::println("Connection status changed!! ({})", (int)callbackInfo->m_info.m_eState);
+
+    switch (callbackInfo->m_info.m_eState) {
+        case k_ESteamNetworkingConnectionState_None:
+            break;
+        
+        case k_ESteamNetworkingConnectionState_ClosedByPeer:
+        case k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
+            if (callbackInfo->m_eOldState == k_ESteamNetworkingConnectionState_Connected)
+			{
+                if (m_NetworkingThreadStates[1].status & NETWORKING_THREAD_ACTIVE_SERVER) {
+                    NetworkingThreadState &state = m_NetworkingThreadStates[1];
+
+                    auto conn = std::find(state.netConnections.begin(), state.netConnections.end(), callbackInfo->m_hConn);
+                    UTILASSERT(conn != state.netConnections.end());
+
+                    state.netConnections.erase(conn);
+
+                    if (m_EventTypeToListenerMap.find(EVENT_CLIENT_DISCONNECTED) != m_EventTypeToListenerMap.end()) {
+                        for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
+                            listener(callbackInfo->m_hConn);
+                        }
+                    }
+                /* if its a client */
+                } else {
+                    UTILASSERT(m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT);
+
+                    NetworkingThreadState &state = m_NetworkingThreadStates[0];
+                    UTILASSERT(state.netConnections.size() == 1 && state.netConnections[0] == callbackInfo->m_hConn);
+
+                    state.netConnections.erase(state.netConnections.begin());
+
+                    if (m_EventTypeToListenerMap.find(EVENT_DISCONNECTED_FROM_SERVER) != m_EventTypeToListenerMap.end()) {
+                        for (auto &listener : m_EventTypeToListenerMap[EVENT_DISCONNECTED_FROM_SERVER]) {
+                            listener(callbackInfo->m_hConn);
+                        }
+                    }
+                }
+
+                m_NetworkingSockets->CloseConnection(callbackInfo->m_hConn, 0, nullptr, false);
+            }
+
+            break;
+        case k_ESteamNetworkingConnectionState_Connecting:
+            if (m_NetworkingThreadStates[1].status & NETWORKING_THREAD_ACTIVE_SERVER) {
+                fmt::println("We're getting a connection!");
+
+                NetworkingThreadState &state = m_NetworkingThreadStates[1];
+
+                /* This callback only happens when a new client is connecting. */
+                UTILASSERT(std::find(state.netConnections.begin(), state.netConnections.end(), callbackInfo->m_hConn) == state.netConnections.end());
+
+                if (m_NetworkingSockets->AcceptConnection(callbackInfo->m_hConn) != k_EResultOK) {
+                    m_NetworkingSockets->CloseConnection(callbackInfo->m_hConn, 0, nullptr, false);
+
+                    break;
+                }
+                
+                if (!m_NetworkingSockets->SetConnectionPollGroup(callbackInfo->m_hConn, m_NetPollGroup)) {
+                    m_NetworkingSockets->CloseConnection(callbackInfo->m_hConn, 0, nullptr, false);
+
+                    break;
+                }
+
+                if (m_EventTypeToListenerMap.find(EVENT_CLIENT_CONNECTED) != m_EventTypeToListenerMap.end()) {
+                    for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_CONNECTED]) {
+                        listener(callbackInfo->m_hConn);
+                    }
+                }
+
+                SendFullUpdateToConnection(callbackInfo->m_hConn, state.tickNumber);
+
+                state.netConnections.push_back(callbackInfo->m_hConn);
+            } else {
+                UTILASSERT(m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT);
+                UTILASSERT(m_NetworkingThreadStates[0].netConnections.size() < 1);
+
+                m_NetworkingThreadStates[0].netConnections.push_back(callbackInfo->m_hConn);
+
+                if (m_EventTypeToListenerMap.find(EVENT_CONNECTED_TO_SERVER) != m_EventTypeToListenerMap.end()) {
+                    for (auto &listener : m_EventTypeToListenerMap[EVENT_CONNECTED_TO_SERVER]) {
+                        listener(callbackInfo->m_hConn);
+                    }
+                }
+            }
+
+            break;
+        
+        case k_ESteamNetworkingConnectionState_Connected:
+            break;
+
+        default:
+            break;
+    }
+}
+
+void Engine::RegisterNetworkListener(const std::function<void(HSteamNetConnection)> listener, NetworkingEventType listenerTarget) {
+    if (m_EventTypeToListenerMap.find(listenerTarget) == m_EventTypeToListenerMap.end()) {
+        m_EventTypeToListenerMap[listenerTarget] = std::vector<std::function<void(HSteamNetConnection)>>();
+    }
+
+    m_EventTypeToListenerMap[listenerTarget].push_back(listener);
 }
 
 UI::GenericElement *Engine::GetElementByID(const std::string &id) {
@@ -2931,3 +3046,839 @@ void Engine::UnregisterUIButton(UI::Button *button) {
 
     return;
 }
+
+void Engine::InitNetworkingThread(NetworkingThreadStatus status) {
+    fmt::println("Initializing network thread to {}!", (int)status);
+
+    if (status == NETWORKING_THREAD_ACTIVE_CLIENT) {
+        NetworkingThreadState &state = m_NetworkingThreadStates[0];
+
+        if (state.status != NETWORKING_THREAD_INACTIVE) {
+            return;
+        }
+
+        state.thread = std::thread(&Engine::NetworkingThreadClient_Main, this, std::ref(state));
+    } else if (status == NETWORKING_THREAD_ACTIVE_SERVER) {
+        NetworkingThreadState &state = m_NetworkingThreadStates[1];
+
+        if (state.status != NETWORKING_THREAD_INACTIVE) {
+            return;
+        }
+
+        state.thread = std::thread(&Engine::NetworkingThreadServer_Main, this, std::ref(state));
+    }
+}
+
+void Engine::NetworkingThreadClient_Main(NetworkingThreadState &state) {
+    fmt::println("Started client networking thread!");
+    state.status |= NETWORKING_THREAD_ACTIVE_CLIENT;
+
+    using namespace std::chrono;
+
+    high_resolution_clock::time_point lastTickTime = high_resolution_clock::now();
+    double accumulativeTickTime = 0;
+
+    while (!state.shouldQuit) {
+        high_resolution_clock::time_point now = high_resolution_clock::now();
+
+        double tickDeltaTime = (duration_cast<duration<double>>(now - lastTickTime).count());
+
+        accumulativeTickTime += tickDeltaTime;
+
+        /* hardcoded 64 tick, to be replaced. */
+        if (accumulativeTickTime < (1.0f/64.0f)) {
+            std::this_thread::sleep_for(milliseconds(8));  /* keep waking up at half the time just incase */
+            continue;
+        }
+
+        accumulativeTickTime -= (1.0f / 64.0f);
+
+        state.tickNumber++;
+        
+        for (auto handler : state.tickUpdateHandlers) {
+            handler(state.tickNumber);
+        }
+
+        m_CallbackInstance = this;
+        m_NetworkingSockets->RunCallbacks();
+
+        /* Receiving */
+        ISteamNetworkingMessage *incomingMessages;
+        int msgCount = m_NetworkingSockets->ReceiveMessagesOnConnection(state.netConnections[0], &incomingMessages, 1);
+
+        if (msgCount < 0) {
+            throw std::runtime_error("Error receiving messages from server!");
+        }
+        if (msgCount > 0) {
+            for (int i = 0; i < msgCount; i++) {
+                ISteamNetworkingMessage *incomingMessage = incomingMessages + (i * sizeof(ISteamNetworkingMessage));
+
+                if (incomingMessage->GetSize() < sizeof(size_t)) {
+                    fmt::println("Invalid packet!");
+                } else {
+                    const void *data = incomingMessage->GetData();
+                    
+                    std::vector<std::byte> message{reinterpret_cast<const std::byte *>(data), reinterpret_cast<const std::byte *>(data) + incomingMessage->GetSize()};
+
+                    Networking_StatePacket packet = DeserializePacket(message);
+
+                    fmt::println("New state packet just dropped! {} objects sent by server", packet.objects.size());
+
+                    /* add a dummy type */
+                    Networking_Event event{NETWORKING_NULL, {}, {}, {}};
+                    std::lock_guard<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
+
+                    if (state.lastSyncedTickNumber == -1) {
+                        event.type = NETWORKING_INITIAL_UPDATE;
+                        event.packet = packet;
+
+                        /* Don't forget this, this could be used for prediction in the future. */
+                        state.tickNumber = packet.tickNumber;
+
+                        m_NetworkingEvents.push_back(event);
+                    } else {
+                        for (Networking_Object &networkingObject : packet.objects) {
+                            auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [networkingObject] (Object *obj) { return obj->GetObjectID() == networkingObject.ObjectID; });
+
+                            event.object = networkingObject;
+
+                            /* If the scene changed, we should wait until the scene is properly loaded */
+                            if (it == m_Objects.end()) {
+                                event.type = NETWORKING_NEW_OBJECT;
+
+                                m_NetworkingEvents.push_back(event);
+
+                                continue;
+                            }
+
+                            // Object *obj = m_Objects.at(std::distance(m_Objects.begin(), it));
+
+                            // UTILASSERT(obj);
+
+                            event.type = NETWORKING_UPDATE_OBJECT;
+
+                            m_NetworkingEvents.push_back(event);
+                        }
+                    }
+
+                    state.lastSyncedTickNumber = packet.tickNumber;
+                }
+                
+                incomingMessage->Release();
+            }
+        }
+
+
+        /* Sending */
+        // ...
+    }
+
+    fmt::println("Stopping client networking thread!");
+
+    DisconnectFromServer();
+    state.status &= ~NETWORKING_THREAD_ACTIVE_CLIENT;
+    state.lastSyncedTickNumber = -1;
+    state.tickNumber = -1;
+    state.shouldQuit = false;
+}
+
+
+
+void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
+    if (!m_NetListenSocket) {
+        throw std::runtime_error("Networking Thread initialized with no networking connection!");
+    }
+
+    fmt::println("Started server networking thread!");
+    state.status |= NETWORKING_THREAD_ACTIVE_SERVER;
+
+    using namespace std::chrono;
+
+    high_resolution_clock::time_point lastTickTime = high_resolution_clock::now();
+    double accumulativeTickTime = 0;
+
+    while (!state.shouldQuit) {
+        high_resolution_clock::time_point now = high_resolution_clock::now();
+
+        double tickDeltaTime = (duration_cast<duration<double>>(now - lastTickTime).count());
+
+        accumulativeTickTime += tickDeltaTime;
+
+        /* hardcoded 64 tick, to be replaced. */
+        if (accumulativeTickTime < (1.0f/64.0f)) {
+            std::this_thread::sleep_for(milliseconds(8));  /* keep waking up at half the time just incase */
+            continue;
+        }
+
+        accumulativeTickTime -= (1.0f / 64.0f);
+
+        state.tickNumber++;
+        
+        for (auto handler : state.tickUpdateHandlers) {
+            handler(state.tickNumber);
+        }
+
+        m_CallbackInstance = this;
+        m_NetworkingSockets->RunCallbacks();
+
+        ISteamNetworkingMessage *incomingMessages;
+        
+        /* TODO: This stupid thing doesn't receive client requests. */
+        int msgCount = m_NetworkingSockets->ReceiveMessagesOnPollGroup(m_NetPollGroup, &incomingMessages, 1);
+        
+        if (msgCount < 0) {
+            throw std::runtime_error("Error receiving messages from a client!");
+        }
+        if (msgCount > 0) {
+            for (int i = 0; i < msgCount; i++) {
+                ISteamNetworkingMessage *incomingMessage = incomingMessages + (i * sizeof(ISteamNetworkingMessage));
+
+                if (incomingMessage->GetSize() < sizeof(int)) {
+                    fmt::println("Invalid packet!");
+                } else {
+                    const void *data = incomingMessage->GetData();
+                    
+                    std::vector<std::byte> message{reinterpret_cast<const std::byte *>(data), reinterpret_cast<const std::byte *>(data) + incomingMessage->GetSize()};
+
+                    Networking_ClientRequest packet;
+
+                    DeserializeClientRequest(message, packet);
+
+                    switch (packet.requestType) {
+                        case CLIENT_REQUEST_DISCONNECT:
+                            DisconnectClientFromServer(incomingMessage->GetConnection());
+                            break;
+                    }
+                }
+                
+                incomingMessage->Release();
+            }
+        }
+
+        for (HSteamNetConnection &netConnection : state.netConnections) {
+            SendUpdateToConnection(netConnection, state.tickNumber);
+        }
+
+        lastTickTime = now;
+    }
+
+    fmt::println("Stopping server networking thread!");
+
+    StopHostingGameServer();
+    state.status &= ~NETWORKING_THREAD_ACTIVE_SERVER;
+    state.lastSyncedTickNumber = -1;
+    state.tickNumber = -1;
+    state.shouldQuit = false;
+}
+
+void Engine::DisconnectFromServer() {
+    NetworkingThreadState &state = m_NetworkingThreadStates[0];
+
+    UTILASSERT(state.netConnections.size() == 1);
+
+    if (m_EventTypeToListenerMap.find(EVENT_DISCONNECTED_FROM_SERVER) != m_EventTypeToListenerMap.end()) {
+        for (auto &listener : m_EventTypeToListenerMap[EVENT_DISCONNECTED_FROM_SERVER]) {
+            listener(state.netConnections[0]);
+        }
+    }
+
+    /* TODO: this should work but idk why the server doesn't receive anything. */
+    std::vector<std::byte> serializedDisconnectRequest;
+    Networking_ClientRequest clientRequest{CLIENT_REQUEST_DISCONNECT};
+    SerializeClientRequest(clientRequest, serializedDisconnectRequest);
+    EResult result = m_NetworkingSockets->SendMessageToConnection(state.netConnections[0], serializedDisconnectRequest.data(), serializedDisconnectRequest.size(), k_nSteamNetworkingSend_Reliable, nullptr);
+    if (result != k_EResultOK) {
+        fmt::println("Couldn't send disconnect to server! {}", (int)result);
+    } else {
+        fmt::println("Sent disconnect request to server!");
+    }
+
+    m_NetworkingSockets->CloseConnection(state.netConnections[0], 0, nullptr, true);
+}
+
+void Engine::DisconnectClientFromServer(HSteamNetConnection connection) {
+    NetworkingThreadState &state = m_NetworkingThreadStates[1];
+
+    auto it = std::find(state.netConnections.begin(), state.netConnections.end(), connection);
+    UTILASSERT(it != state.netConnections.end());
+
+    if (m_EventTypeToListenerMap.find(EVENT_CLIENT_DISCONNECTED) != m_EventTypeToListenerMap.end()) {
+        for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
+            listener(connection);
+        }
+    }
+
+    m_NetworkingSockets->CloseConnection(connection, 0, nullptr, true);
+
+    state.netConnections.erase(it);
+}
+
+void Engine::StopHostingGameServer() {
+    NetworkingThreadState &state = m_NetworkingThreadStates[1];
+
+    if (state.status & NETWORKING_THREAD_ACTIVE_SERVER) {
+        while (state.netConnections.size() != 0) {
+            DisconnectClientFromServer(state.netConnections[0]);
+        }
+
+        if (m_NetListenSocket != k_HSteamListenSocket_Invalid) {
+            m_NetworkingSockets->CloseListenSocket(m_NetListenSocket);
+        }
+    }
+}
+
+void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvents) {
+    std::unique_lock<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
+
+    /* only for initial updates */
+    std::vector<Networking_Event> newEvents;
+
+    while (!networkingEvents->empty()) {
+        Networking_Event &event = (*networkingEvents)[0];
+
+        Object *object;
+        Camera *camera;
+
+        Networking_Object objectPacket;
+        Networking_Camera cameraPacket;
+
+        switch (event.type) {
+            case NETWORKING_INITIAL_UPDATE:
+                /* event.packet MUST be set, This will automatically error out for us in the rare case of it not actually being set. */
+                for (Networking_Camera &camera : event.packet.value().cameras) {
+                    Networking_Event event;
+
+                    event.type = NETWORKING_NEW_CAMERA;
+                    event.camera = camera;
+
+                    newEvents.push_back(event);
+                }
+
+                for (Networking_Object &object : event.packet.value().objects) {
+                    Networking_Event event;
+
+                    event.type = NETWORKING_NEW_OBJECT;
+                    event.object = object;
+
+                    newEvents.push_back(event);
+                }
+
+                networkingEventsLockGuard.unlock();
+                ProcessNetworkEvents(&newEvents);
+                networkingEventsLockGuard.lock();
+
+                break;
+            case NETWORKING_NEW_CAMERA:
+                cameraPacket = event.camera.value();
+
+                camera = new Camera(cameraPacket.up, cameraPacket.yaw, cameraPacket.pitch);
+
+                camera->SetCameraID(cameraPacket.cameraID);
+                
+                camera->Pitch = cameraPacket.pitch;
+                camera->Yaw = cameraPacket.yaw;
+
+                camera->Up = cameraPacket.up;
+
+                camera->FOV = cameraPacket.fov;
+                
+                if (cameraPacket.isMainCamera && !m_MainCamera) {
+                    m_MainCamera = camera;
+                    m_Renderer->SetPrimaryCamera(camera);
+                }
+
+                m_Cameras.push_back(camera);
+
+                break;
+            case NETWORKING_NEW_OBJECT:
+                object = new Object();
+
+                objectPacket = event.object.value();
+
+                if (objectPacket.isGeneratedFromFile && objectPacket.objectSourceFile != "") {
+                    /* TODO: Sanitize */
+                    object->ImportFromFile(objectPacket.objectSourceFile);
+
+                    std::vector<std::pair<Networking_Object *, int>> relatedObjects = FilterRelatedNetworkingObjects(m_ObjectsFromImportedObject, &objectPacket);
+
+                    int offset = 0;
+                    for (auto &generatedObjectPair : relatedObjects) {
+                        Networking_Object *generatedObject = generatedObjectPair.first;
+                        m_ObjectsFromImportedObject.erase(m_ObjectsFromImportedObject.begin() + (generatedObjectPair.second - offset++));
+
+                        Object *childEquivalent = DeepSearchObjectTree(object, [generatedObject] (Object *child) { return child->GetSourceID() == generatedObject->objectSourceID; });
+                        UTILASSERT(childEquivalent);
+
+                        childEquivalent->SetObjectID(generatedObject->ObjectID);
+
+                        childEquivalent->SetPosition(generatedObject->position);
+                        childEquivalent->SetRotation(generatedObject->rotation);
+                        childEquivalent->SetScale(generatedObject->scale);
+
+                        /* assuming its not all generated */
+                        for (int &childID : generatedObject->children) {
+                            auto previousObjectPtr = std::find_if(m_PreviousObjects.begin(), m_PreviousObjects.end(), [childID] (Object *&packet) { return packet->GetObjectID() == childID; });
+
+                            if (previousObjectPtr == m_PreviousObjects.end()) {
+                                continue;
+                            }
+
+                            Object *previousObject = *previousObjectPtr;
+
+                            previousObject->SetParent(childEquivalent);
+
+                            m_PreviousObjects.erase(previousObjectPtr);
+                        }
+
+                        if (childEquivalent->GetCameraAttachment() != nullptr) {
+                            for (Camera *cam : m_Cameras) {
+                                if (cam->GetCameraID() == generatedObject->cameraAttachment) {
+                                    Camera *oldCamera = childEquivalent->GetCameraAttachment();
+
+                                    childEquivalent->SetCameraAttachment(cam);
+
+                                    /* TODO: Create RemoveObject and RemoveCamera */
+                                    m_Cameras.erase(std::find(m_Cameras.begin(), m_Cameras.end(), oldCamera));
+
+                                    delete oldCamera;
+                                }
+                            }
+                        }
+                    }
+                } else if (objectPacket.isGeneratedFromFile) {
+                    m_ObjectsFromImportedObject.push_back(objectPacket);
+                    
+                    networkingEvents->erase(networkingEvents->begin());
+                    continue;
+                }
+
+                object->SetObjectID(objectPacket.ObjectID);
+
+                object->SetPosition(objectPacket.position);
+                object->SetRotation(objectPacket.rotation);
+                object->SetScale(objectPacket.scale);
+
+                /* assuming its not all generated */
+                for (int &childID : objectPacket.children) {
+                    auto previousObjectPtr = std::find_if(m_PreviousObjects.begin(), m_PreviousObjects.end(), [childID] (Object *&packet) { return packet->GetObjectID() == childID; });
+
+                    if (previousObjectPtr == m_PreviousObjects.end()) {
+                        continue;
+                    }
+
+                    Object *previousObject = *previousObjectPtr;
+
+                    previousObject->SetParent(object);
+
+                    m_PreviousObjects.erase(previousObjectPtr);
+                }
+
+                if (object->GetCameraAttachment() != nullptr) {
+                    for (Camera *cam : m_Cameras) {
+                        if (cam->GetCameraID() == objectPacket.cameraAttachment) {
+                            object->SetCameraAttachment(cam);
+                        }
+                    }
+                }
+
+                m_PreviousObjects.push_back(object);
+
+                AddObject(object);
+
+                break;
+            case NETWORKING_UPDATE_OBJECT:
+                objectPacket = event.object.value();
+
+                object = GetObjectByID(objectPacket.ObjectID);
+                UTILASSERT(object);
+
+                object->SetPosition(objectPacket.position);
+                object->SetRotation(objectPacket.rotation);
+                object->SetScale(objectPacket.scale);
+
+                /* TODO: inheritance, and tons of other stuff to synchronize. */
+                /* note to self: this doesn't seem to end at all.. so many things to synchronize in so many different ways.... */
+
+                break;
+            default:
+                break;
+        }
+
+        networkingEvents->erase(networkingEvents->begin());
+    }
+}
+
+Object *Engine::GetObjectByID(int ObjectID) {
+    auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [ObjectID] (Object *&obj) { return ObjectID == obj->GetObjectID(); });
+
+    if (it == m_Objects.end()) {
+        return nullptr;
+    }
+
+    return *it;
+}
+
+Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &serializedPacket) {
+    Networking_StatePacket statePacket{};
+
+    Deserialize(serializedPacket, statePacket.tickNumber);
+
+    size_t camerasCount;
+    Deserialize(serializedPacket, camerasCount);
+
+    for (size_t i = 0; i < camerasCount; i++) {
+        Networking_Camera cameraPacket;
+
+        DeserializeNetworkingCamera(serializedPacket, cameraPacket);
+
+        statePacket.cameras.push_back(cameraPacket);
+    }
+
+    size_t objectsCount;
+    Deserialize(serializedPacket, objectsCount);
+
+    for (size_t i = 0; i < objectsCount; i++) {
+        Networking_Object objectPacket;
+
+        DeserializeNetworkingObject(serializedPacket, objectPacket);
+
+        statePacket.objects.push_back(objectPacket);
+    }
+
+    return statePacket;
+}
+
+void Engine::DeserializeNetworkingObject(std::vector<std::byte> &serializedObjectPacket, Networking_Object &dest) {
+    Deserialize(serializedObjectPacket, dest.ObjectID);
+
+    Deserialize(serializedObjectPacket, dest.position.x);
+    Deserialize(serializedObjectPacket, dest.position.y);
+    Deserialize(serializedObjectPacket, dest.position.z);
+
+    Deserialize(serializedObjectPacket, dest.rotation.x);
+    Deserialize(serializedObjectPacket, dest.rotation.y);
+    Deserialize(serializedObjectPacket, dest.rotation.z);
+    Deserialize(serializedObjectPacket, dest.rotation.w);
+
+    Deserialize(serializedObjectPacket, dest.scale.x);
+    Deserialize(serializedObjectPacket, dest.scale.y);
+    Deserialize(serializedObjectPacket, dest.scale.z);
+
+    Deserialize(serializedObjectPacket, dest.isGeneratedFromFile);
+
+    if (dest.isGeneratedFromFile) {
+        Deserialize(serializedObjectPacket, dest.objectSourceFile);
+        Deserialize(serializedObjectPacket, dest.objectSourceID);
+    }
+
+    size_t childrenListSize;
+    Deserialize(serializedObjectPacket, childrenListSize);
+
+    for (size_t i = 0; i < childrenListSize; i++) {
+        int childObjectID;
+        Deserialize(serializedObjectPacket, childObjectID);
+
+        dest.children.push_back(childObjectID);
+    }
+
+    Deserialize(serializedObjectPacket, dest.cameraAttachment);
+}
+
+void Engine::DeserializeNetworkingCamera(std::vector<std::byte> &serializedCameraPacket, Networking_Camera &dest) {
+    Deserialize(serializedCameraPacket, dest.cameraID);
+
+    Deserialize(serializedCameraPacket, dest.pitch);
+    Deserialize(serializedCameraPacket, dest.yaw);
+
+    Deserialize(serializedCameraPacket, dest.up.x);
+    Deserialize(serializedCameraPacket, dest.up.y);
+
+    Deserialize(serializedCameraPacket, dest.fov);
+    Deserialize(serializedCameraPacket, dest.isMainCamera);
+}
+
+std::optional<Networking_Object> Engine::AddObjectToStatePacket(Object *object, Networking_StatePacket &statePacket, bool includeChildren, bool isRecursive) {
+    if (object->GetParent() != nullptr && !isRecursive) {
+        return {};
+    }
+
+    Networking_Object objectPacket{};
+
+    objectPacket.ObjectID = object->GetObjectID();
+    
+    objectPacket.position = object->GetPosition();
+    objectPacket.rotation = object->GetRotation();
+    objectPacket.scale = object->GetScale();
+
+    objectPacket.objectSourceFile = object->GetSourceFile();
+    objectPacket.isGeneratedFromFile = object->IsGeneratedFromFile();
+    objectPacket.objectSourceID = object->GetSourceID();
+
+    if (object->GetCameraAttachment()) {
+        objectPacket.cameraAttachment = object->GetCameraAttachment()->GetCameraID();
+    }
+
+    /* Put children before the parent. */
+    if (includeChildren) {
+        for (Object *child : object->GetChildren()) {
+            AddObjectToStatePacket(child, statePacket, true, true);
+            objectPacket.children.push_back(child->GetObjectID());
+        }
+    }
+
+    statePacket.objects.push_back(objectPacket);
+
+    return objectPacket;
+}
+
+void Engine::AddObjectToStatePacketIfChanged(Object *object, Networking_StatePacket &statePacket, bool includeChildren, bool isRecursive) {
+    auto lastPacketObjectEquivalent = std::find_if(m_LastPacket.objects.begin(), m_LastPacket.objects.end(), [object] (Networking_Object &obj) { return obj.ObjectID == object->GetObjectID(); });
+    bool anythingChanged = lastPacketObjectEquivalent == m_LastPacket.objects.end();
+
+    if (!anythingChanged && (
+        object->GetPosition() != lastPacketObjectEquivalent->position ||
+        object->GetRotation() != lastPacketObjectEquivalent->rotation ||
+        object->GetScale() != lastPacketObjectEquivalent->scale ||
+        object->IsGeneratedFromFile() != lastPacketObjectEquivalent->isGeneratedFromFile ||
+        object->GetSourceFile() != lastPacketObjectEquivalent->objectSourceFile ||
+        object->GetSourceID() != lastPacketObjectEquivalent->objectSourceID ||
+        object->GetChildren().size() != lastPacketObjectEquivalent->children.size()))
+        anythingChanged = true;
+    
+    if (!anythingChanged && object->GetCameraAttachment() != nullptr && object->GetCameraAttachment()->GetCameraID() != lastPacketObjectEquivalent->cameraAttachment) {
+        anythingChanged = true;
+    }
+
+    if (includeChildren) {
+        for (Object *child : object->GetChildren()) {
+            AddObjectToStatePacketIfChanged(child, statePacket, includeChildren, true);
+        }
+    }
+
+    if (anythingChanged) {
+        auto objectPacketOptional = AddObjectToStatePacket(object, statePacket, false, isRecursive);
+
+        if (!objectPacketOptional.has_value()) {
+            return;
+        }
+
+        Networking_Object objectPacket = objectPacketOptional.value();
+
+        /* Why is there a nullptr check? I don't know!! I don't care!! */
+        if (lastPacketObjectEquivalent.base() != nullptr && lastPacketObjectEquivalent != m_LastPacket.objects.end()) {
+            *lastPacketObjectEquivalent = objectPacket;
+        } else {
+            m_LastPacket.objects.push_back(objectPacket);
+        }
+    }
+}
+
+Networking_Camera Engine::AddCameraToStatePacket(Camera *cam, Networking_StatePacket &statePacket, bool isMainCamera) {
+    Networking_Camera cameraPacket{};
+
+    cameraPacket.cameraID = cam->GetCameraID();
+    cameraPacket.pitch = cam->Pitch;
+    cameraPacket.yaw = cam->Yaw;
+    cameraPacket.up = cam->Up;
+    cameraPacket.fov = cam->FOV;
+    cameraPacket.isMainCamera = isMainCamera;
+
+    statePacket.cameras.push_back(cameraPacket);
+
+    return cameraPacket;
+}
+
+void Engine::AddCameraToStatePacketIfChanged(Camera *cam, Networking_StatePacket &statePacket, bool isMainCamera) {
+    auto lastPacketCameraEquivalent = std::find_if(m_LastPacket.cameras.begin(), m_LastPacket.cameras.end(), [cam] (Networking_Camera &cameraPacket) { return cameraPacket.cameraID == cam->GetCameraID(); });
+    bool anythingChanged = lastPacketCameraEquivalent == m_LastPacket.cameras.end();
+
+    if (!anythingChanged && (
+        cam->Pitch != lastPacketCameraEquivalent->pitch ||
+        cam->Yaw != lastPacketCameraEquivalent->yaw ||
+        cam->Up != lastPacketCameraEquivalent->up ||
+        cam->FOV != lastPacketCameraEquivalent->fov ||
+        isMainCamera != lastPacketCameraEquivalent->isMainCamera))
+        anythingChanged = true;
+
+    if (anythingChanged) {
+        Networking_Camera cameraPacket = AddCameraToStatePacket(cam, statePacket, isMainCamera);
+
+        if (lastPacketCameraEquivalent != m_LastPacket.cameras.end()) {
+            m_LastPacket.cameras.at(std::distance(m_LastPacket.cameras.begin(), lastPacketCameraEquivalent)) = cameraPacket;
+        } else {
+            m_LastPacket.cameras.push_back(cameraPacket);
+        }
+    }
+}
+
+void Engine::SendFullUpdateToConnection(HSteamNetConnection connection, int tickNumber) {
+    Networking_StatePacket statePacket{};
+    
+    statePacket.tickNumber = tickNumber;
+
+    for (Camera *cam : m_Cameras) {
+        bool isMainCamera = false;
+        if (m_ConnToCameraAttachment.find(connection) != m_ConnToCameraAttachment.end() && m_ConnToCameraAttachment[connection] == cam) {
+            isMainCamera = true;
+        }
+
+        AddCameraToStatePacket(cam, statePacket, isMainCamera);
+    }
+
+    for (Object *object : m_Objects) {
+        AddObjectToStatePacket(object, statePacket);
+    }
+
+    std::vector<std::byte> serializedPacket;
+    
+    Serialize(statePacket.tickNumber, serializedPacket);
+
+    Serialize(statePacket.cameras.size(), serializedPacket);
+
+    for (Networking_Camera &cameraPacket : statePacket.cameras) {
+        SerializeNetworkingCamera(cameraPacket, serializedPacket);
+    }
+
+    Serialize(statePacket.objects.size(), serializedPacket);
+    
+    for (Networking_Object &objectPacket : statePacket.objects) {
+        SerializeNetworkingObject(objectPacket, serializedPacket);
+    }
+
+    m_NetworkingSockets->SendMessageToConnection(connection, serializedPacket.data(), serializedPacket.size(), k_nSteamNetworkingSend_Reliable, nullptr);
+
+    m_LastPacket = statePacket;
+}
+
+
+void Engine::SendUpdateToConnection(HSteamNetConnection connection, int tickNumber) {
+    Networking_StatePacket statePacket{};
+
+    statePacket.tickNumber = tickNumber;
+
+    for (Camera *camera : m_Cameras) {
+        bool isMainCamera = false;
+        if (m_ConnToCameraAttachment.find(connection) != m_ConnToCameraAttachment.end() && m_ConnToCameraAttachment[connection] == camera) {
+            isMainCamera = true;
+        }
+
+        AddCameraToStatePacketIfChanged(camera, statePacket, isMainCamera);
+    }
+    
+    for (Object *object : m_Objects) {
+        AddObjectToStatePacketIfChanged(object, statePacket);
+    }
+
+    std::vector<std::byte> serializedPacket;
+
+    Serialize(statePacket.tickNumber, serializedPacket);
+
+    Serialize(statePacket.cameras.size(), serializedPacket);
+
+    for (Networking_Camera &cameraPacket : statePacket.cameras) {
+        SerializeNetworkingCamera(cameraPacket, serializedPacket);
+    }
+
+    Serialize(statePacket.objects.size(), serializedPacket);
+    
+    for (Networking_Object &objectPacket : statePacket.objects) {
+        SerializeNetworkingObject(objectPacket, serializedPacket);
+    }
+
+    m_NetworkingSockets->SendMessageToConnection(connection, serializedPacket.data(), serializedPacket.size(), k_nSteamNetworkingSend_Reliable, nullptr);
+}
+
+void Engine::SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest) {
+    Serialize(objectPacket.ObjectID, dest);
+
+    Serialize(objectPacket.position.x, dest);
+    Serialize(objectPacket.position.y, dest);
+    Serialize(objectPacket.position.z, dest);
+
+    Serialize(objectPacket.rotation.x, dest);
+    Serialize(objectPacket.rotation.y, dest);
+    Serialize(objectPacket.rotation.z, dest);
+    Serialize(objectPacket.rotation.w, dest);
+
+    Serialize(objectPacket.scale.x, dest);
+    Serialize(objectPacket.scale.y, dest);
+    Serialize(objectPacket.scale.z, dest);
+
+    Serialize(objectPacket.isGeneratedFromFile, dest);
+
+    if (objectPacket.isGeneratedFromFile) {
+        Serialize(objectPacket.objectSourceFile, dest);
+        Serialize(objectPacket.objectSourceID, dest);
+    }
+
+    Serialize(objectPacket.children.size(), dest);
+
+    for (int &childObjectID : objectPacket.children) {
+        Serialize(childObjectID, dest);
+    }
+
+    Serialize(objectPacket.cameraAttachment, dest);
+}
+
+void Engine::SerializeNetworkingCamera(Networking_Camera &cameraPacket, std::vector<std::byte> &dest) {
+    Serialize(cameraPacket.cameraID, dest);
+
+    Serialize(cameraPacket.pitch, dest);
+    Serialize(cameraPacket.yaw, dest);
+
+    Serialize(cameraPacket.up.x, dest);
+    Serialize(cameraPacket.up.y, dest);
+
+    Serialize(cameraPacket.fov, dest);
+    Serialize(cameraPacket.isMainCamera, dest);
+}
+
+void Engine::SerializeClientRequest(Networking_ClientRequest &clientRequest, std::vector<std::byte> &dest) {
+    Serialize(clientRequest.requestType, dest);
+}
+
+void Engine::DeserializeClientRequest(std::vector<std::byte> &serializedClientRequest, Networking_ClientRequest &dest) {
+    Deserialize(serializedClientRequest, dest.requestType);
+}
+
+template<typename T>
+void Engine::Deserialize(std::vector<std::byte> &object, T &dest) {
+    if constexpr (std::is_same<T, std::string>::value) {
+        UTILASSERT(object.size() >= sizeof(size_t));    /* minimum size */
+
+        size_t stringSize = *reinterpret_cast<size_t *>(object.data());
+        object.erase(object.begin(), object.begin() + sizeof(size_t));
+
+        UTILASSERT(object.size() >= stringSize);    /* Each char is 1 byte, this is valid. */
+
+        char *string = reinterpret_cast<char *>(object.data());
+
+        dest = std::string(string, stringSize);
+
+        object.erase(object.begin(), object.begin() + stringSize);
+    } else {
+        UTILASSERT(object.size() >= sizeof(T));
+        
+        dest = *reinterpret_cast<T *>(object.data());
+
+        object.erase(object.begin(), object.begin() + sizeof(T));
+    }
+}
+
+template<typename T>
+void Engine::Serialize(T object, std::vector<std::byte> &dest) {
+    if constexpr (std::is_same<T, std::string>::value) {
+        Serialize(object.size(), dest);
+
+        for (char &c : object) {
+            Serialize(c, dest);
+        }
+    } else {
+        for (size_t i = 0; i < sizeof(T); i++) {
+            std::byte *byte = reinterpret_cast<std::byte *>(&object) + i;
+            dest.push_back(*byte);
+        }
+    }
+}
+
+Engine *Engine::m_CallbackInstance = nullptr;

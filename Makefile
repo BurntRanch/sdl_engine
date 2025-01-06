@@ -23,35 +23,23 @@ NAME		 = BurntEngine
 TARGET		 = libengine.so.1
 SRC 	   	 = $(sort $(wildcard src/*.cpp))
 OBJ 	   	 = $(SRC:.cpp=.o)
-LDFLAGS   	+= -L$(BUILDDIR)/fmt -L$(BUILDDIR)/steam -lGameNetworkingSockets -lassimp -lfmt -lSDL3 -lvulkan -lfreetype -shared -fno-PIE -Wl,-soname,$(TARGET)
+LDFLAGS   	+= -L$(BUILDDIR)/steam -lGameNetworkingSockets -lassimp -lSDL3 -lvulkan -lfreetype -shared -fno-PIE -Wl,-soname,$(TARGET)
 CXXFLAGS  	?= -mtune=generic -march=native
-CXXFLAGS        += -funroll-all-loops -Iinclude -isystem/usr/include/freetype2 -fPIC -std=c++17 $(VARS)
+CXXFLAGS        += -funroll-all-loops -Iinclude -Iinclude/steam -isystem/usr/include/freetype2 -fPIC -std=c++17 $(VARS)
 
-all: fmt toml gamenetworkingsockets $(TARGET)
-
-fmt:
-ifeq ($(wildcard $(BUILDDIR)/fmt/libfmt.a),)
-	mkdir -p $(BUILDDIR)/fmt
-	make -C src/fmt BUILDDIR=$(BUILDDIR)/fmt
-endif
-
-toml:
-ifeq ($(wildcard $(BUILDDIR)/toml++/toml.o),)
-	mkdir -p $(BUILDDIR)/toml++
-	make -C src/toml++ BUILDDIR=$(BUILDDIR)/toml++
-endif
+all: gamenetworkingsockets $(TARGET)
 
 gamenetworkingsockets:
 ifeq ($(wildcard $(BUILDDIR)/steam/libGameNetworkingSockets.so),)
 	mkdir -p $(BUILDDIR)/steam
 	mkdir -p steam/GameNetworkingSockets/build
 	cd steam/GameNetworkingSockets/build && cmake .. && make -j11
-	cp steam/GameNetworkingSockets/build/bin/libGameNetworkingSockets.so $(BUILDDIR)/steam/libGameNetworkingSockets.so
+	cp steam/GameNetworkingSockets/build/bin/libGameNetworkingSockets.so $(BUILDDIR)/steam/
 endif
 
-$(TARGET): fmt toml gamenetworkingsockets $(OBJ)
+$(TARGET): gamenetworkingsockets $(OBJ)
 	mkdir -p $(BUILDDIR)
-	$(CXX) $(OBJ) $(BUILDDIR)/toml++/toml.o -o $(BUILDDIR)/$(TARGET) $(LDFLAGS)
+	$(CXX) $(OBJ) -o $(BUILDDIR)/$(TARGET) $(LDFLAGS)
 
 dist: $(TARGET)
 	bsdtar -zcf $(NAME)-v$(VERSION).tar.gz LICENSE README.md -C $(BUILDDIR) $(TARGET)
@@ -62,4 +50,4 @@ clean:
 distclean:
 	rm -rf $(BUILDDIR) $(OBJ)
 
-.PHONY: $(TARGET) fmt toml clean all
+.PHONY: $(TARGET) clean all

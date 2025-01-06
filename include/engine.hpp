@@ -3,9 +3,12 @@
 
 #include "camera.hpp"
 #include "common.hpp"
+#include "isteamnetworkingsockets.h"
+#include "steamnetworkingtypes.h"
 #include "ui.hpp"
 #include "ui/button.hpp"
 #include "object.hpp"
+
 #include <future>
 #include <mutex>
 #include <unordered_map>
@@ -39,6 +42,7 @@
 #define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include "fmt/core.h"
 #include "fmt/ranges.h"
@@ -67,7 +71,7 @@ const std::vector<const char *> requiredInstanceExtensions = {
 
 const std::vector<const char *> requiredLayerExtensions {
 #if DEBUG
-//    "VK_LAYER_KHRONOS_validation",
+    "VK_LAYER_KHRONOS_validation",
 #endif
 };
 
@@ -181,7 +185,7 @@ struct RenderPass {
 
 class Renderer {
 public:
-    Renderer(Settings &settings, const Camera *primaryCam) : m_PrimaryCamera(primaryCam), m_Settings(settings) {};
+    Renderer(Settings &settings, Camera *primaryCam) : m_PrimaryCamera(primaryCam), m_Settings(settings) {};
     ~Renderer();
 
     void SetMouseCaptureState(bool capturing);
@@ -225,7 +229,7 @@ public:
     /* DO NOT 'OR' MULTIPLE EVENT TYPES, REGISTER THE SAME FUNCTION WITH A DIFFERENT TYPE IF YOU WANT THAT. */
     void RegisterSDLEventListener(const std::function<void(SDL_Event *)> &func, SDL_EventType types);
 
-    void SetPrimaryCamera(Camera &cam);
+    void SetPrimaryCamera(Camera *cam);
 
     Glyph GenerateGlyph(EngineSharedContext &sharedContext, FT_Face ftFace, char c, float &x, float &y, float depth);
 
@@ -273,7 +277,7 @@ private:
     inline bool HasStencilAttachment(VkFormat format) {return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;};
 
     /* Cameras, high-level stuff. */
-    const Camera *m_PrimaryCamera;
+    Camera *m_PrimaryCamera;
     Settings &m_Settings;
 
     std::unordered_map<SDL_EventType, std::vector<std::function<void(SDL_Event *)>>> m_SDLEventListeners;
@@ -373,15 +377,125 @@ private:
     std::vector<VkSampler> m_CreatedSamplers;
 };
 
+/* A representation of an Object to be transmitted over the network. */
+struct Networking_Object {
+    int ObjectID;
+
+    glm::vec3 position;
+    glm::quat rotation;
+    glm::vec3 scale;
+
+    bool isGeneratedFromFile;
+    std::string objectSourceFile;
+    int objectSourceID;
+
+    /* List of objectIDs */
+    std::vector<int> children;
+
+    /* index in cameras array */
+    int cameraAttachment = -1;
+};
+
+struct Networking_Camera {
+    int cameraID;
+    float pitch;
+    float yaw;
+    glm::vec3 up;
+    float fov;
+    bool isMainCamera = false;
+};
+
+struct Networking_StatePacket {
+    int tickNumber;
+
+    std::vector<Networking_Camera> cameras;
+    std::vector<Networking_Object> objects;
+};
+
+enum Networking_ClientRequestType {
+    CLIENT_REQUEST_DISCONNECT
+};
+
+/* in the future, inputs could go here! */
+struct Networking_ClientRequest {
+    Networking_ClientRequestType requestType;
+
+    /* for now, we only have the DISCONNECT type, so there isn't much data we need to put here. */
+};
+
+enum Networking_EventType {
+    NETWORKING_NULL,
+    NETWORKING_INITIAL_UPDATE,  /* If we just connected to the server */
+    NETWORKING_NEW_OBJECT,
+    NETWORKING_NEW_CAMERA,
+    NETWORKING_UPDATE_OBJECT,
+};
+
+/* This isn't meant to be sent over the network, this is meant to be sent between the NetworkThread and the render thread */
+struct Networking_Event {
+    Networking_EventType type;
+
+    // /* Index of the object, only set if type == NETWORKING_NEW_OBJECT or NETWORKING_UPDATE_OBJECT*/
+    // int objectIdx;
+
+    /* The object that's involved in the event, only set if type == NETWORKING_NEW_OBJECT or NETWORKING_UPDATE_OBJECT */
+    std::optional<Networking_Object> object;
+
+    /* The camera that's involved in the event, only set if type == NETWORKING_NEW_CAMERA (or, in the future, NETWORKING_UPDATE_CAMERA)*/
+    std::optional<Networking_Camera> camera;
+
+    /* if type == NETWORKING_INITIAL_UPDATE, this will be set instead of .object. */
+    std::optional<Networking_StatePacket> packet;
+};
+
+enum NetworkingThreadStatus {
+    NETWORKING_THREAD_INACTIVE = 0,
+    NETWORKING_THREAD_ACTIVE_SERVER = 1,
+    NETWORKING_THREAD_ACTIVE_CLIENT = 2,
+    NETWORKING_THREAD_ACTIVE_BOTH = 3
+};
+
+/* I know the name is confusing, this is to be used by applications to listen for specific events like clients disconnecting and such. */
+enum NetworkingEventType {
+    EVENT_CLIENT_DISCONNECTED,  /* The client disconnected from us */
+    EVENT_DISCONNECTED_FROM_SERVER,   /* We (client) disconnected from a remote server */
+    EVENT_CLIENT_CONNECTED, /* A new client has connected */
+    EVENT_CONNECTED_TO_SERVER, /* We have connected to a server. */
+};
+
+/* The state stored for every NetworkingThread */
+struct NetworkingThreadState {
+    int status = NETWORKING_THREAD_INACTIVE;
+
+    std::vector<HSteamNetConnection> netConnections;
+
+    int tickNumber = -1;
+    
+    /* if this value is set to -1, then the thread hadn't received a packet yet. */
+    int lastSyncedTickNumber = -1;  /* always -1 for the server because the server doesn't really sync with the client, it's a server-authoritative model. */
+
+    std::vector<std::function<void(int)>> tickUpdateHandlers;
+
+    bool shouldQuit = false;
+    std::thread thread;
+};
+
 class Engine {
 public:
+    ~Engine();
+
     Engine() = default;
 
-    void InitRenderer(Settings &settings, const Camera *primaryCamera);
+    void InitRenderer(Settings &settings, Camera *primaryCamera);
+
+    void InitNetworking();
 
     /* UI::Button listeners will receive events when any button is pressed, along with its ID. */
     /* Due to how it works, this function can be called before the renderer is initialized. */
     void RegisterUIButtonListener(const std::function<void(std::string)> listener);
+
+    /* status is an indicator of which NetworkingThread should accept it, if it's set to NETWORKING_THREAD_ACTIVE_SERVER, it will register to the server, so on. */
+    void RegisterTickUpdateHandler(const std::function<void(int)> handler, NetworkingThreadStatus status);
 
     Renderer *GetRenderer();
 
@@ -389,8 +503,29 @@ public:
 
     void LoadUIFile(const std::string &name);
 
+    void AddObject(Object *object);
+
     bool ImportScene(const std::string &path);
     void ExportScene(const std::string &path);
+
+    void AttachCameraToConnection(Camera *cam, HSteamNetConnection conn);
+
+    void ConnectToGameServer(SteamNetworkingIPAddr ipAddr);
+    void HostGameServer(SteamNetworkingIPAddr ipAddr);
+
+    void ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *callbackInfo);
+
+    void RegisterNetworkListener(const std::function<void(HSteamNetConnection)> listener, NetworkingEventType listenerTarget);
+
+    void DisconnectFromServer();    // Disconnects you from a game server, Safe to call in any situation but wont do anything if you aren't connected to a server.
+
+    void DisconnectClientFromServer(HSteamNetConnection connection);  // Disconnects a client from your server, Call this only if you're hosting a server.
+
+    void StopHostingGameServer();
+
+    void ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvents);
+
+    Object *GetObjectByID(int ObjectID);
 
     UI::GenericElement *GetElementByID(const std::string &id);
 
@@ -400,13 +535,99 @@ public:
 private:
 /*  Systems   */
     Renderer *m_Renderer = nullptr;
+    ISteamNetworkingSockets *m_NetworkingSockets;
+
+    /* [0] = client, [1] = server. */
+    std::array<NetworkingThreadState, 2> m_NetworkingThreadStates;
+    
+    HSteamListenSocket m_NetListenSocket = k_HSteamListenSocket_Invalid;
+    HSteamNetPollGroup m_NetPollGroup = k_HSteamNetPollGroup_Invalid;
+
+    std::string m_ScenePath = "";
+
+    std::unordered_map<NetworkingEventType, std::vector<std::function<void(HSteamNetConnection)>>> m_EventTypeToListenerMap;
+    std::unordered_map<HSteamNetConnection, Camera *> m_ConnToCameraAttachment;
+
+    std::vector<Networking_Event> m_NetworkingEvents;
+    std::mutex m_NetworkingEventsLock;
     
     Settings *m_Settings;
+    Camera *m_MainCamera;
 
+    /* Next 2 variables are for ProcessNetworkEvents */
+    /* Objects that were created as a result of ImportFromFile may not have the same ObjectIDs, and will be hard to track. So we store them to compare their SourceIDs */
+    std::vector<Networking_Object> m_ObjectsFromImportedObject;
+
+    /* Doesn't include elements that belong in objectsFromImportedObject */
+    std::vector<Object *> m_PreviousObjects;
+
+    std::vector<Camera *> m_Cameras;
     std::vector<Object *> m_Objects;
     std::vector<UI::GenericElement *> m_UIElements;
 
+    Networking_StatePacket m_LastPacket;
+
+    /* I'm starting to like this m_CallbackInstance method */
+
+    static Engine *m_CallbackInstance;
+
+    static void onConnectionStatusChangedCallback(SteamNetConnectionStatusChangedCallback_t *callbackInfo) {
+        m_CallbackInstance->ConnectionStatusChanged(callbackInfo);
+    }
+
+    /* Do not set isRecursive to true, This is only there to recursively add objs children BEFORE obj. This is a requirement in the protocol.
+     * The return is optional (empty if obj is a child and isRecursive == false) but that doesn't mean you have to put it in the statePacket yourself. It's just there incase you want it.
+    */
+    std::optional<Networking_Object> AddObjectToStatePacket(Object *obj, Networking_StatePacket &statePacket, bool includeChildren = true, bool isRecursive = false);
+
+    /* Do not set isRecursive to true, This is only there to recursively add objs children BEFORE obj. This is a requirement in the protocol. */
+    void AddObjectToStatePacketIfChanged(Object *obj, Networking_StatePacket &statePacket, bool includeChildren = true, bool isRecursive = false);
+
+    /* Very similar to the Object equivalent, difference is Cameras don't have children. Make sure isMainCamera is set to true based off of m_ConnToCameraAttachment. */
+    Networking_Camera AddCameraToStatePacket(Camera *cam, Networking_StatePacket &statePacket, bool isMainCamera = false);
+
+    /* Very similar to the Object equivalent, difference is Cameras don't have children. Make sure isMainCamera is set to true based off of m_ConnToCameraAttachment. */
+    void AddCameraToStatePacketIfChanged(Camera *cam, Networking_StatePacket &statePacket, bool isMainCamera = false);
+
+    /* Deserialization */
+    Networking_StatePacket DeserializePacket(std::vector<std::byte> &serializedPacket);
+
+    /* Deserialize the Networking_Object */
+    void DeserializeNetworkingObject(std::vector<std::byte> &serializedObjectPacket, Networking_Object &dest);
+
+    /* Deserialize the Networking_Camera */
+    void DeserializeNetworkingCamera(std::vector<std::byte> &serializedCameraPacket, Networking_Camera &dest);
+
+    /* Sends a full update to the connection. Sends every single object, regardless whether it has changed, to the client. Avoid sending this unless it's a clients first time connecting. */
+    void SendFullUpdateToConnection(HSteamNetConnection connection, int tickNumber);
+
+    /* Send an update to the client, Keep in mind the server won't send objects that haven't changed to the client. */
+    void SendUpdateToConnection(HSteamNetConnection connection, int tickNumber);
+
+    /* Serialize the Networking_Object and append it to dest */
+    void SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest);
+
+    /* Serialize the Networking_Camera and append it to dest */
+    void SerializeNetworkingCamera(Networking_Camera &cameraPacket, std::vector<std::byte> &dest);
+
+    void SerializeClientRequest(Networking_ClientRequest &clientRequest, std::vector<std::byte> &dest);
+
+    void DeserializeClientRequest(std::vector<std::byte> &serializedClientRequest, Networking_ClientRequest &dest);
+
+    /* Deserialize to dest */
+    template<typename T>
+    void Deserialize(std::vector<std::byte> &object, T &dest);
+
+    /* Serialize and append to dest. */
+    template<typename T>
+    void Serialize(T object, std::vector<std::byte> &dest);
+
     void CheckButtonClicks(SDL_Event *event);
+
+    void InitNetworkingThread(NetworkingThreadStatus status);
+
+    void NetworkingThreadClient_Main(NetworkingThreadState &state);
+    void NetworkingThreadServer_Main(NetworkingThreadState &state);
 
     std::vector<std::function<void(std::string)>> m_UIButtonListeners;
     std::vector<UI::Button *> m_UIButtons;

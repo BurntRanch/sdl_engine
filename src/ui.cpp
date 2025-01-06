@@ -181,14 +181,15 @@ void Label::DestroyBuffers() {
     Glyphs.clear();
 }
 
-Arrows::Arrows(Model &highlightedModel) {
+Arrows::Arrows(Object &highlightedModel) {
     genericType = ARROWS;
     type = ARROWS;
 
-    arrowsModel = new Model("models/arrows.obj");
-    arrowsModel->SetParent(&highlightedModel);
+    arrowsObject = new Object();
+    arrowsObject->ImportFromFile("models/arrows.obj");
+    arrowsObject->SetParent(&highlightedModel);
 
-    arrowsModel->SetScale(glm::vec3(0.5f, 0.5f, 0.5f));
+    arrowsObject->SetScale(glm::vec3(0.5f, 0.5f, 0.5f));
 }
 
 Button::Button(glm::vec2 position, glm::vec2 scale, Panel *panel, Label *label) : bgPanel(panel), fgLabel(label) {

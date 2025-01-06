@@ -23,7 +23,7 @@ namespace engineError {
     inline string COMMAND_BUFFER_BEGIN_FAILURE = "Failed to begin recording the command buffer!";
     inline string COMMAND_BUFFER_END_FAILURE = "Failed to end recording of the command buffer!";
     inline string SYNC_OBJECTS_CREATION_FAILURE = "Failed to create sync objects!";
-    inline string QUEUE_SUBMIT_FAILURE = "Failed to submit command buffer to queue!";
+    inline string QUEUE_SUBMIT_FAILURE = "Failed to submit command buffer to queue! {}";
     inline string INSTANCE_CREATION_FAILURE = "Failed to create vulkan instance!";
     inline string CANT_ACQUIRE_NEXT_IMAGE = "Failed to acquire next swapchain image!";
     inline string CANT_CREATE_VERTEX_BUFFER = "Failed to create a vertex buffer!";
@@ -42,6 +42,7 @@ namespace engineError {
     inline string RENDERPASS_PIPELINE_EXISTS = "Tried to create a graphics pipeline for a renderpass that already has a graphics pipeline!";
     inline string SURFACE_CREATION_FAILURE = "Failed to create a surface, Reason: {}!";
     inline string NO_MATERIALS = "No materials found in model!";
+    inline string WAIT_FOR_FENCES_FAILED = "Waiting for fences failed! {}";
 };
 
 #endif
