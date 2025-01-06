@@ -9,7 +9,17 @@
 #include <glm/trigonometric.hpp>
 
 Object::~Object() {
-    
+    for (Object *obj : m_Children) {
+        delete obj;
+    }
+
+    if (m_CameraAttachment) {
+        delete m_CameraAttachment;
+    }
+
+    for (Model *model : m_ModelAttachments) {
+        delete model;
+    }
 }
 
 Object::Object(glm::vec3 position, glm::quat rotation, glm::vec3 scale, int objectID) {

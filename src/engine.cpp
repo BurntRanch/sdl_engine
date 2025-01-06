@@ -2173,12 +2173,6 @@ void Renderer::Start() {
 
             vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_RenderScissor);
 
-        #ifdef LOG_FRAME
-            afterRenderInitTime = high_resolution_clock::now();
-
-            fmt::println("Time spent initializing render and calling update functions: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderInitTime - afterAcquireImageResultTime).count()));
-        #endif
-
             glm::mat4 viewMatrix;
             glm::mat4 projectionMatrix;
 
@@ -2383,12 +2377,6 @@ void Renderer::Start() {
             vkCmdSetViewport(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayViewport);
 
             vkCmdSetScissor(m_CommandBuffers[currentFrameIndex], 0, 1, &m_DisplayScissor);
-
-    #ifdef LOG_FRAME
-            afterRenderInitTime = high_resolution_clock::now();
-
-            fmt::println("Time spent initializing render and calling update functions: {:.5f}ms", (duration_cast<duration<double, std::milli>>(afterRenderInitTime - afterAcquireImageResultTime).count()));
-    #endif
 
             // vertex buffer binding!!
             VkDeviceSize mainOffsets[] = {0};
@@ -2751,6 +2739,48 @@ void Engine::AddObject(Object *object) {
     m_Objects.push_back(object);
 }
 
+void Engine::RemoveCamera(Camera *cam) {
+    auto camIt = std::find(m_Cameras.begin(), m_Cameras.end(), cam);
+
+    if (camIt == m_Cameras.end()) {
+        return;
+    }
+
+    if (m_MainCamera == cam) {
+        m_MainCamera = nullptr;
+
+        if (m_Renderer) {
+            m_Renderer->SetPrimaryCamera(nullptr);
+        }
+    }
+
+    m_Cameras.erase(camIt);
+}
+
+void Engine::RemoveObject(Object *object) {
+    auto objectIt = std::find(m_Objects.begin(), m_Objects.end(), object);
+
+    if (objectIt == m_Objects.end()) {
+        return;
+    }
+
+    if (m_Renderer) {
+        for (Model *model : object->GetModelAttachments()) {
+            m_Renderer->UnloadModel(model);
+        }
+    }
+
+    if (object->GetCameraAttachment()) {
+        RemoveCamera(object->GetCameraAttachment());
+    }
+
+    for (Object *child : object->GetChildren()) {
+        RemoveObject(child);
+    }
+
+    m_Objects.erase(objectIt);
+}
+
 /* Import an xml scene, overwriting the current one.
     * Throws std::runtime_error and rapidxml::parse_error
 
@@ -3092,11 +3122,17 @@ void Engine::NetworkingThreadClient_Main(NetworkingThreadState &state) {
         }
 
         accumulativeTickTime -= (1.0f / 64.0f);
-
-        state.tickNumber++;
         
-        for (auto handler : state.tickUpdateHandlers) {
-            handler(state.tickNumber);
+        if (state.tickNumber != -1) {
+            if (state.tickNumber > state.predictionTickNumber) {
+                state.predictionTickNumber = state.tickNumber;
+            }
+
+            state.predictionTickNumber++;
+
+            for (auto handler : state.tickUpdateHandlers) {
+                handler(state.predictionTickNumber);
+            }
         }
 
         m_CallbackInstance = this;
@@ -3111,7 +3147,7 @@ void Engine::NetworkingThreadClient_Main(NetworkingThreadState &state) {
         }
         if (msgCount > 0) {
             for (int i = 0; i < msgCount; i++) {
-                ISteamNetworkingMessage *incomingMessage = incomingMessages + (i * sizeof(ISteamNetworkingMessage));
+                ISteamNetworkingMessage *incomingMessage = &incomingMessages[i];
 
                 if (incomingMessage->GetSize() < sizeof(size_t)) {
                     fmt::println("Invalid packet!");
@@ -3128,12 +3164,11 @@ void Engine::NetworkingThreadClient_Main(NetworkingThreadState &state) {
                     Networking_Event event{NETWORKING_NULL, {}, {}, {}};
                     std::lock_guard<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
 
+                    state.tickNumber = packet.tickNumber;
+
                     if (state.lastSyncedTickNumber == -1) {
                         event.type = NETWORKING_INITIAL_UPDATE;
                         event.packet = packet;
-
-                        /* Don't forget this, this could be used for prediction in the future. */
-                        state.tickNumber = packet.tickNumber;
 
                         m_NetworkingEvents.push_back(event);
                     } else {
@@ -3222,7 +3257,7 @@ void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
         m_NetworkingSockets->RunCallbacks();
 
         ISteamNetworkingMessage *incomingMessages;
-        
+
         /* TODO: This stupid thing doesn't receive client requests. */
         int msgCount = m_NetworkingSockets->ReceiveMessagesOnPollGroup(m_NetPollGroup, &incomingMessages, 1);
         
@@ -3231,11 +3266,13 @@ void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
         }
         if (msgCount > 0) {
             for (int i = 0; i < msgCount; i++) {
-                ISteamNetworkingMessage *incomingMessage = incomingMessages + (i * sizeof(ISteamNetworkingMessage));
+                ISteamNetworkingMessage *incomingMessage = &incomingMessages[i];
 
                 if (incomingMessage->GetSize() < sizeof(int)) {
                     fmt::println("Invalid packet!");
                 } else {
+                    fmt::println("DATA!");
+
                     const void *data = incomingMessage->GetData();
                     
                     std::vector<std::byte> message{reinterpret_cast<const std::byte *>(data), reinterpret_cast<const std::byte *>(data) + incomingMessage->GetSize()};
@@ -3247,6 +3284,8 @@ void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
                     switch (packet.requestType) {
                         case CLIENT_REQUEST_DISCONNECT:
                             DisconnectClientFromServer(incomingMessage->GetConnection());
+                            break;
+                        case CLIENT_REQUEST_APPLICATION:
                             break;
                     }
                 }
@@ -3396,8 +3435,14 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
                 objectPacket = event.object.value();
 
                 if (objectPacket.isGeneratedFromFile && objectPacket.objectSourceFile != "") {
-                    /* TODO: Sanitize */
-                    object->ImportFromFile(objectPacket.objectSourceFile);
+                    std::filesystem::path path = objectPacket.objectSourceFile;
+
+                    std::string absoluteSourcePath = std::filesystem::absolute(path).string();
+                    std::string absoluteResourcesPath = std::filesystem::absolute("resources").string();
+
+                    UTILASSERT(absoluteSourcePath.substr(0, absoluteResourcesPath.length()).compare(absoluteResourcesPath) == 0);
+
+                    object->ImportFromFile(absoluteSourcePath);
 
                     std::vector<std::pair<Networking_Object *, int>> relatedObjects = FilterRelatedNetworkingObjects(m_ObjectsFromImportedObject, &objectPacket);
 
@@ -3437,8 +3482,7 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
 
                                     childEquivalent->SetCameraAttachment(cam);
 
-                                    /* TODO: Create RemoveObject and RemoveCamera */
-                                    m_Cameras.erase(std::find(m_Cameras.begin(), m_Cameras.end(), oldCamera));
+                                    RemoveCamera(oldCamera);
 
                                     delete oldCamera;
                                 }
@@ -3497,7 +3541,7 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
                 object->SetScale(objectPacket.scale);
 
                 /* TODO: inheritance, and tons of other stuff to synchronize. */
-                /* note to self: this doesn't seem to end at all.. so many things to synchronize in so many different ways.... */
+                /* idea: perhaps move inheritance to a stateful class that's able to keep track of all previous Networking_Objects */
 
                 break;
             default:
@@ -3506,6 +3550,26 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
 
         networkingEvents->erase(networkingEvents->begin());
     }
+}
+
+void Engine::SendRequestToServer(std::vector<std::byte> &data) {
+    NetworkingThreadState &state = m_NetworkingThreadStates[0];
+
+    if (state.status == NETWORKING_THREAD_INACTIVE) {
+        return;
+    }
+
+    UTILASSERT(state.netConnections.size() == 1);
+
+    Networking_ClientRequest request{};
+    request.requestType = CLIENT_REQUEST_APPLICATION;
+    request.dataSize = data.size();
+    request.data = data.data();
+
+    std::vector<std::byte> serializedRequest;
+    SerializeClientRequest(request, serializedRequest);
+
+    m_NetworkingSockets->SendMessageToConnection(state.netConnections[0], serializedRequest.data(), serializedRequest.size(), k_nSteamNetworkingSend_Reliable, nullptr);
 }
 
 Object *Engine::GetObjectByID(int ObjectID) {
@@ -3835,6 +3899,13 @@ void Engine::SerializeNetworkingCamera(Networking_Camera &cameraPacket, std::vec
 
 void Engine::SerializeClientRequest(Networking_ClientRequest &clientRequest, std::vector<std::byte> &dest) {
     Serialize(clientRequest.requestType, dest);
+
+    if (clientRequest.data != nullptr) {
+        Serialize(clientRequest.dataSize, dest);
+
+        dest.resize(dest.size() + clientRequest.dataSize);
+        memcpy(dest.data() + (dest.size() - clientRequest.dataSize), clientRequest.data, clientRequest.dataSize);
+    }
 }
 
 void Engine::DeserializeClientRequest(std::vector<std::byte> &serializedClientRequest, Networking_ClientRequest &dest) {

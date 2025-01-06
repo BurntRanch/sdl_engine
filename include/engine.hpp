@@ -413,14 +413,16 @@ struct Networking_StatePacket {
 };
 
 enum Networking_ClientRequestType {
-    CLIENT_REQUEST_DISCONNECT
+    CLIENT_REQUEST_DISCONNECT,
+    CLIENT_REQUEST_APPLICATION,  /* Application data. */
 };
 
 /* in the future, inputs could go here! */
 struct Networking_ClientRequest {
     Networking_ClientRequestType requestType;
 
-    /* for now, we only have the DISCONNECT type, so there isn't much data we need to put here. */
+    size_t dataSize = 0;
+    void *data = nullptr;
 };
 
 enum Networking_EventType {
@@ -469,7 +471,11 @@ struct NetworkingThreadState {
 
     std::vector<HSteamNetConnection> netConnections;
 
+    /* This is dictated by the server. */
     int tickNumber = -1;
+    
+    /* This is dictated by the client as it predicts the results of future predictions. (prediction is handled by TickUpdate) */
+    int predictionTickNumber = -1;
     
     /* if this value is set to -1, then the thread hadn't received a packet yet. */
     int lastSyncedTickNumber = -1;  /* always -1 for the server because the server doesn't really sync with the client, it's a server-authoritative model. */
@@ -494,7 +500,8 @@ public:
     /* Due to how it works, this function can be called before the renderer is initialized. */
     void RegisterUIButtonListener(const std::function<void(std::string)> listener);
 
-    /* status is an indicator of which NetworkingThread should accept it, if it's set to NETWORKING_THREAD_ACTIVE_SERVER, it will register to the server, so on. */
+    /* status is an indicator of which NetworkingThread should accept it, if it's set to NETWORKING_THREAD_ACTIVE_SERVER, it will register to the server, so on. 
+     * This handler will be mostly responsible for prediction. */
     void RegisterTickUpdateHandler(const std::function<void(int)> handler, NetworkingThreadStatus status);
 
     Renderer *GetRenderer();
@@ -504,6 +511,10 @@ public:
     void LoadUIFile(const std::string &name);
 
     void AddObject(Object *object);
+
+    /* This does not delete the object nor its attachments. */
+    void RemoveObject(Object *object);
+    void RemoveCamera(Camera *cam);
 
     bool ImportScene(const std::string &path);
     void ExportScene(const std::string &path);
@@ -524,6 +535,9 @@ public:
     void StopHostingGameServer();
 
     void ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvents);
+
+    /* Sends a packet to the server that gets handled at the program level, this could include inputs n such. */
+    void SendRequestToServer(std::vector<std::byte> &data);
 
     Object *GetObjectByID(int ObjectID);
 
