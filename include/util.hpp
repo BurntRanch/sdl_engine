@@ -39,4 +39,44 @@ glm::vec2                getScale(rapidxml::xml_node<char> *propertiesNode);
 float                    getZDepth(rapidxml::xml_node<char> *propertiesNode, float depthDefault = 1.0f);
 bool                     getVisible(rapidxml::xml_node<char> *propertiesNode);
 
+template<typename T>
+void Deserialize(std::vector<std::byte> &object, T &dest) {
+    if constexpr (std::is_same<T, std::string>::value) {
+        UTILASSERT(object.size() >= sizeof(size_t));    /* minimum size */
+
+        size_t stringSize = *reinterpret_cast<size_t *>(object.data());
+        object.erase(object.begin(), object.begin() + sizeof(size_t));
+
+        UTILASSERT(object.size() >= stringSize);    /* Each char is 1 byte, this is valid. */
+
+        char *string = reinterpret_cast<char *>(object.data());
+
+        dest = std::string(string, stringSize);
+
+        object.erase(object.begin(), object.begin() + stringSize);
+    } else {
+        UTILASSERT(object.size() >= sizeof(T));
+        
+        dest = *reinterpret_cast<T *>(object.data());
+
+        object.erase(object.begin(), object.begin() + sizeof(T));
+    }
+}
+
+template<typename T>
+void Serialize(T object, std::vector<std::byte> &dest) {
+    if constexpr (std::is_same<T, std::string>::value) {
+        Serialize(object.size(), dest);
+
+        for (char &c : object) {
+            Serialize(c, dest);
+        }
+    } else {
+        for (size_t i = 0; i < sizeof(T); i++) {
+            std::byte *byte = reinterpret_cast<std::byte *>(&object) + i;
+            dest.push_back(*byte);
+        }
+    }
+}
+
 #endif

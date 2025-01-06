@@ -536,6 +536,8 @@ public:
 
     void ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvents);
 
+    bool IsConnectedToGameServer();
+
     /* Sends a packet to the server that gets handled at the program level, this could include inputs n such. */
     void SendRequestToServer(std::vector<std::byte> &data);
 
@@ -627,14 +629,6 @@ private:
     void SerializeClientRequest(Networking_ClientRequest &clientRequest, std::vector<std::byte> &dest);
 
     void DeserializeClientRequest(std::vector<std::byte> &serializedClientRequest, Networking_ClientRequest &dest);
-
-    /* Deserialize to dest */
-    template<typename T>
-    void Deserialize(std::vector<std::byte> &object, T &dest);
-
-    /* Serialize and append to dest. */
-    template<typename T>
-    void Serialize(T object, std::vector<std::byte> &dest);
 
     void CheckButtonClicks(SDL_Event *event);
 

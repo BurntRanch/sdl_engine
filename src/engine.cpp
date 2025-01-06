@@ -3552,6 +3552,10 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
     }
 }
 
+bool Engine::IsConnectedToGameServer() {
+    return m_NetworkingThreadStates[0].netConnections.size() == 1;
+}
+
 void Engine::SendRequestToServer(std::vector<std::byte> &data) {
     NetworkingThreadState &state = m_NetworkingThreadStates[0];
 
@@ -3910,46 +3914,6 @@ void Engine::SerializeClientRequest(Networking_ClientRequest &clientRequest, std
 
 void Engine::DeserializeClientRequest(std::vector<std::byte> &serializedClientRequest, Networking_ClientRequest &dest) {
     Deserialize(serializedClientRequest, dest.requestType);
-}
-
-template<typename T>
-void Engine::Deserialize(std::vector<std::byte> &object, T &dest) {
-    if constexpr (std::is_same<T, std::string>::value) {
-        UTILASSERT(object.size() >= sizeof(size_t));    /* minimum size */
-
-        size_t stringSize = *reinterpret_cast<size_t *>(object.data());
-        object.erase(object.begin(), object.begin() + sizeof(size_t));
-
-        UTILASSERT(object.size() >= stringSize);    /* Each char is 1 byte, this is valid. */
-
-        char *string = reinterpret_cast<char *>(object.data());
-
-        dest = std::string(string, stringSize);
-
-        object.erase(object.begin(), object.begin() + stringSize);
-    } else {
-        UTILASSERT(object.size() >= sizeof(T));
-        
-        dest = *reinterpret_cast<T *>(object.data());
-
-        object.erase(object.begin(), object.begin() + sizeof(T));
-    }
-}
-
-template<typename T>
-void Engine::Serialize(T object, std::vector<std::byte> &dest) {
-    if constexpr (std::is_same<T, std::string>::value) {
-        Serialize(object.size(), dest);
-
-        for (char &c : object) {
-            Serialize(c, dest);
-        }
-    } else {
-        for (size_t i = 0; i < sizeof(T); i++) {
-            std::byte *byte = reinterpret_cast<std::byte *>(&object) + i;
-            dest.push_back(*byte);
-        }
-    }
 }
 
 Engine *Engine::m_CallbackInstance = nullptr;
