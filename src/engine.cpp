@@ -3149,9 +3149,9 @@ void Engine::NetworkingThreadClient_Main(NetworkingThreadState &state) {
                     std::vector<std::byte> message{reinterpret_cast<const std::byte *>(data), reinterpret_cast<const std::byte *>(data) + incomingMessage->GetSize()};
 
                     Networking_StatePacket packet = DeserializePacket(message);
-
+#ifdef LOG_FRAME
                     fmt::println("New state packet just dropped! {} objects sent by server", packet.objects.size());
-
+#endif
                     /* add a dummy type */
                     Networking_Event event{NETWORKING_NULL, {}, {}, {}};
                     std::lock_guard<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
