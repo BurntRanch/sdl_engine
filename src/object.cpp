@@ -102,7 +102,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
     node->mTransformation.Decompose(scale, rotation, position);
 
-    obj->SetPosition(glm::vec3(position.x, position.y, -position.z));
+    obj->SetPosition(glm::vec3(position.x, position.y, position.z));
     obj->SetRotation(glm::quat(rotation.w, rotation.x, rotation.y, rotation.z));
     obj->SetScale(glm::vec3(scale.x, scale.y, scale.z));
 
@@ -116,7 +116,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
             direction.Normalize();
 
             float pitch = glm::degrees(std::atan2(direction.x, direction.y));
-            float yaw = glm::degrees(std::asin(-direction.z));
+            float yaw = glm::degrees(std::asin(direction.z));
 
             Camera *cam = new Camera(glm::vec3(sceneCam->mUp.x, sceneCam->mUp.y, sceneCam->mUp.z), yaw, pitch);
 

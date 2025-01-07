@@ -3662,9 +3662,9 @@ std::optional<Networking_Object> Engine::AddObjectToStatePacket(Object *object, 
 
     objectPacket.ObjectID = object->GetObjectID();
     
-    objectPacket.position = object->GetPosition();
-    objectPacket.rotation = object->GetRotation();
-    objectPacket.scale = object->GetScale();
+    objectPacket.position = object->GetPosition(false);
+    objectPacket.rotation = object->GetRotation(false);
+    objectPacket.scale = object->GetScale(false);
 
     objectPacket.objectSourceFile = object->GetSourceFile();
     objectPacket.isGeneratedFromFile = object->IsGeneratedFromFile();
