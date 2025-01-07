@@ -23,7 +23,7 @@ NAME		 = BurntEngine
 TARGET		 = libengine.so.1
 SRC 	   	 = $(sort $(wildcard src/*.cpp))
 OBJ 	   	 = $(SRC:.cpp=.o)
-LDFLAGS   	+= -L$(BUILDDIR)/fmt -L$(BUILDDIR)/steam -lGameNetworkingSockets -lassimp -lfmt -lSDL3 -lvulkan -lfreetype -shared -fno-PIE -Wl,-soname,$(TARGET)
+LDFLAGS   	+= -L$(BUILDDIR)/fmt -L$(BUILDDIR)/steam -lGameNetworkingSockets -lassimp -l:libfmt.a -lSDL3 -lvulkan -lfreetype -shared -fno-PIE -Wl,-soname,$(TARGET)
 CXXFLAGS  	?= -mtune=generic -march=native
 CXXFLAGS        += -funroll-all-loops -Iinclude -Iinclude/steam -isystem/usr/include/freetype2 -fPIC -std=c++17 $(VARS)
 
