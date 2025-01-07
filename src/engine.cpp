@@ -2967,11 +2967,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
 
                     state.netConnections.erase(conn);
 
-                    if (m_EventTypeToListenerMap.find(EVENT_CLIENT_DISCONNECTED) != m_EventTypeToListenerMap.end()) {
-                        for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
-                            listener(callbackInfo->m_hConn);
-                        }
-                    }
+                    FireNetworkEvent(EVENT_CLIENT_DISCONNECTED, callbackInfo->m_hConn);
                 /* if its a client */
                 } else {
                     UTILASSERT(m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT);
@@ -2981,11 +2977,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
 
                     state.netConnections.erase(state.netConnections.begin());
 
-                    if (m_EventTypeToListenerMap.find(EVENT_DISCONNECTED_FROM_SERVER) != m_EventTypeToListenerMap.end()) {
-                        for (auto &listener : m_EventTypeToListenerMap[EVENT_DISCONNECTED_FROM_SERVER]) {
-                            listener(callbackInfo->m_hConn);
-                        }
-                    }
+                    FireNetworkEvent(EVENT_DISCONNECTED_FROM_SERVER, callbackInfo->m_hConn);
                 }
 
                 m_NetworkingSockets->CloseConnection(callbackInfo->m_hConn, 0, nullptr, false);
@@ -3013,11 +3005,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                     break;
                 }
 
-                if (m_EventTypeToListenerMap.find(EVENT_CLIENT_CONNECTED) != m_EventTypeToListenerMap.end()) {
-                    for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_CONNECTED]) {
-                        listener(callbackInfo->m_hConn);
-                    }
-                }
+                FireNetworkEvent(EVENT_CLIENT_CONNECTED, callbackInfo->m_hConn);
 
                 SendFullUpdateToConnection(callbackInfo->m_hConn, state.tickNumber);
 
@@ -3028,11 +3016,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
 
                 m_NetworkingThreadStates[0].netConnections.push_back(callbackInfo->m_hConn);
 
-                if (m_EventTypeToListenerMap.find(EVENT_CONNECTED_TO_SERVER) != m_EventTypeToListenerMap.end()) {
-                    for (auto &listener : m_EventTypeToListenerMap[EVENT_CONNECTED_TO_SERVER]) {
-                        listener(callbackInfo->m_hConn);
-                    }
-                }
+                FireNetworkEvent(EVENT_CONNECTED_TO_SERVER, callbackInfo->m_hConn);
             }
 
             break;
@@ -3045,12 +3029,17 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
     }
 }
 
-void Engine::RegisterNetworkListener(const std::function<void(HSteamNetConnection)> listener, NetworkingEventType listenerTarget) {
+void Engine::RegisterNetworkEventListener(const std::function<void(HSteamNetConnection)> listener, NetworkingEventType listenerTarget) {
     if (m_EventTypeToListenerMap.find(listenerTarget) == m_EventTypeToListenerMap.end()) {
         m_EventTypeToListenerMap[listenerTarget] = std::vector<std::function<void(HSteamNetConnection)>>();
     }
 
     m_EventTypeToListenerMap[listenerTarget].push_back(listener);
+}
+
+
+void Engine::RegisterNetworkDataListener(const std::function<void(HSteamNetConnection, std::vector<std::byte> &)> listener) {
+    m_DataListeners.push_back(listener);
 }
 
 UI::GenericElement *Engine::GetElementByID(const std::string &id) {
@@ -3286,6 +3275,7 @@ void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
                             DisconnectClientFromServer(incomingMessage->GetConnection());
                             break;
                         case CLIENT_REQUEST_APPLICATION:
+                            FireNetworkEvent(EVENT_RECEIVED_CLIENT_REQUEST, incomingMessage->GetConnection(), packet.data);
                             break;
                     }
                 }
@@ -3315,11 +3305,7 @@ void Engine::DisconnectFromServer() {
 
     UTILASSERT(state.netConnections.size() == 1);
 
-    if (m_EventTypeToListenerMap.find(EVENT_DISCONNECTED_FROM_SERVER) != m_EventTypeToListenerMap.end()) {
-        for (auto &listener : m_EventTypeToListenerMap[EVENT_DISCONNECTED_FROM_SERVER]) {
-            listener(state.netConnections[0]);
-        }
-    }
+    FireNetworkEvent(EVENT_DISCONNECTED_FROM_SERVER, state.netConnections[0]);
 
     /* TODO: this should work but idk why the server doesn't receive anything. */
     std::vector<std::byte> serializedDisconnectRequest;
@@ -3341,11 +3327,7 @@ void Engine::DisconnectClientFromServer(HSteamNetConnection connection) {
     auto it = std::find(state.netConnections.begin(), state.netConnections.end(), connection);
     UTILASSERT(it != state.netConnections.end());
 
-    if (m_EventTypeToListenerMap.find(EVENT_CLIENT_DISCONNECTED) != m_EventTypeToListenerMap.end()) {
-        for (auto &listener : m_EventTypeToListenerMap[EVENT_CLIENT_DISCONNECTED]) {
-            listener(connection);
-        }
-    }
+    FireNetworkEvent(EVENT_CLIENT_DISCONNECTED, connection);
 
     m_NetworkingSockets->CloseConnection(connection, 0, nullptr, true);
 
@@ -3567,8 +3549,7 @@ void Engine::SendRequestToServer(std::vector<std::byte> &data) {
 
     Networking_ClientRequest request{};
     request.requestType = CLIENT_REQUEST_APPLICATION;
-    request.dataSize = data.size();
-    request.data = data.data();
+    request.data = data;
 
     std::vector<std::byte> serializedRequest;
     SerializeClientRequest(request, serializedRequest);
@@ -3704,9 +3685,9 @@ void Engine::AddObjectToStatePacketIfChanged(Object *object, Networking_StatePac
     bool anythingChanged = lastPacketObjectEquivalent == m_LastPacket.objects.end();
 
     if (!anythingChanged && (
-        object->GetPosition() != lastPacketObjectEquivalent->position ||
-        object->GetRotation() != lastPacketObjectEquivalent->rotation ||
-        object->GetScale() != lastPacketObjectEquivalent->scale ||
+        object->GetPosition(false) != lastPacketObjectEquivalent->position ||
+        object->GetRotation(false) != lastPacketObjectEquivalent->rotation ||
+        object->GetScale(false) != lastPacketObjectEquivalent->scale ||
         object->IsGeneratedFromFile() != lastPacketObjectEquivalent->isGeneratedFromFile ||
         object->GetSourceFile() != lastPacketObjectEquivalent->objectSourceFile ||
         object->GetSourceID() != lastPacketObjectEquivalent->objectSourceID ||
@@ -3904,16 +3885,37 @@ void Engine::SerializeNetworkingCamera(Networking_Camera &cameraPacket, std::vec
 void Engine::SerializeClientRequest(Networking_ClientRequest &clientRequest, std::vector<std::byte> &dest) {
     Serialize(clientRequest.requestType, dest);
 
-    if (clientRequest.data != nullptr) {
-        Serialize(clientRequest.dataSize, dest);
+    Serialize(clientRequest.data.size(), dest);
 
-        dest.resize(dest.size() + clientRequest.dataSize);
-        memcpy(dest.data() + (dest.size() - clientRequest.dataSize), clientRequest.data, clientRequest.dataSize);
-    }
+    dest.insert(dest.end(), clientRequest.data.begin(), clientRequest.data.end());
 }
 
 void Engine::DeserializeClientRequest(std::vector<std::byte> &serializedClientRequest, Networking_ClientRequest &dest) {
     Deserialize(serializedClientRequest, dest.requestType);
+
+    size_t dataSize = 0;
+    Deserialize(serializedClientRequest, dataSize);
+
+    /* Deserialize actually takes away from the vector, so we **should** be able to just copy the rest to data. */
+    dest.data = serializedClientRequest;
+}
+
+void Engine::FireNetworkEvent(NetworkingEventType type, HSteamNetConnection conn, std::optional<std::reference_wrapper<std::vector<std::byte>>> data) {
+    if (type == EVENT_RECEIVED_CLIENT_REQUEST) {
+        UTILASSERT(data.has_value());
+
+        for (auto &listener : m_DataListeners) {
+            listener(conn, data.value().get());
+        }
+        
+        return;
+    }
+
+    if (m_EventTypeToListenerMap.find(type) != m_EventTypeToListenerMap.end()) {
+        for (auto &listener : m_EventTypeToListenerMap[type]) {
+            listener(conn);
+        }
+    }
 }
 
 Engine *Engine::m_CallbackInstance = nullptr;

@@ -421,8 +421,7 @@ enum Networking_ClientRequestType {
 struct Networking_ClientRequest {
     Networking_ClientRequestType requestType;
 
-    size_t dataSize = 0;
-    void *data = nullptr;
+    std::vector<std::byte> data;
 };
 
 enum Networking_EventType {
@@ -463,6 +462,8 @@ enum NetworkingEventType {
     EVENT_DISCONNECTED_FROM_SERVER,   /* We (client) disconnected from a remote server */
     EVENT_CLIENT_CONNECTED, /* A new client has connected */
     EVENT_CONNECTED_TO_SERVER, /* We have connected to a server. */
+
+    EVENT_RECEIVED_CLIENT_REQUEST,
 };
 
 /* The state stored for every NetworkingThread */
@@ -526,7 +527,8 @@ public:
 
     void ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *callbackInfo);
 
-    void RegisterNetworkListener(const std::function<void(HSteamNetConnection)> listener, NetworkingEventType listenerTarget);
+    void RegisterNetworkEventListener(const std::function<void(HSteamNetConnection)> listener, NetworkingEventType listenerTarget);
+    void RegisterNetworkDataListener(const std::function<void(HSteamNetConnection, std::vector<std::byte> &)> listener);
 
     void DisconnectFromServer();    // Disconnects you from a game server, Safe to call in any situation but wont do anything if you aren't connected to a server.
 
@@ -562,6 +564,8 @@ private:
     std::string m_ScenePath = "";
 
     std::unordered_map<NetworkingEventType, std::vector<std::function<void(HSteamNetConnection)>>> m_EventTypeToListenerMap;
+    std::vector<std::function<void(HSteamNetConnection, std::vector<std::byte> &)>> m_DataListeners;
+
     std::unordered_map<HSteamNetConnection, Camera *> m_ConnToCameraAttachment;
 
     std::vector<Networking_Event> m_NetworkingEvents;
@@ -629,6 +633,8 @@ private:
     void SerializeClientRequest(Networking_ClientRequest &clientRequest, std::vector<std::byte> &dest);
 
     void DeserializeClientRequest(std::vector<std::byte> &serializedClientRequest, Networking_ClientRequest &dest);
+
+    void FireNetworkEvent(NetworkingEventType type, HSteamNetConnection conn, std::optional<std::reference_wrapper<std::vector<std::byte>>> data = {});
 
     void CheckButtonClicks(SDL_Event *event);
 

@@ -36,9 +36,10 @@ public:
     void SetRotation(glm::quat rotation);
     void SetScale(glm::vec3 scale);
 
-    glm::vec3 GetPosition();
-    glm::quat GetRotation();
-    glm::vec3 GetScale();
+    /* withInheritance controls whether this returns its position in respect to its parent or not. */
+    glm::vec3 GetPosition(bool withInheritance = true);
+    glm::quat GetRotation(bool withInheritance = true);
+    glm::vec3 GetScale(bool withInheritance = true);
 
     void SetParent(Object *parent);
     Object *GetParent();

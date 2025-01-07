@@ -102,8 +102,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
     node->mTransformation.Decompose(scale, rotation, position);
 
-    /* This was designed with Blender in mind, which for some damn reason just doesn't put the values in the objectively correct places. */
-    obj->SetPosition(glm::vec3(position.x, -position.z, position.y));
+    obj->SetPosition(glm::vec3(position.x, position.y, -position.z));
     obj->SetRotation(glm::quat(rotation.w, rotation.x, rotation.y, rotation.z));
     obj->SetScale(glm::vec3(scale.x, scale.y, scale.z));
 
@@ -116,8 +115,8 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
             aiVector3D direction = aiVector3D(-node->mTransformation.a3, -node->mTransformation.b3, -node->mTransformation.c3);
             direction.Normalize();
 
-            float pitch = glm::degrees(std::asin(-direction.z));
-            float yaw = glm::degrees(std::atan2(direction.x, -direction.y));
+            float pitch = glm::degrees(std::atan2(direction.x, direction.y));
+            float yaw = glm::degrees(std::asin(-direction.z));
 
             Camera *cam = new Camera(glm::vec3(sceneCam->mUp.x, sceneCam->mUp.y, sceneCam->mUp.z), yaw, pitch);
 
@@ -256,16 +255,16 @@ void Object::SetScale(glm::vec3 scale) {
     m_Scale = scale;
 }
 
-glm::vec3 Object::GetPosition() {
-    return m_Position + (m_Parent != nullptr ? m_Parent->GetPosition() : glm::vec3(0));
+glm::vec3 Object::GetPosition(bool withInheritance) {
+    return m_Position + (m_Parent != nullptr && withInheritance ? m_Parent->GetPosition() : glm::vec3(0));
 }
 
-glm::quat Object::GetRotation() {
-    return m_Rotation * (m_Parent != nullptr ? m_Parent->GetRotation() : glm::quat(0, 0, 0, 1));
+glm::quat Object::GetRotation(bool withInheritance) {
+    return m_Rotation * (m_Parent != nullptr && withInheritance ? m_Parent->GetRotation() : glm::quat(0, 0, 0, 1));
 }
 
-glm::vec3 Object::GetScale() {
-    return m_Scale * (m_Parent != nullptr ? m_Parent->GetScale() : glm::vec3(1));
+glm::vec3 Object::GetScale(bool withInheritance) {
+    return m_Scale * (m_Parent != nullptr && withInheritance ? m_Parent->GetScale() : glm::vec3(1));
 }
 
 int Object::GetObjectID() {
