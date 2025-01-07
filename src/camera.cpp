@@ -29,6 +29,7 @@ Camera::Camera(float upX, float upY, float upZ, float yaw, float pitch) : Front(
 glm::mat4 Camera::GetViewMatrix()
 {
     glm::vec3 position = (m_ObjectAttachment != nullptr ? m_ObjectAttachment->GetPosition() : glm::vec3(0.0f, 0.0f, 0.0f));
+
     return glm::lookAt(position, position + Front, Up);
 }
 

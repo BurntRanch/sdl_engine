@@ -3010,8 +3010,12 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                 SendFullUpdateToConnection(callbackInfo->m_hConn, state.tickNumber);
 
                 state.netConnections.push_back(callbackInfo->m_hConn);
-            } else {
-                UTILASSERT(m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT);
+            }
+
+            break;
+        
+        case k_ESteamNetworkingConnectionState_Connected:
+            if (m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT) {
                 UTILASSERT(m_NetworkingThreadStates[0].netConnections.size() < 1);
 
                 m_NetworkingThreadStates[0].netConnections.push_back(callbackInfo->m_hConn);
@@ -3019,9 +3023,6 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                 FireNetworkEvent(EVENT_CONNECTED_TO_SERVER, callbackInfo->m_hConn);
             }
 
-            break;
-        
-        case k_ESteamNetworkingConnectionState_Connected:
             break;
 
         default:
@@ -3127,20 +3128,22 @@ void Engine::NetworkingThreadClient_Main(NetworkingThreadState &state) {
         m_CallbackInstance = this;
         m_NetworkingSockets->RunCallbacks();
 
-        /* Receiving */
-        ISteamNetworkingMessage *incomingMessages;
-        int msgCount = m_NetworkingSockets->ReceiveMessagesOnConnection(state.netConnections[0], &incomingMessages, 1);
+        if (state.netConnections.size() >= 1) {
+            /* Receiving */
+            ISteamNetworkingMessage *incomingMessages;
+            int msgCount = m_NetworkingSockets->ReceiveMessagesOnConnection(state.netConnections[0], &incomingMessages, 1);
 
-        if (msgCount < 0) {
-            throw std::runtime_error("Error receiving messages from server!");
-        }
-        if (msgCount > 0) {
-            for (int i = 0; i < msgCount; i++) {
-                ISteamNetworkingMessage *incomingMessage = &incomingMessages[i];
+            if (msgCount < 0) {
+                throw std::runtime_error("Error receiving messages from server!");
+            }
+            if (msgCount > 0) {
+                for (int i = 0; i < msgCount; i++) {
+                    ISteamNetworkingMessage *incomingMessage = &incomingMessages[i];
 
-                if (incomingMessage->GetSize() < sizeof(size_t)) {
-                    fmt::println("Invalid packet!");
-                } else {
+                    if (incomingMessage->GetSize() < sizeof(size_t)) {
+                        fmt::println("Invalid packet!");
+                        continue;
+                    }
                     const void *data = incomingMessage->GetData();
                     
                     std::vector<std::byte> message{reinterpret_cast<const std::byte *>(data), reinterpret_cast<const std::byte *>(data) + incomingMessage->GetSize()};
@@ -3186,9 +3189,9 @@ void Engine::NetworkingThreadClient_Main(NetworkingThreadState &state) {
                     }
 
                     state.lastSyncedTickNumber = packet.tickNumber;
-                }
                 
-                incomingMessage->Release();
+                    incomingMessage->Release();
+                }
             }
         }
 
@@ -3302,6 +3305,10 @@ void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
 
 void Engine::DisconnectFromServer() {
     NetworkingThreadState &state = m_NetworkingThreadStates[0];
+
+    if (state.netConnections.empty()) {
+        return;
+    }
 
     UTILASSERT(state.netConnections.size() == 1);
 
