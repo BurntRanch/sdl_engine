@@ -2180,7 +2180,7 @@ void Renderer::Start() {
                 viewMatrix = m_PrimaryCamera->GetViewMatrix();
 
                 if (m_PrimaryCamera->type == CAMERA_PERSPECTIVE) {
-                    projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), m_PrimaryCamera->AspectRatio, m_Settings.CameraNear, CAMERA_FAR);
+                    projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), (float)m_Settings.RenderWidth / (float)m_Settings.RenderHeight, m_Settings.CameraNear, CAMERA_FAR);
                 } else {
                     projectionMatrix = glm::ortho(0.0f, m_PrimaryCamera->OrthographicWidth, 0.0f, m_PrimaryCamera->OrthographicWidth*m_PrimaryCamera->AspectRatio);
                 }
