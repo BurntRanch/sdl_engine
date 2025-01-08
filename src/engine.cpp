@@ -297,22 +297,22 @@ std::array<TextureImageAndMemory, 1> Renderer::LoadTexturesFromMesh(Mesh &mesh, 
     {
         if (!mesh.diffuseMapPath.empty()) {
             std::filesystem::path path;
-            // map_Kd /home/toni/.../brown_mud_dry_diff_4k.jpg
-            if (mesh.diffuseMapPath.has_root_path())
-            {
-                path = mesh.diffuseMapPath;
-            }
-            else
-            {
+
+            if (!mesh.diffuseMapPath.has_root_path()) {
                 // https://stackoverflow.com/a/73927710
-                auto rel = std::filesystem::relative(mesh.diffuseMapPath, "textures");
-                // map_Kd textures/brown_mud_dry_diff_4k.jpg
+                auto rel = std::filesystem::relative(mesh.diffuseMapPath, "resources");
+                // map_Kd resources/brown_mud_dry_diff_4k.jpg
                 if (!rel.empty() && rel.native()[0] != '.')
                     path = mesh.diffuseMapPath;
                 // map_Kd brown_mud_dry_diff_4k.jpg
                 else
-                    path = "textures" / mesh.diffuseMapPath;
+                    path = "resources" / mesh.diffuseMapPath;
             }
+
+            std::string absoluteSourcePath = std::filesystem::absolute(path).string();
+            std::string absoluteResourcesPath = std::filesystem::absolute("resources").string();
+
+            UTILASSERT(absoluteSourcePath.substr(0, absoluteResourcesPath.length()).compare(absoluteResourcesPath) == 0);
 
             TextureBufferAndMemory textureBufferAndMemory = LoadTextureFromFile(path);
             VkFormat textureFormat = getBestFormatFromChannels(textureBufferAndMemory.channels);
@@ -2178,7 +2178,12 @@ void Renderer::Start() {
 
             if (m_PrimaryCamera) {
                 viewMatrix = m_PrimaryCamera->GetViewMatrix();
-                projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), m_Settings.RenderWidth / (float) m_Settings.RenderHeight, m_Settings.CameraNear, CAMERA_FAR);
+
+                if (m_PrimaryCamera->type == CAMERA_PERSPECTIVE) {
+                    projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), m_PrimaryCamera->AspectRatio, m_Settings.CameraNear, CAMERA_FAR);
+                } else {
+                    projectionMatrix = glm::ortho(0.0f, m_PrimaryCamera->OrthographicWidth, 0.0f, m_PrimaryCamera->OrthographicWidth*m_PrimaryCamera->AspectRatio);
+                }
 
                 // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
                 projectionMatrix[1][1] *= -1;
@@ -3399,9 +3404,17 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
             case NETWORKING_NEW_CAMERA:
                 cameraPacket = event.camera.value();
 
-                camera = new Camera(cameraPacket.up, cameraPacket.yaw, cameraPacket.pitch);
+                camera = new Camera(cameraPacket.aspectRatio, cameraPacket.up, cameraPacket.yaw, cameraPacket.pitch);
 
                 camera->SetCameraID(cameraPacket.cameraID);
+
+                if (cameraPacket.isOrthographic) {
+                    camera->type = CAMERA_ORTHOGRAPHIC;
+
+                    camera->OrthographicWidth = cameraPacket.orthographicWidth;
+                }
+
+                camera->AspectRatio = cameraPacket.aspectRatio;
                 
                 camera->Pitch = cameraPacket.pitch;
                 camera->Yaw = cameraPacket.yaw;
@@ -3643,6 +3656,11 @@ void Engine::DeserializeNetworkingObject(std::vector<std::byte> &serializedObjec
 void Engine::DeserializeNetworkingCamera(std::vector<std::byte> &serializedCameraPacket, Networking_Camera &dest) {
     Deserialize(serializedCameraPacket, dest.cameraID);
 
+    Deserialize(serializedCameraPacket, dest.isOrthographic);
+
+    Deserialize(serializedCameraPacket, dest.aspectRatio);
+    Deserialize(serializedCameraPacket, dest.orthographicWidth);
+
     Deserialize(serializedCameraPacket, dest.pitch);
     Deserialize(serializedCameraPacket, dest.yaw);
 
@@ -3733,6 +3751,9 @@ Networking_Camera Engine::AddCameraToStatePacket(Camera *cam, Networking_StatePa
     Networking_Camera cameraPacket{};
 
     cameraPacket.cameraID = cam->GetCameraID();
+    cameraPacket.isOrthographic = cam->type == CAMERA_ORTHOGRAPHIC;
+    cameraPacket.aspectRatio = cam->AspectRatio;
+    cameraPacket.orthographicWidth = cam->OrthographicWidth;
     cameraPacket.pitch = cam->Pitch;
     cameraPacket.yaw = cam->Yaw;
     cameraPacket.up = cam->Up;
@@ -3749,10 +3770,14 @@ void Engine::AddCameraToStatePacketIfChanged(Camera *cam, Networking_StatePacket
     bool anythingChanged = lastPacketCameraEquivalent == m_LastPacket.cameras.end();
 
     if (!anythingChanged && (
+        (cam->type == CAMERA_ORTHOGRAPHIC) != lastPacketCameraEquivalent->isOrthographic ||
+        cam->AspectRatio != lastPacketCameraEquivalent->aspectRatio ||
+        cam->OrthographicWidth != lastPacketCameraEquivalent->orthographicWidth ||
         cam->Pitch != lastPacketCameraEquivalent->pitch ||
         cam->Yaw != lastPacketCameraEquivalent->yaw ||
         cam->Up != lastPacketCameraEquivalent->up ||
         cam->FOV != lastPacketCameraEquivalent->fov ||
+        /* TODO: This constantly syncs the camera if there's more than one player connected because isMainCamera could change across connections. */
         isMainCamera != lastPacketCameraEquivalent->isMainCamera))
         anythingChanged = true;
 
@@ -3878,6 +3903,11 @@ void Engine::SerializeNetworkingObject(Networking_Object &objectPacket, std::vec
 
 void Engine::SerializeNetworkingCamera(Networking_Camera &cameraPacket, std::vector<std::byte> &dest) {
     Serialize(cameraPacket.cameraID, dest);
+
+    Serialize(cameraPacket.isOrthographic, dest);
+
+    Serialize(cameraPacket.aspectRatio, dest);
+    Serialize(cameraPacket.orthographicWidth, dest);
 
     Serialize(cameraPacket.pitch, dest);
     Serialize(cameraPacket.yaw, dest);

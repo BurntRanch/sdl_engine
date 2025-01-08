@@ -398,6 +398,11 @@ struct Networking_Object {
 
 struct Networking_Camera {
     int cameraID;
+
+    bool isOrthographic = false;
+    float aspectRatio;
+    float orthographicWidth;
+    
     float pitch;
     float yaw;
     glm::vec3 up;

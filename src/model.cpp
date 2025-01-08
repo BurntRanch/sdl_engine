@@ -112,7 +112,7 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
         if (diffuseTextureCount >= 1) {
             aiString path;
             material->GetTexture(aiTextureType_DIFFUSE, 0, &path);
-            diffuseMap = string(path.C_Str());
+            diffuseMap = string(std::filesystem::absolute(path.C_Str()));
         }
 
         aiColor4D aiDiffuseColor;

@@ -20,6 +20,11 @@ enum Camera_Movement {
     RIGHT
 };
 
+enum Camera_Type {
+    CAMERA_ORTHOGRAPHIC,
+    CAMERA_PERSPECTIVE,
+};
+
 // Default camera values
 const float YAW         =  0.0f;
 const float PITCH       =  0.0f;
@@ -33,6 +38,8 @@ class Object;
 class Camera
 {
 public:
+    Camera_Type type = CAMERA_PERSPECTIVE;
+
     // camera Attributes
     glm::vec3 Front;
     glm::vec3 Up;
@@ -46,11 +53,14 @@ public:
     float MouseSensitivity;
     float FOV;
 
+    float AspectRatio;
+    float OrthographicWidth;
+
     // constructor with vectors
-    Camera(glm::vec3 up = glm::vec3(0.0f, 0.0f, 1.0f), float yaw = YAW, float pitch = PITCH);
+    Camera(float aspectRatio, glm::vec3 up = glm::vec3(0.0f, 0.0f, 1.0f), float yaw = YAW, float pitch = PITCH);
 
     // constructor with scalar values
-    Camera(float upX = 0.0f, float upY = 0.0f, float upZ = 1.0f, float yaw = YAW, float pitch = PITCH);
+    Camera(float aspectRatio, float upX = 0.0f, float upY = 0.0f, float upZ = 1.0f, float yaw = YAW, float pitch = PITCH);
 
     // returns the view matrix calculated using Euler Angles and the LookAt Matrix
     glm::mat4 GetViewMatrix();

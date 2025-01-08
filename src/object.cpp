@@ -112,15 +112,22 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
         if (scene->mCameras[i]->mName == node->mName) {
             aiCamera *sceneCam = scene->mCameras[i];
 
+            UTILASSERT((sceneCam->mOrthographicWidth > 0 || sceneCam->mHorizontalFOV > 0) && !(sceneCam->mOrthographicWidth > 0 && sceneCam->mHorizontalFOV > 0));
+
             aiVector3D direction = aiVector3D(-node->mTransformation.a3, -node->mTransformation.b3, -node->mTransformation.c3);
             direction.Normalize();
 
             float pitch = glm::degrees(std::atan2(direction.x, direction.y));
             float yaw = glm::degrees(std::asin(direction.z));
 
-            Camera *cam = new Camera(glm::vec3(sceneCam->mUp.x, sceneCam->mUp.y, sceneCam->mUp.z), yaw, pitch);
+            Camera *cam = new Camera(sceneCam->mAspect, glm::vec3(sceneCam->mUp.x, sceneCam->mUp.y, sceneCam->mUp.z), yaw, pitch);
 
-            cam->FOV = glm::degrees(sceneCam->mHorizontalFOV);
+            if (sceneCam->mHorizontalFOV > 0) {
+                cam->FOV = glm::degrees(sceneCam->mHorizontalFOV);
+            } else {
+                cam->type = CAMERA_ORTHOGRAPHIC;
+                cam->OrthographicWidth = sceneCam->mOrthographicWidth;
+            }
 
             obj->SetCameraAttachment(cam);
 

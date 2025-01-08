@@ -2,10 +2,12 @@
 #include "fmt/format.h"
 #include "object.hpp"
 
-Camera::Camera(glm::vec3 up, float yaw, float pitch) : Front(glm::vec3(0.0f, 1.0f, 0.0f)), MovementSpeed(SPEED), MouseSensitivity(SENSITIVITY), FOV(FIELDOFVIEW)
+Camera::Camera(float aspectRatio, glm::vec3 up, float yaw, float pitch) : Front(glm::vec3(0.0f, 1.0f, 0.0f)), MovementSpeed(SPEED), MouseSensitivity(SENSITIVITY), FOV(FIELDOFVIEW)
 {
     HighestCameraID++;
     SetCameraID(HighestCameraID);
+
+    AspectRatio = aspectRatio;
 
     WorldUp = up;
     Yaw = yaw;
@@ -14,10 +16,12 @@ Camera::Camera(glm::vec3 up, float yaw, float pitch) : Front(glm::vec3(0.0f, 1.0
 }
 
 // constructor with scalar values
-Camera::Camera(float upX, float upY, float upZ, float yaw, float pitch) : Front(glm::vec3(0.0f, 1.0f, 0.0f)), MovementSpeed(SPEED), MouseSensitivity(SENSITIVITY), FOV(FIELDOFVIEW)
+Camera::Camera(float aspectRatio, float upX, float upY, float upZ, float yaw, float pitch) : Front(glm::vec3(0.0f, 1.0f, 0.0f)), MovementSpeed(SPEED), MouseSensitivity(SENSITIVITY), FOV(FIELDOFVIEW)
 {
     HighestCameraID++;
     SetCameraID(HighestCameraID);
+
+    AspectRatio = aspectRatio;
 
     WorldUp = glm::vec3(upX, upY, upZ);
     Yaw = yaw;
