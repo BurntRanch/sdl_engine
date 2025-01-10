@@ -1,5 +1,15 @@
 #include "engine.hpp"
 
+#include "BulletCollision/BroadphaseCollision/btDbvtBroadphase.h"
+#include "BulletCollision/BroadphaseCollision/btDispatcher.h"
+#include "BulletCollision/CollisionDispatch/btCollisionConfiguration.h"
+#include "BulletCollision/CollisionDispatch/btCollisionObject.h"
+#include "BulletCollision/CollisionDispatch/btDefaultCollisionConfiguration.h"
+#include "BulletDynamics/ConstraintSolver/btSequentialImpulseConstraintSolver.h"
+#include "BulletDynamics/Dynamics/btDiscreteDynamicsWorld.h"
+#include "BulletDynamics/Dynamics/btDynamicsWorld.h"
+#include "BulletDynamics/Dynamics/btRigidBody.h"
+#include "LinearMath/btVector3.h"
 #include "camera.hpp"
 #include "common.hpp"
 #include "fmt/base.h"
@@ -37,6 +47,7 @@
 #include <future>
 #include <glm/fwd.hpp>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <stdexcept>
@@ -2611,6 +2622,8 @@ Engine::~Engine() {
     }
 
     GameNetworkingSockets_Kill();
+
+    DeinitPhysics();
 }
 
 void Engine::InitRenderer(Settings &settings, Camera *primaryCamera) {
@@ -2632,6 +2645,48 @@ void Engine::InitNetworking() {
     }
 
     m_NetworkingSockets = SteamNetworkingSockets();
+}
+
+void Engine::InitPhysics() {
+    m_CollisionConfig = std::make_unique<btDefaultCollisionConfiguration>();
+    m_Dispatcher = std::make_unique<btCollisionDispatcher>(m_CollisionConfig.get());
+    m_Broadphase = std::make_unique<btDbvtBroadphase>();
+    m_Solver = std::make_unique<btSequentialImpulseConstraintSolver>();
+
+    m_DynamicsWorld = std::make_unique<btDiscreteDynamicsWorld>(m_Dispatcher.get(), m_Broadphase.get(), m_Solver.get(), m_CollisionConfig.get());
+
+    m_DynamicsWorld->setGravity(btVector3(0, -10, 0));
+}
+
+void Engine::DeinitPhysics() {
+    if (m_DynamicsWorld) {
+        while (m_DynamicsWorld->getNumConstraints() > 0) {
+            m_DynamicsWorld->removeConstraint(m_DynamicsWorld->getConstraint(0));
+        }
+
+        btCollisionObjectArray &array = m_DynamicsWorld->getCollisionObjectArray();
+
+        while (array.size() > 0) {
+            btCollisionObject *obj = array[0];
+            btRigidBody *rigidBody = btRigidBody::upcast(obj);
+
+            if (rigidBody && rigidBody->getMotionState()) {
+                delete rigidBody->getMotionState();
+            }
+
+            m_DynamicsWorld->removeCollisionObject(obj);
+            delete obj;
+        }
+    }
+
+    /* I love smart pointers :D */
+    m_CollisionShapes.clear();
+
+    m_DynamicsWorld.reset();
+    m_Solver.reset();
+    m_Broadphase.reset();
+    m_Dispatcher.reset();
+    m_CollisionConfig.reset();
 }
 
 void Engine::RegisterUIButtonListener(const std::function<void(std::string)> listener) {
@@ -3669,6 +3724,14 @@ void Engine::DeserializeNetworkingCamera(std::vector<std::byte> &serializedCamer
 
     Deserialize(serializedCameraPacket, dest.fov);
     Deserialize(serializedCameraPacket, dest.isMainCamera);
+}
+
+void Engine::PhysicsStep(float deltaTime) {
+    if (!m_DynamicsWorld) {
+        return;
+    }
+
+    m_DynamicsWorld->stepSimulation(deltaTime);
 }
 
 std::optional<Networking_Object> Engine::AddObjectToStatePacket(Object *object, Networking_StatePacket &statePacket, bool includeChildren, bool isRecursive) {

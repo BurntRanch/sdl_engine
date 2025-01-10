@@ -1,3 +1,4 @@
 -Iinclude
 -Iinclude/steam
+-I/usr/include/bullet
 -isystem/usr/include/freetype2

@@ -1,6 +1,11 @@
 #ifndef ENGINE_HPP
 #define ENGINE_HPP
 
+#include <BulletCollision/BroadphaseCollision/btBroadphaseInterface.h>
+#include <BulletCollision/BroadphaseCollision/btDispatcher.h>
+#include <BulletCollision/CollisionDispatch/btCollisionConfiguration.h>
+#include <BulletDynamics/ConstraintSolver/btConstraintSolver.h>
+#include <BulletDynamics/Dynamics/btDiscreteDynamicsWorld.h>
 #include "camera.hpp"
 #include "common.hpp"
 #include "isteamnetworkingsockets.h"
@@ -8,6 +13,9 @@
 #include "ui.hpp"
 #include "ui/button.hpp"
 #include "object.hpp"
+
+#include <LinearMath/btVector3.h>
+#include <btBulletDynamicsCommon.h>
 
 #include <future>
 #include <mutex>
@@ -502,6 +510,12 @@ public:
 
     void InitNetworking();
 
+    /* Initializes the Bullet Physics engine, Relies on Networking being enabled. */
+    void InitPhysics();
+
+    /* Stops the physics engine. */
+    void DeinitPhysics();
+
     /* UI::Button listeners will receive events when any button is pressed, along with its ID. */
     /* Due to how it works, this function can be called before the renderer is initialized. */
     void RegisterUIButtonListener(const std::function<void(std::string)> listener);
@@ -560,6 +574,14 @@ private:
     Renderer *m_Renderer = nullptr;
     ISteamNetworkingSockets *m_NetworkingSockets;
 
+    std::unique_ptr<btCollisionConfiguration> m_CollisionConfig;
+    std::unique_ptr<btDispatcher> m_Dispatcher;
+    std::unique_ptr<btBroadphaseInterface> m_Broadphase;
+    std::unique_ptr<btConstraintSolver> m_Solver;
+    std::unique_ptr<btDiscreteDynamicsWorld> m_DynamicsWorld;
+
+    std::vector<std::shared_ptr<btCollisionShape>> m_CollisionShapes;
+
     /* [0] = client, [1] = server. */
     std::array<NetworkingThreadState, 2> m_NetworkingThreadStates;
     
@@ -599,6 +621,8 @@ private:
     static void onConnectionStatusChangedCallback(SteamNetConnectionStatusChangedCallback_t *callbackInfo) {
         m_CallbackInstance->ConnectionStatusChanged(callbackInfo);
     }
+
+    void PhysicsStep(float deltaTime);
 
     /* Do not set isRecursive to true, This is only there to recursively add objs children BEFORE obj. This is a requirement in the protocol.
      * The return is optional (empty if obj is a child and isRecursive == false) but that doesn't mean you have to put it in the statePacket yourself. It's just there incase you want it.
