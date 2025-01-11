@@ -1,12 +1,25 @@
 #include "object.hpp"
+#include "BulletCollision/CollisionDispatch/btCollisionObject.h"
+#include "BulletCollision/CollisionShapes/btCollisionShape.h"
+#include "BulletDynamics/Dynamics/btRigidBody.h"
+#include "LinearMath/btDefaultMotionState.h"
+#include "LinearMath/btMotionState.h"
+#include "LinearMath/btQuaternion.h"
+#include "LinearMath/btTransform.h"
+#include "LinearMath/btVector3.h"
 #include "camera.hpp"
 #include "util.hpp"
+#include <SDL3/SDL_stdinc.h>
 #include <assimp/Importer.hpp>
+#include <assimp/metadata.h>
 #include <assimp/quaternion.h>
 #include <assimp/scene.h>
+#include <assimp/types.h>
 #include <assimp/vector3.h>
 #include <functional>
 #include <glm/trigonometric.hpp>
+#include <memory>
+#include "switch_fnv1a.h"
 
 Object::~Object() {
     for (Object *obj : m_Children) {
@@ -76,6 +89,22 @@ bool Object::IsGeneratedFromFile() {
     return m_GeneratedFromFile;
 }
 
+void Object::CreateRigidbody(btRigidBody::btRigidBodyConstructionInfo &constructionInfo) {
+    m_RigidBody = std::make_shared<btRigidBody>(constructionInfo);
+
+    SynchronizePhysicsTransform();
+
+    m_RigidBody->setUserPointer(this);
+}
+
+std::shared_ptr<btRigidBody> &Object::GetRigidBody() {
+    return m_RigidBody;
+}
+
+void Object::DeleteRigidbody() {
+    m_RigidBody.reset();
+}
+
 /* if parent is nullptr, that must mean this is the rootNode. */
 void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Object *parent, std::optional<std::reference_wrapper<Camera *>> primaryCamOutput) {
     fmt::println("Processing node!");
@@ -102,9 +131,39 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
     node->mTransformation.Decompose(scale, rotation, position);
 
-    obj->SetPosition(glm::vec3(position.x, position.y, position.z));
+    obj->SetPosition(glm::vec3(position.x, position.z, position.y));
     obj->SetRotation(glm::quat(rotation.w, rotation.x, rotation.y, rotation.z));
     obj->SetScale(glm::vec3(scale.x, scale.y, scale.z));
+
+    aiMetadata extensionsData;
+
+    if (node->mMetaData && node->mMetaData->HasKey("extensions")) {
+        node->mMetaData->Get("extensions", extensionsData);
+    }
+
+    if (extensionsData.HasKey("KHR_physics_rigid_bodies") && scene->mMetaData && scene->mMetaData->HasKey("extensions")) {
+        struct glTFRigidBody rigidBody = getColliderInfoFromNode(node, scene);
+        struct glTFColliderInfo &colliderInfo = rigidBody.colliderInfo;
+
+        btVector3 localInertia(0, 0, 0);
+        if (rigidBody.mass != 0.0f) {
+            /* TODO: looks like there's some more inertia information in `KHR_physics_rigid_bodies/motion`, Consider using that. */
+            colliderInfo.shape->calculateLocalInertia(rigidBody.mass, localInertia);    
+        }
+
+        btTransform transform;
+        transform.setIdentity();
+        transform.setOrigin(btVector3(position.x, position.y, position.z));
+        transform.setRotation(btQuaternion(rotation.x, rotation.y, rotation.z, rotation.w));
+
+        btRigidBody::btRigidBodyConstructionInfo cInfo{static_cast<btScalar>(rigidBody.mass), new btDefaultMotionState(transform), colliderInfo.shape, localInertia};
+        obj->CreateRigidbody(cInfo);
+
+        obj->GetRigidBody()->setFriction(colliderInfo.physicsMaterial.staticFriction);
+        obj->GetRigidBody()->setRollingFriction(colliderInfo.physicsMaterial.dynamicFriction);
+        obj->GetRigidBody()->setSpinningFriction(colliderInfo.physicsMaterial.dynamicFriction);
+        obj->GetRigidBody()->setRestitution(colliderInfo.physicsMaterial.restitution);
+    }
 
     /* Check if this node is/has a camera. */
     for (Uint32 i = 0; i < scene->mNumCameras; i++) {
@@ -157,6 +216,14 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
         sourceID++;
         ProcessNode(node->mChildren[i], scene, sourceID, obj, primaryCamOutput);
     }
+}
+
+void Object::SynchronizePhysicsTransform() {
+    if (!m_RigidBody) {
+        return;
+    }
+
+    m_RigidBody->getMotionState()->setWorldTransform(btTransform(btQuaternion(m_Rotation.x, m_Rotation.y, m_Rotation.z, m_Rotation.w), btVector3(m_Position.x, m_Position.z, m_Position.y)));
 }
 
 void Object::AddModelAttachment(Model *model) {
@@ -252,10 +319,14 @@ Camera *Object::GetCameraAttachment() {
 
 void Object::SetPosition(glm::vec3 position) {
     m_Position = position;
+
+    SynchronizePhysicsTransform();
 }
 
 void Object::SetRotation(glm::quat rotation) {
     m_Rotation = rotation;
+
+    SynchronizePhysicsTransform();
 }
 
 void Object::SetScale(glm::vec3 scale) {

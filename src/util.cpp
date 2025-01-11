@@ -1,4 +1,12 @@
 #include "util.hpp"
+#include "BulletCollision/CollisionDispatch/btCollisionObject.h"
+#include "BulletCollision/CollisionShapes/btBoxShape.h"
+#include "BulletCollision/CollisionShapes/btBvhTriangleMeshShape.h"
+#include "BulletCollision/CollisionShapes/btCollisionShape.h"
+#include "BulletCollision/CollisionShapes/btConcaveShape.h"
+#include "BulletCollision/CollisionShapes/btStridingMeshInterface.h"
+#include "BulletCollision/CollisionShapes/btTriangleIndexVertexArray.h"
+#include "LinearMath/btVector3.h"
 #include "camera.hpp"
 #include "engine.hpp"
 #include "isteamnetworkingsockets.h"
@@ -6,8 +14,10 @@
 #include "ui/label.hpp"
 #include "common.hpp"
 #include <algorithm>
+#include <assimp/metadata.h>
 #include <sstream>
 #include <stdexcept>
+#include "switch_fnv1a.h"
 
 bool endsWith(const std::string_view fullString, const std::string_view ending) {
     if (ending.length() > fullString.length())
@@ -227,4 +237,170 @@ bool getVisible(rapidxml::xml_node<char> *propertiesNode) {
     }
 
     return false;
+}
+
+btCollisionShape *createBoxShape(glm::vec3 size) {
+    btCollisionShape *shapePtr = new btBoxShape(btVector3(size.x, size.y, size.z));
+
+    return shapePtr;
+}
+
+struct glTFRigidBody getColliderInfoFromNode(const aiNode *node, const aiScene *scene) {
+    struct glTFRigidBody rigidBody{};
+
+    UTILASSERT(node->mMetaData && node->mMetaData->HasKey("extensions"));
+
+    aiMetadata extensionsData;
+
+    node->mMetaData->Get("extensions", extensionsData);
+
+    UTILASSERT(extensionsData.HasKey("KHR_physics_rigid_bodies") && scene->mMetaData && scene->mMetaData->HasKey("extensions"));
+
+    aiMetadata subMetaData;
+    extensionsData.Get("KHR_physics_rigid_bodies", subMetaData);
+
+    aiMetadata colliderData;
+    subMetaData.Get("collider", colliderData);
+
+    aiMetadata geometryParams;
+    colliderData.Get("geometry", geometryParams);
+
+    aiMetadata sceneExtensionsData;
+    scene->mMetaData->Get("extensions", sceneExtensionsData);
+
+    if (geometryParams.HasKey("shape")) {
+        int shapeIndex = 0;
+        geometryParams.Get("shape", shapeIndex);
+
+        UTILASSERT(sceneExtensionsData.HasKey("KHR_implicit_shapes"));
+
+        aiMetadata implicitShapesData;
+        sceneExtensionsData.Get("KHR_implicit_shapes", implicitShapesData);
+
+        aiMetadata implicitShapesArray;
+        implicitShapesData.Get("shapes", implicitShapesArray);
+
+        aiMetadata shapeData;
+        implicitShapesArray.Get(shapeIndex, shapeData);
+
+        aiString shapeType;
+        shapeData.Get("type", shapeType);
+
+        switch (fnv1a32::hash(shapeType.C_Str())) {
+            case "box"_fnv1a32:
+                glm::vec3 boxSize{};
+
+                aiMetadata shapeSize;
+                geometryParams.Get("size", shapeSize);
+
+                shapeSize.Get(0, boxSize.x);
+                shapeSize.Get(1, boxSize.y);
+                shapeSize.Get(2, boxSize.z);
+
+                rigidBody.colliderInfo.shape = createBoxShape(boxSize);
+            }
+
+        fmt::println("Shape: {}", shapeType.C_Str());
+    } else {
+        bool isConvexHull = false;
+        geometryParams.Get("convexHull", isConvexHull);
+
+        if (isConvexHull) {
+            throw std::runtime_error("Convex Hull rigid bodies are not supported!");
+        }
+
+        int targetNodeIdx = 0;
+        geometryParams.Get("node", targetNodeIdx);
+
+        std::vector<aiNode *> checkList(scene->mRootNode->mChildren, scene->mRootNode->mChildren + scene->mRootNode->mNumChildren);
+        bool stopSearch = false;
+
+        while (!checkList.empty() && !stopSearch) {
+            aiNode *node = checkList[0];
+            int nodeIdx = 0;
+
+            if (node->mMetaData && node->mMetaData->HasKey("glTF_Index")) {
+                node->mMetaData->Get("glTF_Index", nodeIdx);
+
+                if (targetNodeIdx == nodeIdx) {
+                    stopSearch = true;
+                    continue;
+                }
+            }
+
+            checkList.erase(checkList.begin());
+
+            for (Uint32 i = 0; i < node->mNumChildren; i++) {
+                checkList.push_back(node->mChildren[i]);
+            }
+        }
+
+        UTILASSERT(stopSearch);
+        aiNode *targetNode = checkList[0];
+
+        UTILASSERT(targetNode->mNumMeshes > 0);
+        aiMesh *mesh = scene->mMeshes[targetNode->mMeshes[0]];
+
+        btTriangleIndexVertexArray *va = new btTriangleIndexVertexArray();
+
+        Uint32 *indices = new Uint32[mesh->mNumFaces * 3];
+        glm::vec3 *vertices = new glm::vec3[mesh->mNumVertices];
+
+        // process indices
+        for(unsigned int i = 0; i < mesh->mNumFaces; i++)
+        {
+            aiFace face = mesh->mFaces[i];
+            for (unsigned int j = 0; j < face.mNumIndices; j++) {
+                indices[i * 3 + j] = face.mIndices[j];
+            }
+        }
+
+        // process vertices
+        for(unsigned int i = 0; i < mesh->mNumVertices; i++)
+        {
+            vertices[i] = glm::vec3(mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z);
+        }
+        
+        btIndexedMesh indexedMesh;
+        indexedMesh.m_indexType = PHY_INTEGER;
+        indexedMesh.m_numTriangles = mesh->mNumFaces;
+        indexedMesh.m_triangleIndexBase = reinterpret_cast<Uint8 *>(indices);
+        indexedMesh.m_triangleIndexStride = sizeof(int)*3;
+
+        indexedMesh.m_vertexType = PHY_FLOAT;
+        indexedMesh.m_numVertices = mesh->mNumVertices;
+        indexedMesh.m_vertexBase = reinterpret_cast<Uint8 *>(vertices);
+        indexedMesh.m_vertexStride = sizeof(float) * 3;
+
+        va->addIndexedMesh(indexedMesh);
+
+        rigidBody.colliderInfo.shape = new btBvhTriangleMeshShape(va, true);
+    }
+
+    /* Physics Material */
+    int materialIndex = 0;
+    colliderData.Get("physicsMaterial", materialIndex);
+
+    aiMetadata rigidBodiesData;
+    sceneExtensionsData.Get("KHR_physics_rigid_bodies", rigidBodiesData);
+
+    aiMetadata physicsMaterials;
+    rigidBodiesData.Get("physicsMaterials", physicsMaterials);
+
+    aiMetadata physicsMaterial;
+    physicsMaterials.Get(materialIndex, physicsMaterial);
+
+    physicsMaterial.Get("staticFriction", rigidBody.colliderInfo.physicsMaterial.staticFriction);
+    physicsMaterial.Get("dynamicFriction", rigidBody.colliderInfo.physicsMaterial.dynamicFriction);
+    physicsMaterial.Get("restitution", rigidBody.colliderInfo.physicsMaterial.restitution);
+
+    /* Mass */
+    if (subMetaData.HasKey("motion")) {
+        aiMetadata motionData;
+        subMetaData.Get("motion", motionData);
+
+        motionData.Get("mass", rigidBody.mass);
+    }
+
+    return rigidBody;
 }

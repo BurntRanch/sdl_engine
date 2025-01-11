@@ -2655,7 +2655,13 @@ void Engine::InitPhysics() {
 
     m_DynamicsWorld = std::make_unique<btDiscreteDynamicsWorld>(m_Dispatcher.get(), m_Broadphase.get(), m_Solver.get(), m_CollisionConfig.get());
 
-    m_DynamicsWorld->setGravity(btVector3(0, -10, 0));
+    m_DynamicsWorld->setGravity(btVector3(0, -0.1, 0));
+
+    for (auto &rigidBodyPtr : m_RigidBodies) {
+        m_DynamicsWorld->addRigidBody(rigidBodyPtr.get());
+    }
+
+    RegisterTickUpdateHandler(std::bind(&Engine::PhysicsStep, this, std::placeholders::_1), NETWORKING_THREAD_ACTIVE_SERVER);
 }
 
 void Engine::DeinitPhysics() {
@@ -2674,13 +2680,14 @@ void Engine::DeinitPhysics() {
                 delete rigidBody->getMotionState();
             }
 
+            if (obj->getCollisionShape()) {
+                delete obj->getCollisionShape();
+            }
+
             m_DynamicsWorld->removeCollisionObject(obj);
             delete obj;
         }
     }
-
-    /* I love smart pointers :D */
-    m_CollisionShapes.clear();
 
     m_DynamicsWorld.reset();
     m_Solver.reset();
@@ -2792,11 +2799,25 @@ void Engine::AddObject(Object *object) {
         m_Cameras.push_back(object->GetCameraAttachment());
     }
 
+    if (object->GetRigidBody()) {
+        auto &rigidBodyPtr = object->GetRigidBody();
+
+        m_RigidBodies.push_back(rigidBodyPtr);
+
+        if (m_DynamicsWorld) {
+            m_DynamicsWorld->addRigidBody(rigidBodyPtr.get());
+        }
+    }
+
     for (Object *child : object->GetChildren()) {
         AddObject(child);
     }
 
     m_Objects.push_back(object);
+}
+
+std::vector<Camera *> &Engine::GetCameras() {
+    return m_Cameras;
 }
 
 void Engine::RemoveCamera(Camera *cam) {
@@ -3726,12 +3747,37 @@ void Engine::DeserializeNetworkingCamera(std::vector<std::byte> &serializedCamer
     Deserialize(serializedCameraPacket, dest.isMainCamera);
 }
 
-void Engine::PhysicsStep(float deltaTime) {
+void Engine::PhysicsStep(int _) {
     if (!m_DynamicsWorld) {
         return;
     }
 
-    m_DynamicsWorld->stepSimulation(deltaTime);
+    m_DynamicsWorld->stepSimulation(1.0f / 64.0f, 4, (1.0f / 4.0f) / 64.0f);
+
+    /* TODO: in the far future, we might be able to do softbodies! */
+    for (int i = m_DynamicsWorld->getNumCollisionObjects() - 1; i >= 0; i--) {
+        btCollisionObject *collisionObject = m_DynamicsWorld->getCollisionObjectArray()[i];
+        btRigidBody *body = btRigidBody::upcast(collisionObject);
+
+        btTransform transform;
+
+        if (body && body->getMotionState()) {
+            body->getMotionState()->getWorldTransform(transform);
+        } else {
+            transform = collisionObject->getWorldTransform();
+        }
+
+        btVector3 origin = transform.getOrigin();
+        btQuaternion rotation = transform.getRotation();
+
+        fmt::println("origin: {} {} {}", origin.getX(), origin.getY(), origin.getZ());
+
+        Object *obj = reinterpret_cast<Object *>(collisionObject->getUserPointer());
+        UTILASSERT(obj);
+
+        obj->SetPosition(glm::vec3(origin.getX(), origin.getZ(), origin.getY()));
+        obj->SetRotation(glm::quat(rotation.getW(), rotation.getX(), rotation.getY(), rotation.getZ()));
+    }
 }
 
 std::optional<Networking_Object> Engine::AddObjectToStatePacket(Object *object, Networking_StatePacket &statePacket, bool includeChildren, bool isRecursive) {

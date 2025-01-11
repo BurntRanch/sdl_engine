@@ -1,9 +1,11 @@
 #pragma once
 
+#include "BulletDynamics/Dynamics/btRigidBody.h"
 #include "camera.hpp"
 #include "model.hpp"
 #include <functional>
 #include <glm/gtc/quaternion.hpp>
+#include <memory>
 #include <optional>
 
 class Object {
@@ -56,10 +58,16 @@ public:
     /* Gets whether the object was sourced from an ImportFromFile call or not. */
     bool IsGeneratedFromFile();
 
+    void CreateRigidbody(btRigidBody::btRigidBodyConstructionInfo &constructionInfo);
+    std::shared_ptr<btRigidBody> &GetRigidBody();
+    void DeleteRigidbody();
+
     int GetObjectID();
     void SetObjectID(int objectID);
 private:
     void ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Object *parent = nullptr, std::optional<std::reference_wrapper<Camera *>> primaryCamOutput = {});
+
+    void SynchronizePhysicsTransform();
 
     int m_ObjectID = -1;
 
@@ -78,6 +86,8 @@ private:
     glm::vec3 m_Position;
     glm::quat m_Rotation;
     glm::vec3 m_Scale;
+
+    std::shared_ptr<btRigidBody> m_RigidBody;
 
     static int HighestObjectID;
 };

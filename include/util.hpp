@@ -1,11 +1,14 @@
 #ifndef UTIL_HPP
 #define UTIL_HPP
+#include "BulletCollision/CollisionShapes/btCollisionShape.h"
 #include "common.hpp"
 #include "engine.hpp"
 #include "fmt/base.h"
 #include "isteamnetworkingsockets.h"
 #include "object.hpp"
 #include "steamnetworkingtypes.h"
+#include <SDL3/SDL_stdinc.h>
+#include <assimp/scene.h>
 #include <glm/ext/vector_float2.hpp>
 #include <glm/vec3.hpp>
 #include <array>
@@ -19,6 +22,28 @@
 #define UTILASSERT(expr)        (static_cast<bool>(expr)    \
                                     ? void(0)   \
                                     : throw std::runtime_error((std::string)#expr + (std::string)" is false/null!"))
+
+struct glTFPhysicsMaterial {
+    float staticFriction;
+    float dynamicFriction;
+
+    float restitution;
+};
+
+struct glTFColliderInfo {
+    btCollisionShape *shape;
+
+    glTFPhysicsMaterial physicsMaterial;
+
+    /* TODO: I don't see a point in collisionFilter but it could be useful. */
+};
+
+struct glTFRigidBody {
+    /* If this is 0, then the RigidBody is static. */
+    Uint64 mass = 0;
+
+    glTFColliderInfo colliderInfo;
+};
 
 bool                     intersects(const glm::vec3 &origin, const glm::vec3 &front, const std::array<glm::vec3, 2> &boundingBox);
 std::vector<std::string> split(const std::string_view text, const char delim);
@@ -38,6 +63,11 @@ glm::vec2                getPosition(rapidxml::xml_node<char> *propertiesNode);
 glm::vec2                getScale(rapidxml::xml_node<char> *propertiesNode);
 float                    getZDepth(rapidxml::xml_node<char> *propertiesNode, float depthDefault = 1.0f);
 bool                     getVisible(rapidxml::xml_node<char> *propertiesNode);
+
+/* Creates a box shape and gives back a pointer that is owned by the caller. */
+btCollisionShape *createBoxShape(glm::vec3 size);
+
+struct glTFRigidBody getColliderInfoFromNode(const aiNode *node, const aiScene *scene);
 
 template<typename T>
 void Deserialize(std::vector<std::byte> &object, T &dest) {

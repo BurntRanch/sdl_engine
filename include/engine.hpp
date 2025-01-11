@@ -6,6 +6,9 @@
 #include <BulletCollision/CollisionDispatch/btCollisionConfiguration.h>
 #include <BulletDynamics/ConstraintSolver/btConstraintSolver.h>
 #include <BulletDynamics/Dynamics/btDiscreteDynamicsWorld.h>
+#include <BulletDynamics/Dynamics/btDynamicsWorld.h>
+#include "BulletDynamics/ConstraintSolver/btSequentialImpulseConstraintSolver.h"
+#include "BulletDynamics/Dynamics/btRigidBody.h"
 #include "camera.hpp"
 #include "common.hpp"
 #include "isteamnetworkingsockets.h"
@@ -532,6 +535,8 @@ public:
 
     void AddObject(Object *object);
 
+    std::vector<Camera *> &GetCameras();
+
     /* This does not delete the object nor its attachments. */
     void RemoveObject(Object *object);
     void RemoveCamera(Camera *cam);
@@ -574,13 +579,16 @@ private:
     Renderer *m_Renderer = nullptr;
     ISteamNetworkingSockets *m_NetworkingSockets;
 
-    std::unique_ptr<btCollisionConfiguration> m_CollisionConfig;
-    std::unique_ptr<btDispatcher> m_Dispatcher;
+    std::unique_ptr<btDefaultCollisionConfiguration> m_CollisionConfig;
+    std::unique_ptr<btCollisionDispatcher> m_Dispatcher;
     std::unique_ptr<btBroadphaseInterface> m_Broadphase;
-    std::unique_ptr<btConstraintSolver> m_Solver;
+    std::unique_ptr<btSequentialImpulseConstraintSolver> m_Solver;
     std::unique_ptr<btDiscreteDynamicsWorld> m_DynamicsWorld;
 
-    std::vector<std::shared_ptr<btCollisionShape>> m_CollisionShapes;
+    /* I don't really like this variable type, but this is basically an array of pointers.
+     * We don't own these, they're all owned by the object, but we still can remove/add them from/to the dynamic world.
+     */
+    std::vector<std::shared_ptr<btRigidBody>> m_RigidBodies;
 
     /* [0] = client, [1] = server. */
     std::array<NetworkingThreadState, 2> m_NetworkingThreadStates;
@@ -622,7 +630,8 @@ private:
         m_CallbackInstance->ConnectionStatusChanged(callbackInfo);
     }
 
-    void PhysicsStep(float deltaTime);
+    /* Steps through the physics engine assuming a tickrate of 64.0f (TODO: change) */
+    void PhysicsStep(int _);
 
     /* Do not set isRecursive to true, This is only there to recursively add objs children BEFORE obj. This is a requirement in the protocol.
      * The return is optional (empty if obj is a child and isRecursive == false) but that doesn't mean you have to put it in the statePacket yourself. It's just there incase you want it.
