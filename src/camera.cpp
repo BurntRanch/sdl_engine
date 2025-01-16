@@ -33,7 +33,11 @@ Camera::Camera(float aspectRatio, float upX, float upY, float upZ, float yaw, fl
 glm::mat4 Camera::GetViewMatrix()
 {
     glm::vec3 position = (m_ObjectAttachment != nullptr ? m_ObjectAttachment->GetPosition() : glm::vec3(0.0f, 0.0f, 0.0f));
+    float positionZ = position.z;
+    position.z = position.y;
+    position.y = positionZ;
 
+    fmt::println("position: {} {} {}, front: {} {} {}, objectAttachment: {}, pitch: {}, yaw: {}.", position.x, position.y, position.z, Front.x, Front.y, Front.z, fmt::ptr(m_ObjectAttachment), Pitch, Yaw);
     return glm::lookAt(position, position + Front, Up);
 }
 

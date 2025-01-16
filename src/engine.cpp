@@ -3527,7 +3527,6 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
                     int offset = 0;
                     for (auto &generatedObjectPair : relatedObjects) {
                         Networking_Object *generatedObject = generatedObjectPair.first;
-                        m_ObjectsFromImportedObject.erase(m_ObjectsFromImportedObject.begin() + (generatedObjectPair.second - offset++));
 
                         Object *childEquivalent = DeepSearchObjectTree(object, [generatedObject] (Object *child) { return child->GetSourceID() == generatedObject->objectSourceID; });
                         UTILASSERT(childEquivalent);
@@ -3566,6 +3565,8 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
                                 }
                             }
                         }
+                        
+                        m_ObjectsFromImportedObject.erase(m_ObjectsFromImportedObject.begin() + (generatedObjectPair.second - offset++));
                     }
                 } else if (objectPacket.isGeneratedFromFile) {
                     m_ObjectsFromImportedObject.push_back(objectPacket);

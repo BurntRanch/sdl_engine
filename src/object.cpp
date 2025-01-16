@@ -120,7 +120,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
         obj->SetSourceID(sourceID);
 
-        fmt::println("Node {} is a child to {} object.", fmt::ptr(node), fmt::ptr(parent));
+        fmt::println("Node {} (Name: {}) is a child to {} object (SourceID: {}).", fmt::ptr(node), node->mName.C_Str(), fmt::ptr(parent), sourceID);
     }
 
     fmt::println("Node {} is represented by Object {}.", fmt::ptr(node), fmt::ptr(obj));
