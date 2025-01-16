@@ -21,11 +21,11 @@ endif
 
 NAME		 = BurntEngine
 TARGET		 = libengine.so.1
-SRC 	   	 = $(sort $(wildcard src/*.cpp))
+SRC 	   	 = $(sort $(wildcard src/*.cpp) $(wildcard src/renderer/*.cpp))
 OBJ 	   	 = $(SRC:.cpp=.o)
 LDFLAGS   	+= -L$(BUILDDIR)/fmt -L$(BUILDDIR)/steam -lGameNetworkingSockets -lassimp -lBulletSoftBody -lBulletDynamics -lBulletCollision -lLinearMath -l:libfmt.a -lSDL3 -lvulkan -lfreetype -shared -fno-PIE -Wl,-soname,$(TARGET)
 CXXFLAGS  	?= -mtune=generic -march=native
-CXXFLAGS        += -funroll-all-loops -Iinclude -Iinclude/steam -I/usr/include/bullet -isystem/usr/include/freetype2 -std=c++17 -fPIC $(VARS)
+CXXFLAGS        += -funroll-all-loops -Iinclude -Wall -Iinclude/steam -I/usr/include/bullet -isystem/usr/include/freetype2 -std=c++17 -fPIC $(VARS)
 
 all: fmt toml gamenetworkingsockets $(TARGET)
 

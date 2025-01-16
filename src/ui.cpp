@@ -1,6 +1,7 @@
 #include "ui.hpp"
 
 #include "common.hpp"
+#include "renderer/vulkanRenderer.hpp"
 #include "ui/arrows.hpp"
 #include "ui/button.hpp"
 #include "ui/label.hpp"
@@ -21,7 +22,7 @@ Panel::~Panel() {
     DestroyBuffers();
 };
 
-Panel::Panel(EngineSharedContext &sharedContext, glm::vec3 color, glm::vec2 position, glm::vec2 scales, float zDepth)
+Panel::Panel(VulkanRendererSharedContext &sharedContext, glm::vec3 color, glm::vec2 position, glm::vec2 scales, float zDepth)
     : m_SharedContext(sharedContext) {
 
     genericType = SCALABLE;
@@ -98,7 +99,7 @@ Label::~Label() {
     DestroyBuffers();
 }
 
-Label::Label(EngineSharedContext &sharedContext, std::string text, std::filesystem::path fontPath, glm::vec2 position, float zDepth)
+Label::Label(VulkanRendererSharedContext &sharedContext, std::string text, std::filesystem::path fontPath, glm::vec2 position, float zDepth)
     : m_SharedContext(sharedContext) {
 
     genericType = LABEL;
@@ -127,7 +128,7 @@ void Label::InitGlyphs(std::string text, std::filesystem::path fontPath) {
     float y = 0.0f;
 
     for (char c : text) {
-        Glyph glyph = m_SharedContext.engine->GenerateGlyph(m_SharedContext, m_FTFace, c, x, y, m_Depth);
+        Glyph glyph = m_SharedContext.renderer->GenerateGlyph(m_SharedContext, m_FTFace, c, x, y, m_Depth);
 
         if (!glyph.glyphBuffer.has_value()) {
             continue;
@@ -140,8 +141,8 @@ void Label::InitGlyphs(std::string text, std::filesystem::path fontPath) {
     m_FontPath = fontPath;
 
     /* It should return true if this label was added to the Renderer */
-    if (m_SharedContext.engine->RemoveUILabel(this)) {
-        m_SharedContext.engine->AddUILabel(this);
+    if (m_SharedContext.renderer->RemoveUILabel(this)) {
+        m_SharedContext.renderer->AddUILabel(this);
     }
 }
 
@@ -300,7 +301,7 @@ inline glm::vec2 Scalable::GetUnfitScale() {
     return scale;
 }
 
-GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxml::xml_node<char> *node, UI::GenericElement *parent = nullptr) {
+GenericElement *DeserializeUIElement(VulkanRendererSharedContext &sharedContext, rapidxml::xml_node<char> *node, UI::GenericElement *parent = nullptr) {
     using namespace rapidxml;
     std::string nodeName = node->name();
 
@@ -411,7 +412,7 @@ GenericElement *DeserializeUIElement(EngineSharedContext &sharedContext, rapidxm
     return element;
 }
 
-std::vector<GenericElement *> UI::LoadUIFile(EngineSharedContext &sharedContext, std::string_view fileName) {
+std::vector<GenericElement *> UI::LoadUIFile(VulkanRendererSharedContext &sharedContext, std::string_view fileName) {
     using namespace rapidxml;
 
     std::ifstream fileStream(fileName.data(), std::ios::binary | std::ios::ate);
