@@ -585,13 +585,11 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                     break;
                 }
 
-                SteamConnection connection(m_NetworkingSockets, callbackInfo->m_hConn);
+                SteamConnection &conn = state.connections.emplace_back(m_NetworkingSockets, callbackInfo->m_hConn);
 
-                FireNetworkEvent(EVENT_CLIENT_CONNECTED, connection);
+                FireNetworkEvent(EVENT_CLIENT_CONNECTED, conn);
 
-                SendFullUpdateToConnection(connection, state.tickNumber);
-
-                state.connections.push_back(connection);
+                SendFullUpdateToConnection(conn, state.tickNumber);
             }
 
             break;
@@ -600,9 +598,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
             if (m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT) {
                 UTILASSERT(m_NetworkingThreadStates[0].connections.size() < 1);
 
-                SteamConnection conn(m_NetworkingSockets, callbackInfo->m_hConn);
-
-                m_NetworkingThreadStates[0].connections.push_back(conn);
+                SteamConnection &conn = m_NetworkingThreadStates[0].connections.emplace_back(m_NetworkingSockets, callbackInfo->m_hConn);
 
                 FireNetworkEvent(EVENT_CONNECTED_TO_SERVER, conn);
             }
