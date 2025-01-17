@@ -12,6 +12,7 @@
 #include "camera.hpp"
 #include "common.hpp"
 #include "isteamnetworkingsockets.h"
+#include "networking/connection.hpp"
 #include "steamnetworkingtypes.h"
 #include "ui.hpp"
 #include "ui/button.hpp"
@@ -170,7 +171,7 @@ enum NetworkingEventType {
 struct NetworkingThreadState {
     int status = NETWORKING_THREAD_INACTIVE;
 
-    std::vector<HSteamNetConnection> netConnections;
+    std::vector<SteamConnection> connections;
 
     /* This is dictated by the server. */
     int tickNumber = -1;
@@ -227,19 +228,19 @@ public:
     bool ImportScene(const std::string &path);
     void ExportScene(const std::string &path);
 
-    void AttachCameraToConnection(Camera *cam, HSteamNetConnection conn);
+    void AttachCameraToConnection(Camera *cam, SteamConnection &conn);
 
     void ConnectToGameServer(SteamNetworkingIPAddr ipAddr);
     void HostGameServer(SteamNetworkingIPAddr ipAddr);
 
     void ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *callbackInfo);
 
-    void RegisterNetworkEventListener(const std::function<void(HSteamNetConnection)> listener, NetworkingEventType listenerTarget);
-    void RegisterNetworkDataListener(const std::function<void(HSteamNetConnection, std::vector<std::byte> &)> listener);
+    void RegisterNetworkEventListener(const std::function<void(SteamConnection &)> listener, NetworkingEventType listenerTarget);
+    void RegisterNetworkDataListener(const std::function<void(SteamConnection &, std::vector<std::byte> &)> listener);
 
     void DisconnectFromServer();    // Disconnects you from a game server, Safe to call in any situation but wont do anything if you aren't connected to a server.
 
-    void DisconnectClientFromServer(HSteamNetConnection connection);  // Disconnects a client from your server, Call this only if you're hosting a server.
+    void DisconnectClientFromServer(SteamConnection &connection);  // Disconnects a client from your server, Call this only if you're hosting a server.
 
     void StopHostingGameServer();
 
@@ -288,10 +289,10 @@ private:
 
     std::string m_ScenePath = "";
 
-    std::unordered_map<NetworkingEventType, std::vector<std::function<void(HSteamNetConnection)>>> m_EventTypeToListenerMap;
-    std::vector<std::function<void(HSteamNetConnection, std::vector<std::byte> &)>> m_DataListeners;
+    std::unordered_map<NetworkingEventType, std::vector<std::function<void(SteamConnection &)>>> m_EventTypeToListenerMap;
+    std::vector<std::function<void(SteamConnection &, std::vector<std::byte> &)>> m_DataListeners;
 
-    std::unordered_map<HSteamNetConnection, Camera *> m_ConnToCameraAttachment;
+    std::unordered_map<SteamConnection *, Camera *> m_ConnToCameraAttachment;
 
     std::vector<Networking_Event> m_NetworkingEvents;
     std::mutex m_NetworkingEventsLock;
@@ -359,10 +360,10 @@ private:
     void DeserializeNetworkingCamera(std::vector<std::byte> &serializedCameraPacket, Networking_Camera &dest);
 
     /* Sends a full update to the connection. Sends every single object, regardless whether it has changed, to the client. Avoid sending this unless it's a clients first time connecting. */
-    void SendFullUpdateToConnection(HSteamNetConnection connection, int tickNumber);
+    void SendFullUpdateToConnection(SteamConnection &connection, int tickNumber);
 
     /* Send an update to the client, Keep in mind the server won't send objects that haven't changed to the client. */
-    void SendUpdateToConnection(HSteamNetConnection connection, int tickNumber);
+    void SendUpdateToConnection(SteamConnection &connection, int tickNumber);
 
     /* Serialize the Networking_Object and append it to dest */
     void SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest);
@@ -374,7 +375,7 @@ private:
 
     void DeserializeClientRequest(std::vector<std::byte> &serializedClientRequest, Networking_ClientRequest &dest);
 
-    void FireNetworkEvent(NetworkingEventType type, HSteamNetConnection conn, std::optional<std::reference_wrapper<std::vector<std::byte>>> data = {});
+    void FireNetworkEvent(NetworkingEventType type, SteamConnection &conn, std::optional<std::reference_wrapper<std::vector<std::byte>>> data = {});
 
     void CheckButtonClicks(SDL_Event *event);
 

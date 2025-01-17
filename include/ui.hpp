@@ -4,7 +4,7 @@
 #include "renderer/vulkanRenderer.hpp"
 
 namespace UI {
-    std::vector<GenericElement *> LoadUIFile(VulkanRendererSharedContext &sharedContext, std::string_view fileName);
+    std::vector<GenericElement *> LoadUIFile(BaseRenderer *renderer, std::string_view fileName);
 }
 
 #include <ui/panel.hpp>

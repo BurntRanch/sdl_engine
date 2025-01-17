@@ -6,6 +6,7 @@
 #include "ui/arrows.hpp"
 #include "ui/waypoint.hpp"
 #include <SDL3/SDL_events.h>
+#include <freetype/freetype.h>
 #include <functional>
 
 namespace UI {
@@ -176,7 +177,22 @@ public:
 
     virtual void SetPrimaryCamera(Camera *cam) = 0;
 
-    // Glyph GenerateGlyph(VulkanRendererSharedContext &sharedContext, FT_Face ftFace, char c, float &x, float &y, float depth);
+    virtual Glyph GenerateGlyph(FT_Face ftFace, char c, float &x, float &y, float depth) = 0;
+    
+    virtual TextureImageAndMemory CreateSinglePixelImage(glm::vec3 color) = 0;
+
+    /* This contains Vulkan flags that can be safely ignored by any renderer not utilizing Vulkan. You may also translate them to your API of choice. */
+    virtual void AllocateBuffer(uint64_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, BufferAndMemory &bufferAndMemory) = 0;
+
+    /* This contains Vulkan flags that can be safely ignored by any renderer not utilizing Vulkan. You may also translate them to your API of choice. */
+    virtual TextureImageAndMemory CreateImage(Uint32 width, Uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties) = 0;
+    virtual void CopyBufferToImage(TextureBufferAndMemory textureBuffer, ImageAndMemory imageAndMemory) = 0;
+
+    virtual void DestroyImage(ImageAndMemory imageAndMemory) = 0;
+
+    virtual BufferAndMemory CreateSimpleVertexBuffer(const std::vector<SimpleVertex> &simpleVerts) = 0;
+    virtual BufferAndMemory CreateVertexBuffer(const std::vector<Vertex> &verts) = 0;
+    virtual BufferAndMemory CreateIndexBuffer(const std::vector<Uint32> &inds) = 0;
 
     virtual void Init() = 0;
 

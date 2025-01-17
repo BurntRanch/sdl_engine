@@ -1,4 +1,5 @@
 #include "renderer/vulkanRenderer.hpp"
+#include "common.hpp"
 #include "util.hpp"
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_init.h>
@@ -6,6 +7,7 @@
 #include <set>
 #include <thread>
 #include <vulkan/vk_enum_string_helper.h>
+#include <vulkan/vulkan_core.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
@@ -229,9 +231,7 @@ SwapChainSupportDetails VulkanRenderer::QuerySwapChainSupport(VkPhysicalDevice p
 }
 
 void VulkanRenderer::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size) {
-    VulkanRendererSharedContext sharedContext = GetVulkanRendererSharedContext();
-
-    VkCommandBuffer commandBuffer = BeginSingleTimeCommands(sharedContext);
+    VkCommandBuffer commandBuffer = BeginSingleTimeCommands();
 
     VkBufferCopy bufferCopy{};
     bufferCopy.srcOffset = 0;   // start
@@ -240,62 +240,58 @@ void VulkanRenderer::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer 
 
     vkCmdCopyBuffer(commandBuffer, hostBuffer, deviceBuffer, 1, &bufferCopy);
 
-    EndSingleTimeCommands(sharedContext, commandBuffer);
+    EndSingleTimeCommands(commandBuffer);
 }
 
 // first element = diffuse
 std::array<TextureImageAndMemory, 1> VulkanRenderer::LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations) {
     std::array<TextureImageAndMemory, 1> textures;
-
-    VulkanRendererSharedContext sharedContext = GetVulkanRendererSharedContext();
     
-    {
-        if (!mesh.diffuseMapPath.empty()) {
-            std::filesystem::path path;
+    if (!mesh.diffuseMapPath.empty()) {
+        std::filesystem::path path;
 
-            if (!mesh.diffuseMapPath.has_root_path()) {
-                // https://stackoverflow.com/a/73927710
-                auto rel = std::filesystem::relative(mesh.diffuseMapPath, "resources");
-                // map_Kd resources/brown_mud_dry_diff_4k.jpg
-                if (!rel.empty() && rel.native()[0] != '.')
-                    path = mesh.diffuseMapPath;
-                // map_Kd brown_mud_dry_diff_4k.jpg
-                else
-                    path = "resources" / mesh.diffuseMapPath;
-            }
-
-            std::string absoluteSourcePath = std::filesystem::absolute(path).string();
-            std::string absoluteResourcesPath = std::filesystem::absolute("resources").string();
-
-            UTILASSERT(absoluteSourcePath.substr(0, absoluteResourcesPath.length()).compare(absoluteResourcesPath) == 0);
-
-            TextureBufferAndMemory textureBufferAndMemory = LoadTextureFromFile(path);
-            VkFormat textureFormat = getBestFormatFromChannels(textureBufferAndMemory.channels);
-
-            textures[0] = CreateImage(sharedContext,
-            textureBufferAndMemory.width, textureBufferAndMemory.height,
-            textureFormat, VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-                );
-            ChangeImageLayout(sharedContext, textures[0].imageAndMemory.image, 
-                        textureFormat, 
-                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-                    );
-            CopyBufferToImage(sharedContext, textureBufferAndMemory, textures[0].imageAndMemory.image);
-            ChangeImageLayout(sharedContext, textures[0].imageAndMemory.image, 
-                        textureFormat, 
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                    );
-            
-            vkDestroyBuffer(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.buffer, NULL);
-            vkFreeMemory(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.memory, NULL);
-
-            m_AllocatedBuffers.erase(std::find(m_AllocatedBuffers.begin(), m_AllocatedBuffers.end(), textureBufferAndMemory.bufferAndMemory.buffer));
-            m_AllocatedMemory.erase(std::find(m_AllocatedMemory.begin(), m_AllocatedMemory.end(), textureBufferAndMemory.bufferAndMemory.memory));
-        } else {
-            textures[0] = CreateSinglePixelImage(sharedContext, mesh.diffuse);
+        if (!mesh.diffuseMapPath.has_root_path()) {
+            // https://stackoverflow.com/a/73927710
+            auto rel = std::filesystem::relative(mesh.diffuseMapPath, "resources");
+            // map_Kd resources/brown_mud_dry_diff_4k.jpg
+            if (!rel.empty() && rel.native()[0] != '.')
+                path = mesh.diffuseMapPath;
+            // map_Kd brown_mud_dry_diff_4k.jpg
+            else
+                path = "resources" / mesh.diffuseMapPath;
         }
+
+        std::string absoluteSourcePath = std::filesystem::absolute(path).string();
+        std::string absoluteResourcesPath = std::filesystem::absolute("resources").string();
+
+        UTILASSERT(absoluteSourcePath.substr(0, absoluteResourcesPath.length()).compare(absoluteResourcesPath) == 0);
+
+        TextureBufferAndMemory textureBufferAndMemory = LoadTextureFromFile(path);
+        VkFormat textureFormat = getBestFormatFromChannels(textureBufferAndMemory.channels);
+
+        textures[0] = CreateImage(
+        textureBufferAndMemory.width, textureBufferAndMemory.height,
+        textureFormat, VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+            );
+        ChangeImageLayout(textures[0].imageAndMemory.image, 
+                    textureFormat, 
+                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                );
+        CopyBufferToImage(textureBufferAndMemory, textures[0].imageAndMemory);
+        ChangeImageLayout(textures[0].imageAndMemory.image, 
+                    textureFormat, 
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                );
+        
+        vkDestroyBuffer(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.buffer, NULL);
+        vkFreeMemory(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.memory, NULL);
+
+        m_AllocatedBuffers.erase(std::find(m_AllocatedBuffers.begin(), m_AllocatedBuffers.end(), textureBufferAndMemory.bufferAndMemory.buffer));
+        m_AllocatedMemory.erase(std::find(m_AllocatedMemory.begin(), m_AllocatedMemory.end(), textureBufferAndMemory.bufferAndMemory.memory));
+    } else {
+        textures[0] = CreateSinglePixelImage(mesh.diffuse);
     }
 
     return textures;
@@ -316,23 +312,19 @@ TextureBufferAndMemory VulkanRenderer::LoadTextureFromFile(const std::string &na
 
     fmt::println("Image loaded ({}x{}, {} channels) with an expected buffer size of {}.", texWidth, texHeight, 4, texWidth * texHeight * 4);
 
-    VulkanRendererSharedContext sharedContext = GetVulkanRendererSharedContext();
+    BufferAndMemory textureBuffer;
 
-    VkBuffer imageStagingBuffer;
-    VkDeviceMemory imageStagingMemory;
+    AllocateBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, textureBuffer);
+    m_AllocatedBuffers.push_back(textureBuffer.buffer);
+    m_AllocatedMemory.push_back(textureBuffer.memory);
 
-    AllocateBuffer(sharedContext, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, imageStagingBuffer, imageStagingMemory);
-    m_AllocatedBuffers.push_back(imageStagingBuffer);
-    m_AllocatedMemory.push_back(imageStagingMemory);
-
-    void *data;
-    vkMapMemory(m_EngineDevice, imageStagingMemory, 0, imageSize, 0, &data);
-    SDL_memcpy(data, imageData, imageSize);
-    vkUnmapMemory(m_EngineDevice, imageStagingMemory);
+    vkMapMemory(m_EngineDevice, textureBuffer.memory, 0, imageSize, 0, &textureBuffer.mappedData);
+    SDL_memcpy(textureBuffer.mappedData, imageData, imageSize);
+    vkUnmapMemory(m_EngineDevice, textureBuffer.memory);
 
     stbi_image_free(imageData);
 
-    return {{imageStagingBuffer, imageStagingMemory}, (Uint32)texWidth, (Uint32)texHeight, (Uint8)4};
+    return {textureBuffer, (Uint32)texWidth, (Uint32)texHeight, (Uint8)4};
 }
 
 VkImageView VulkanRenderer::CreateImageView(TextureImageAndMemory &imageAndMemory, VkFormat format, VkImageAspectFlags aspectMask, bool recordCreation) {
@@ -404,17 +396,15 @@ VkFormat VulkanRenderer::FindBestFormat(const std::vector<VkFormat>& candidates,
 }
 
 RenderModel VulkanRenderer::LoadMesh(Mesh &mesh, Model *model, bool loadTextures) {
-    VulkanRendererSharedContext sharedContext = GetVulkanRendererSharedContext();
-
     RenderModel renderModel{};
 
     renderModel.model = model;
 
-    BufferAndMemory vertexBuffer = CreateVertexBuffer(sharedContext, mesh.vertices);
+    BufferAndMemory vertexBuffer = CreateVertexBuffer(mesh.vertices);
     renderModel.vertexBuffer = vertexBuffer;
 
     renderModel.indexBufferSize = mesh.indices.size();
-    renderModel.indexBuffer = CreateIndexBuffer(sharedContext, mesh.indices);
+    renderModel.indexBuffer = CreateIndexBuffer(mesh.indices);
 
     if (loadTextures) {
         std::array<TextureImageAndMemory, 1> meshTextures = LoadTexturesFromMesh(mesh, false);
@@ -438,7 +428,7 @@ RenderModel VulkanRenderer::LoadMesh(Mesh &mesh, Model *model, bool loadTextures
 
     renderModel.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
 
-    AllocateBuffer(sharedContext, uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer.buffer, renderModel.matricesUBOBuffer.memory);
+    AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer);
 
     vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOBuffer.mappedData);
 
@@ -563,8 +553,6 @@ bool VulkanRenderer::RemoveUIGenericElement(UI::GenericElement *element) {
 }
 
 void VulkanRenderer::AddUIWaypoint(UI::Waypoint *waypoint) {
-    VulkanRendererSharedContext sharedContext = GetVulkanRendererSharedContext();
-
     RenderUIWaypoint renderUIWaypoint{};
 
     renderUIWaypoint.waypoint = waypoint;
@@ -574,7 +562,7 @@ void VulkanRenderer::AddUIWaypoint(UI::Waypoint *waypoint) {
 
     renderUIWaypoint.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
 
-    AllocateBuffer(sharedContext, matricesUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderUIWaypoint.matricesUBOBuffer.buffer, renderUIWaypoint.matricesUBOBuffer.memory);
+    AllocateBuffer(matricesUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderUIWaypoint.matricesUBOBuffer);
 
     vkMapMemory(m_EngineDevice, renderUIWaypoint.matricesUBOBuffer.memory, 0, matricesUniformBufferSize, 0, &renderUIWaypoint.matricesUBOBuffer.mappedData);
 
@@ -583,7 +571,7 @@ void VulkanRenderer::AddUIWaypoint(UI::Waypoint *waypoint) {
 
     renderUIWaypoint.waypointUBO = {waypoint->GetWorldSpacePosition()};
 
-    AllocateBuffer(sharedContext, waypointUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderUIWaypoint.waypointUBOBuffer.buffer, renderUIWaypoint.waypointUBOBuffer.memory);
+    AllocateBuffer(waypointUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderUIWaypoint.waypointUBOBuffer);
 
     vkMapMemory(m_EngineDevice, renderUIWaypoint.waypointUBOBuffer.memory, 0, waypointUniformBufferSize, 0, &renderUIWaypoint.waypointUBOBuffer.mappedData);
 
@@ -635,8 +623,6 @@ void VulkanRenderer::AddUIWaypoint(UI::Waypoint *waypoint) {
 }
 
 void VulkanRenderer::AddUIArrows(UI::Arrows *arrows) {
-    VulkanRendererSharedContext sharedContext = GetVulkanRendererSharedContext();
-
     RenderUIArrows renderUIArrows{};
 
     renderUIArrows.arrows = arrows;
@@ -652,7 +638,7 @@ void VulkanRenderer::AddUIArrows(UI::Arrows *arrows) {
 
         arrowBuffer.first.first = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
 
-        AllocateBuffer(sharedContext, matricesUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, arrowBuffer.second.first.buffer, arrowBuffer.second.first.memory);
+        AllocateBuffer(matricesUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, arrowBuffer.second.first);
 
         vkMapMemory(m_EngineDevice, arrowBuffer.second.first.memory, 0, matricesUniformBufferSize, 0, &arrowBuffer.second.first.mappedData);
 
@@ -661,7 +647,7 @@ void VulkanRenderer::AddUIArrows(UI::Arrows *arrows) {
 
         arrowBuffer.first.second = {glm::vec3(1.0f, 1.0f, 1.0f)};
 
-        AllocateBuffer(sharedContext, arrowsUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, arrowBuffer.second.second.buffer, arrowBuffer.second.second.memory);
+        AllocateBuffer(arrowsUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, arrowBuffer.second.second);
 
         vkMapMemory(m_EngineDevice, arrowBuffer.second.second.memory, 0, arrowsUniformBufferSize, 0, &arrowBuffer.second.second.mappedData);
     }
@@ -752,9 +738,7 @@ void VulkanRenderer::AddUIPanel(UI::Panel *panel) {
     renderUIPanel.ubo.Dimensions = panel->GetDimensions();
     renderUIPanel.ubo.Depth = panel->GetDepth();
 
-    VulkanRendererSharedContext sharedContext = GetVulkanRendererSharedContext();
-
-    AllocateBuffer(sharedContext, sizeof(renderUIPanel.ubo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, renderUIPanel.uboBuffer.buffer, renderUIPanel.uboBuffer.memory);
+    AllocateBuffer(sizeof(renderUIPanel.ubo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, renderUIPanel.uboBuffer);
     vkMapMemory(m_EngineDevice, renderUIPanel.uboBuffer.memory, 0, sizeof(renderUIPanel.ubo), 0, &(renderUIPanel.uboBuffer.mappedData));
 
     m_UIPanels.push_back(renderUIPanel);
@@ -791,8 +775,6 @@ bool VulkanRenderer::RemoveUIPanel(UI::Panel *panel) {
 }
 
 void VulkanRenderer::AddUILabel(UI::Label *label) {
-    VulkanRendererSharedContext sharedContext = GetVulkanRendererSharedContext();
-
     RenderUILabel renderUILabel{};
 
     renderUILabel.label = label;
@@ -811,7 +793,7 @@ void VulkanRenderer::AddUILabel(UI::Label *label) {
 
     renderUILabel.ubo.Depth = label->GetDepth();
 
-    AllocateBuffer(sharedContext, sizeof(renderUILabel.ubo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, renderUILabel.uboBuffer.buffer, renderUILabel.uboBuffer.memory);
+    AllocateBuffer(sizeof(renderUILabel.ubo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, renderUILabel.uboBuffer);
     vkMapMemory(m_EngineDevice, renderUILabel.uboBuffer.memory, 0, sizeof(renderUILabel.ubo), 0, &(renderUILabel.uboBuffer.mappedData));
 
     m_UILabels.push_back(renderUILabel);
@@ -851,7 +833,7 @@ bool VulkanRenderer::RemoveUILabel(UI::Label *label) {
     return found;
 }
 
-Glyph VulkanRenderer::GenerateGlyph(VulkanRendererSharedContext &sharedContext, FT_Face ftFace, char c, float &x, float &y, float depth) {
+Glyph VulkanRenderer::GenerateGlyph(FT_Face ftFace, char c, float &x, float &y, float depth) {
     Glyph glyph{};
     
     glyph.character = c;
@@ -900,7 +882,7 @@ Glyph VulkanRenderer::GenerateGlyph(VulkanRendererSharedContext &sharedContext, 
                 glyph.scale.x = w;
                 glyph.scale.y = h;
 
-                AllocateBuffer(sharedContext, sizeof(glyph.glyphUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyph.glyphUBOBuffer.buffer, glyph.glyphUBOBuffer.memory);
+                AllocateBuffer(sizeof(glyph.glyphUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyph.glyphUBOBuffer);
                 vkMapMemory(m_EngineDevice, glyph.glyphUBOBuffer.memory, 0, sizeof(glyph.glyphUBO), 0, &(glyph.glyphUBOBuffer.mappedData));
 
                 return glyph;
@@ -910,7 +892,7 @@ Glyph VulkanRenderer::GenerateGlyph(VulkanRendererSharedContext &sharedContext, 
     VkDeviceSize glyphBufferSize = static_cast<VkDeviceSize>(ftFace->glyph->bitmap.width * ftFace->glyph->bitmap.rows);
 
     TextureBufferAndMemory glyphBuffer{};
-    AllocateBuffer(sharedContext, glyphBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyphBuffer.bufferAndMemory.buffer, glyphBuffer.bufferAndMemory.memory);
+    AllocateBuffer(glyphBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyphBuffer.bufferAndMemory);
     glyphBuffer.width = ftFace->glyph->bitmap.width;
     glyphBuffer.height = ftFace->glyph->bitmap.rows;
     glyphBuffer.channels = 1;
@@ -918,14 +900,14 @@ Glyph VulkanRenderer::GenerateGlyph(VulkanRendererSharedContext &sharedContext, 
     vkMapMemory(m_EngineDevice, glyphBuffer.bufferAndMemory.memory, 0, glyphBufferSize, 0, &(glyphBuffer.bufferAndMemory.mappedData));
     SDL_memcpy(glyphBuffer.bufferAndMemory.mappedData, ftFace->glyph->bitmap.buffer, glyphBufferSize);
 
-    TextureImageAndMemory textureImageAndMemory = CreateImage(sharedContext, ftFace->glyph->bitmap.width, ftFace->glyph->bitmap.rows, VK_FORMAT_R8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    TextureImageAndMemory textureImageAndMemory = CreateImage(ftFace->glyph->bitmap.width, ftFace->glyph->bitmap.rows, VK_FORMAT_R8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    ChangeImageLayout(sharedContext, textureImageAndMemory.imageAndMemory.image, 
+    ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
                 VK_FORMAT_R8_SRGB, 
                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
             );
-    CopyBufferToImage(sharedContext, glyphBuffer, textureImageAndMemory.imageAndMemory.image);
-    ChangeImageLayout(sharedContext, textureImageAndMemory.imageAndMemory.image, 
+    CopyBufferToImage(glyphBuffer, textureImageAndMemory.imageAndMemory);
+    ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
                 VK_FORMAT_R8_SRGB, 
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
             );
@@ -951,7 +933,7 @@ Glyph VulkanRenderer::GenerateGlyph(VulkanRendererSharedContext &sharedContext, 
                                                 {glm::vec3(w, h, depth), glm::vec2(1.0f, 1.0f)}
                                             };
 
-    BufferAndMemory bufferAndMemory = CreateSimpleVertexBuffer(sharedContext, simpleVerts, false);
+    BufferAndMemory bufferAndMemory = CreateSimpleVertexBuffer(simpleVerts);
     
     glyph.offset.x = xpos;
     glyph.offset.y = ypos;
@@ -964,12 +946,352 @@ Glyph VulkanRenderer::GenerateGlyph(VulkanRendererSharedContext &sharedContext, 
 
     glyph.glyphBuffer = std::make_pair(textureImageAndMemory, bufferAndMemory);
 
-    AllocateBuffer(sharedContext, sizeof(glyph.glyphUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyph.glyphUBOBuffer.buffer, glyph.glyphUBOBuffer.memory);
+    AllocateBuffer(sizeof(glyph.glyphUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyph.glyphUBOBuffer);
     vkMapMemory(m_EngineDevice, glyph.glyphUBOBuffer.memory, 0, sizeof(glyph.glyphUBO), 0, &(glyph.glyphUBOBuffer.mappedData));
 
     m_GlyphCache.push_back(glyph);
 
     return glyph;
+}
+
+TextureImageAndMemory VulkanRenderer::CreateSinglePixelImage(glm::vec3 color) {
+    /* Allocate the buffer that stores our pixel data. */
+    BufferAndMemory textureBufferAndMemory;
+
+    VkDeviceSize bufferSize = sizeof(Uint8) * 4;  // R8G8B8A8
+
+    AllocateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, textureBufferAndMemory);
+
+    // copy the texture data into the buffer
+    std::array<Uint8, 4> texColors = {static_cast<Uint8>(color.r * 255), static_cast<Uint8>(color.g * 255), static_cast<Uint8>(color.b * 255), 255};
+
+    vkMapMemory(m_EngineDevice, textureBufferAndMemory.memory, 0, bufferSize, 0, &textureBufferAndMemory.mappedData);
+    SDL_memcpy(textureBufferAndMemory.mappedData, (void *)texColors.data(), bufferSize);
+    vkUnmapMemory(m_EngineDevice, textureBufferAndMemory.memory);
+
+    /* Transfer our newly created texture to an image */
+    TextureImageAndMemory textureImageAndMemory = CreateImage(1, 1,
+    VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+    VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+        );
+    ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
+                VK_FORMAT_R8G8B8A8_SRGB, 
+                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+            );
+    CopyBufferToImage({textureBufferAndMemory, 1, 1, 4}, textureImageAndMemory.imageAndMemory);
+    ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
+                VK_FORMAT_R8G8B8A8_SRGB, 
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            );
+    
+    vkDestroyBuffer(m_EngineDevice, textureBufferAndMemory.buffer, NULL);
+    vkFreeMemory(m_EngineDevice, textureBufferAndMemory.memory, NULL);
+
+    return textureImageAndMemory;
+}
+
+void VulkanRenderer::AllocateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, BufferAndMemory &bufferAndMemory) {
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(m_EngineDevice, &bufferInfo, NULL, &bufferAndMemory.buffer) != VK_SUCCESS)
+        throw std::runtime_error(engineError::CANT_CREATE_VERTEX_BUFFER);
+
+    VkMemoryRequirements memoryRequirements;
+    vkGetBufferMemoryRequirements(m_EngineDevice, bufferAndMemory.buffer, &memoryRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memoryRequirements.size;
+    allocInfo.memoryTypeIndex = FindMemoryType(memoryRequirements.memoryTypeBits, properties);
+
+    if (vkAllocateMemory(m_EngineDevice, &allocInfo, NULL, &bufferAndMemory.memory) != VK_SUCCESS)
+        throw std::runtime_error(engineError::CANT_ALLOCATE_MEMORY);
+
+    vkBindBufferMemory(m_EngineDevice, bufferAndMemory.buffer, bufferAndMemory.memory, 0);
+}
+
+VkCommandBuffer VulkanRenderer::BeginSingleTimeCommands() {
+    m_SingleTimeCommandMutex.lock();
+
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = m_CommandPool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(m_EngineDevice, &allocInfo, &commandBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+    return commandBuffer;
+}
+
+void VulkanRenderer::EndSingleTimeCommands(VkCommandBuffer commandBuffer) {
+    vkEndCommandBuffer(commandBuffer);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(m_GraphicsQueue);
+
+    vkFreeCommandBuffers(m_EngineDevice, m_CommandPool, 1, &commandBuffer);
+
+    m_SingleTimeCommandMutex.unlock();
+}
+
+TextureImageAndMemory VulkanRenderer::CreateImage(Uint32 width, Uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties) {
+    TextureImageAndMemory textureImageAndMemory;
+
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = width;
+    imageInfo.extent.height = height;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = format;
+    imageInfo.tiling = tiling;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = usage;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateImage(m_EngineDevice, &imageInfo, nullptr, &textureImageAndMemory.imageAndMemory.image) != VK_SUCCESS) {
+        throw std::runtime_error(engineError::IMAGE_CREATION_FAILURE);
+    }
+
+    VkMemoryRequirements memRequirements;
+    vkGetImageMemoryRequirements(m_EngineDevice, textureImageAndMemory.imageAndMemory.image, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties);
+
+    if (vkAllocateMemory(m_EngineDevice, &allocInfo, nullptr, &textureImageAndMemory.imageAndMemory.memory) != VK_SUCCESS) {
+        throw std::runtime_error(engineError::CANT_ALLOCATE_MEMORY);
+    }
+
+    textureImageAndMemory.width = width;
+    textureImageAndMemory.height = height;
+    textureImageAndMemory.channels = getChannelsFromFormats(format);
+    textureImageAndMemory.format = format;
+
+    vkBindImageMemory(m_EngineDevice, textureImageAndMemory.imageAndMemory.image, textureImageAndMemory.imageAndMemory.memory, 0);
+
+    return textureImageAndMemory;
+}
+
+void VulkanRenderer::ChangeImageLayout(VkImage image, VkFormat format, VkImageLayout oldImageLayout, VkImageLayout newImageLayout) {
+    VkCommandBuffer commandBuffer = BeginSingleTimeCommands();
+
+    VkImageMemoryBarrier memoryBarrier{};
+    memoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    memoryBarrier.image = image;
+    memoryBarrier.oldLayout = oldImageLayout;
+    memoryBarrier.newLayout = newImageLayout;
+    memoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    memoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+    memoryBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    memoryBarrier.subresourceRange.baseArrayLayer = 0;
+    memoryBarrier.subresourceRange.baseMipLevel = 0;
+    memoryBarrier.subresourceRange.layerCount = 1;
+    memoryBarrier.subresourceRange.levelCount = 1;
+
+    VkPipelineStageFlags sourceStageFlags;
+    VkPipelineStageFlags destStageFlags;
+
+    if (oldImageLayout == VK_IMAGE_LAYOUT_UNDEFINED && newImageLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        memoryBarrier.srcAccessMask = 0;
+        memoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        sourceStageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destStageFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (oldImageLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newImageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        memoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        sourceStageFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        destStageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else if (oldImageLayout == VK_IMAGE_LAYOUT_UNDEFINED && newImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        memoryBarrier.srcAccessMask = 0;
+        memoryBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+        sourceStageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destStageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    }  else if (oldImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && newImageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        memoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        sourceStageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        destStageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }  else if (oldImageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL && newImageLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        memoryBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+        sourceStageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        destStageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    } else {
+        throw std::invalid_argument(engineError::UNSUPPORTED_LAYOUT_TRANSITION);
+    }
+
+    vkCmdPipelineBarrier(commandBuffer, 
+        sourceStageFlags, destStageFlags,
+        0, 
+        0, nullptr, 
+        0, nullptr, 
+        1, &memoryBarrier
+    );
+
+    EndSingleTimeCommands(commandBuffer);
+}
+
+void VulkanRenderer::CopyBufferToImage(TextureBufferAndMemory textureBuffer, ImageAndMemory imageAndMemory) {
+    VkCommandBuffer commandBuffer = BeginSingleTimeCommands();
+
+    VkBufferImageCopy bufferImageCopy{};
+    bufferImageCopy.bufferImageHeight = textureBuffer.height;
+    bufferImageCopy.bufferOffset = 0;
+    bufferImageCopy.bufferRowLength = 0;
+
+    bufferImageCopy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    bufferImageCopy.imageSubresource.baseArrayLayer = 0;
+    bufferImageCopy.imageSubresource.layerCount = 1;
+    bufferImageCopy.imageSubresource.mipLevel = 0;
+
+    bufferImageCopy.imageOffset = {0, 0, 0};
+    bufferImageCopy.imageExtent = {
+        textureBuffer.width, 
+        textureBuffer.height, 
+        1
+    };
+
+    vkCmdCopyBufferToImage(
+        commandBuffer, 
+        textureBuffer.bufferAndMemory.buffer, 
+        imageAndMemory.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
+        1, &bufferImageCopy
+    );
+
+    EndSingleTimeCommands(commandBuffer);
+}
+
+void VulkanRenderer::DestroyImage(ImageAndMemory imageAndMemory) {
+    vkDestroyImage(m_EngineDevice, imageAndMemory.image, NULL);
+    vkFreeMemory(m_EngineDevice, imageAndMemory.memory, NULL);
+
+    auto imageInAllocatedImages = std::find(m_AllocatedImages.begin(), m_AllocatedImages.end(), imageAndMemory.image);
+    auto memoryInAllocatedMemory = std::find(m_AllocatedMemory.begin(), m_AllocatedMemory.end(), imageAndMemory.memory);
+
+    if (imageInAllocatedImages != m_AllocatedImages.end()) {
+        m_AllocatedImages.erase(imageInAllocatedImages);
+    }
+
+    if (memoryInAllocatedMemory != m_AllocatedMemory.end()) {
+        m_AllocatedMemory.erase(memoryInAllocatedMemory);
+    }
+}
+
+BufferAndMemory VulkanRenderer::CreateSimpleVertexBuffer(const std::vector<SimpleVertex> &simpleVerts) {
+    //if (m_VertexBuffer || m_VertexBufferMemory)
+    //    throw std::runtime_error(engineError::VERTEX_BUFFER_ALREADY_EXISTS);
+
+    // allocate the staging buffer (this is used for performance, having a buffer readable by the GPU and CPU is slower than a GPU-exclusive memory, so we will use that as our real vertex buffer)
+    BufferAndMemory stagingBuffer;
+
+    VkDeviceSize stagingBufferSize = sizeof(SimpleVertex) * simpleVerts.size();
+
+    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer);
+
+    // copy the vertex data into the buffer
+    vkMapMemory(m_EngineDevice, stagingBuffer.memory, 0, stagingBufferSize, 0, &stagingBuffer.mappedData);
+    SDL_memcpy(stagingBuffer.mappedData, (void *)simpleVerts.data(), stagingBufferSize);
+    vkUnmapMemory(m_EngineDevice, stagingBuffer.memory);
+
+    // allocate the gpu-exclusive vertex buffer
+    BufferAndMemory vertexBuffer;
+
+    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer);
+
+    CopyHostBufferToDeviceBuffer(stagingBuffer.buffer, vertexBuffer.buffer, stagingBufferSize);
+
+    vkDestroyBuffer(m_EngineDevice, stagingBuffer.buffer, NULL);
+    vkFreeMemory(m_EngineDevice, stagingBuffer.memory, NULL);
+
+    return vertexBuffer;
+}
+
+
+BufferAndMemory VulkanRenderer::CreateVertexBuffer(const std::vector<Vertex> &verts) {
+    //if (m_VertexBuffer || m_VertexBufferMemory)
+    //    throw std::runtime_error(engineError::VERTEX_BUFFER_ALREADY_EXISTS);
+
+    // allocate the staging buffer (this is used for performance, having a buffer readable by the GPU and CPU is slower than a GPU-exclusive memory, so we will use that as our real vertex buffer)
+    BufferAndMemory stagingBuffer;
+
+    VkDeviceSize stagingBufferSize = sizeof(Vertex) * verts.size();
+
+    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer);
+
+    // copy the vertex data into the buffer
+    vkMapMemory(m_EngineDevice, stagingBuffer.memory, 0, stagingBufferSize, 0, &stagingBuffer.mappedData);
+    SDL_memcpy(stagingBuffer.mappedData, (void *)verts.data(), stagingBufferSize);
+    vkUnmapMemory(m_EngineDevice, stagingBuffer.memory);
+
+    // allocate the gpu-exclusive vertex buffer
+    BufferAndMemory vertexBuffer;
+
+    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer);
+
+    CopyHostBufferToDeviceBuffer(stagingBuffer.buffer, vertexBuffer.buffer, stagingBufferSize);
+
+    vkDestroyBuffer(m_EngineDevice, stagingBuffer.buffer, NULL);
+    vkFreeMemory(m_EngineDevice, stagingBuffer.memory, NULL);
+
+    return vertexBuffer;
+}
+
+BufferAndMemory VulkanRenderer::CreateIndexBuffer(const std::vector<Uint32> &inds) {
+    //if (m_IndexBuffer || m_IndexBufferMemory)
+    //    throw std::runtime_error(engineError::INDEX_BUFFER_ALREADY_EXISTS);
+
+    // allocate the staging buffer (this is used for performance, having a buffer readable by the GPU and CPU is slower than a GPU-exclusive memory, so we will use that as our real index buffer)
+    BufferAndMemory stagingBuffer;
+
+    VkDeviceSize stagingBufferSize = sizeof(Uint32) * inds.size();
+    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer);
+
+    // copy the index data into the buffer
+    vkMapMemory(m_EngineDevice, stagingBuffer.memory, 0, stagingBufferSize, 0, &stagingBuffer.mappedData);
+    SDL_memcpy(stagingBuffer.mappedData, (void *)inds.data(), stagingBufferSize);
+    vkUnmapMemory(m_EngineDevice, stagingBuffer.memory);
+
+    // allocate the gpu-exclusive index buffer
+    BufferAndMemory indexBuffer;
+
+    AllocateBuffer(stagingBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer);
+
+    CopyHostBufferToDeviceBuffer(stagingBuffer.buffer, indexBuffer.buffer, stagingBufferSize);
+
+    vkDestroyBuffer(m_EngineDevice, stagingBuffer.buffer, NULL);
+    vkFreeMemory(m_EngineDevice, stagingBuffer.memory, NULL);
+
+    return indexBuffer;
 }
 
 void VulkanRenderer::InitSwapchain() {
@@ -1089,11 +1411,9 @@ void VulkanRenderer::InitFramebuffers(VkRenderPass renderPass, VkImageView depth
 }
 
 VkImageView VulkanRenderer::CreateDepthImage(Uint32 width, Uint32 height) {
-    VulkanRendererSharedContext sharedContext = GetVulkanRendererSharedContext();
-
     VkFormat depthFormat = FindDepthFormat();
 
-    TextureImageAndMemory depthImageAndMemory = CreateImage(sharedContext, width, height, 
+    TextureImageAndMemory depthImageAndMemory = CreateImage(width, height, 
                         depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkImageView depthImageView = CreateImageView(depthImageAndMemory, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -1569,8 +1889,7 @@ void VulkanRenderer::Init() {
     VkImageView depthImageView = CreateDepthImage(m_Settings.RenderWidth, m_Settings.RenderHeight);
     VkImageView rescaleDepthImageView = CreateDepthImage(m_Settings.DisplayWidth, m_Settings.DisplayHeight);
 
-    VulkanRendererSharedContext sharedContext = GetVulkanRendererSharedContext();
-    TextureImageAndMemory renderImage = CreateImage(sharedContext, m_Settings.RenderWidth, m_Settings.RenderHeight, m_RenderImageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    TextureImageAndMemory renderImage = CreateImage(m_Settings.RenderWidth, m_Settings.RenderHeight, m_RenderImageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkImageView renderImageView = CreateImageView(renderImage, m_RenderImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 
     m_AllocatedImages.push_back(renderImage.imageAndMemory.image);
@@ -1879,10 +2198,8 @@ void VulkanRenderer::Init() {
 
         vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
         
-        VulkanRendererSharedContext sharedContext = GetVulkanRendererSharedContext();
-        
         // Fullscreen Quad initialization
-        m_FullscreenQuadVertexBuffer = CreateSimpleVertexBuffer(sharedContext, {
+        m_FullscreenQuadVertexBuffer = CreateSimpleVertexBuffer({
                                                             {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
                                                             {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, 1.0f)},
                                                             {glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec2(0.0f, 1.0f)},

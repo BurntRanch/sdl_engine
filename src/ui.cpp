@@ -22,13 +22,13 @@ Panel::~Panel() {
     DestroyBuffers();
 };
 
-Panel::Panel(VulkanRendererSharedContext &sharedContext, glm::vec3 color, glm::vec2 position, glm::vec2 scales, float zDepth)
-    : m_SharedContext(sharedContext) {
+Panel::Panel(BaseRenderer *renderer, glm::vec3 color, glm::vec2 position, glm::vec2 scales, float zDepth)
+    : m_Renderer(renderer) {
 
     genericType = SCALABLE;
     type = PANEL;
         
-    texture = CreateSinglePixelImage(sharedContext, color);
+    texture = renderer->CreateSinglePixelImage(color);
     
     SetPosition(position);
     SetScale(scales);
@@ -91,16 +91,15 @@ glm::vec2 Panel::GetUnfitScale() {
 }
 
 void Panel::DestroyBuffers() {
-    vkDestroyImage(m_SharedContext.engineDevice, texture.imageAndMemory.image, NULL);
-    vkFreeMemory(m_SharedContext.engineDevice, texture.imageAndMemory.memory, NULL);
+    m_Renderer->DestroyImage(texture.imageAndMemory);
 }
 
 Label::~Label() {
     DestroyBuffers();
 }
 
-Label::Label(VulkanRendererSharedContext &sharedContext, std::string text, std::filesystem::path fontPath, glm::vec2 position, float zDepth)
-    : m_SharedContext(sharedContext) {
+Label::Label(BaseRenderer *renderer, std::string text, std::filesystem::path fontPath, glm::vec2 position, float zDepth)
+    : m_Renderer(renderer) {
 
     genericType = LABEL;
     type = LABEL;
@@ -128,7 +127,7 @@ void Label::InitGlyphs(std::string text, std::filesystem::path fontPath) {
     float y = 0.0f;
 
     for (char c : text) {
-        Glyph glyph = m_SharedContext.renderer->GenerateGlyph(m_SharedContext, m_FTFace, c, x, y, m_Depth);
+        Glyph glyph = m_Renderer->GenerateGlyph(m_FTFace, c, x, y, m_Depth);
 
         if (!glyph.glyphBuffer.has_value()) {
             continue;
@@ -141,8 +140,8 @@ void Label::InitGlyphs(std::string text, std::filesystem::path fontPath) {
     m_FontPath = fontPath;
 
     /* It should return true if this label was added to the Renderer */
-    if (m_SharedContext.renderer->RemoveUILabel(this)) {
-        m_SharedContext.renderer->AddUILabel(this);
+    if (m_Renderer->RemoveUILabel(this)) {
+        m_Renderer->AddUILabel(this);
     }
 }
 
@@ -301,7 +300,7 @@ inline glm::vec2 Scalable::GetUnfitScale() {
     return scale;
 }
 
-GenericElement *DeserializeUIElement(VulkanRendererSharedContext &sharedContext, rapidxml::xml_node<char> *node, UI::GenericElement *parent = nullptr) {
+GenericElement *DeserializeUIElement(BaseRenderer *renderer, rapidxml::xml_node<char> *node, UI::GenericElement *parent = nullptr) {
     using namespace rapidxml;
     std::string nodeName = node->name();
 
@@ -342,7 +341,7 @@ GenericElement *DeserializeUIElement(VulkanRendererSharedContext &sharedContext,
 
         float zDepth = getZDepth(propertiesNode);
 
-        element = new UI::Panel(sharedContext, color, position, scale, zDepth);
+        element = new UI::Panel(renderer, color, position, scale, zDepth);
 
         if (fitTypeNode && std::string(fitTypeNode->value()) == "FIT_CHILDREN") {
             reinterpret_cast<UI::Scalable *>(element)->fitType = UI::FIT_CHILDREN;
@@ -362,7 +361,7 @@ GenericElement *DeserializeUIElement(VulkanRendererSharedContext &sharedContext,
 
         float zDepth = getZDepth(propertiesNode);
 
-        element = new UI::Label(sharedContext, text, fontPath, position, zDepth);
+        element = new UI::Label(renderer, text, fontPath, position, zDepth);
     } else if (nodeName == "Button") {
         xml_node<char> *fitTypeNode = propertiesNode->first_node("FitType");
 
@@ -375,7 +374,7 @@ GenericElement *DeserializeUIElement(VulkanRendererSharedContext &sharedContext,
         UTILASSERT(bgPanelNode);
         xml_node<char> *panelNode = bgPanelNode->first_node("Panel");
 
-        GenericElement *bgPanel = DeserializeUIElement(sharedContext, panelNode);
+        GenericElement *bgPanel = DeserializeUIElement(renderer, panelNode);
         UTILASSERT(bgPanel->type == UI::PANEL);
 
 
@@ -383,7 +382,7 @@ GenericElement *DeserializeUIElement(VulkanRendererSharedContext &sharedContext,
         UTILASSERT(fgLabelNode);
         xml_node<char> *labelNode = fgLabelNode->first_node("Label");
 
-        GenericElement *fgLabel = DeserializeUIElement(sharedContext, labelNode);
+        GenericElement *fgLabel = DeserializeUIElement(renderer, labelNode);
         UTILASSERT(fgLabel->type == UI::LABEL);
 
         element = new UI::Button(position, scale, reinterpret_cast<UI::Panel *>(bgPanel), reinterpret_cast<UI::Label *>(fgLabel));
@@ -404,7 +403,7 @@ GenericElement *DeserializeUIElement(VulkanRendererSharedContext &sharedContext,
     element->SetVisible(getVisible(propertiesNode));
 
     for (xml_node<char> *childElement = node->first_node("Properties")->next_sibling(); childElement; childElement = childElement->next_sibling()) {
-        DeserializeUIElement(sharedContext, childElement, element);
+        DeserializeUIElement(renderer, childElement, element);
     }
 
     element->SetParent(parent);
@@ -412,7 +411,7 @@ GenericElement *DeserializeUIElement(VulkanRendererSharedContext &sharedContext,
     return element;
 }
 
-std::vector<GenericElement *> UI::LoadUIFile(VulkanRendererSharedContext &sharedContext, std::string_view fileName) {
+std::vector<GenericElement *> UI::LoadUIFile(BaseRenderer *renderer, std::string_view fileName) {
     using namespace rapidxml;
 
     std::ifstream fileStream(fileName.data(), std::ios::binary | std::ios::ate);
@@ -433,7 +432,7 @@ std::vector<GenericElement *> UI::LoadUIFile(VulkanRendererSharedContext &shared
 
     xml_node<char> *uiSceneNode = uiSceneXML.first_node("UIScene");
     for (xml_node<char> *uiElement = uiSceneNode->first_node(); uiElement; uiElement = uiElement->next_sibling()) {
-        GenericElement *element = DeserializeUIElement(sharedContext, uiElement);
+        GenericElement *element = DeserializeUIElement(renderer, uiElement);
 
         if (!element)
             continue;

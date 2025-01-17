@@ -16,6 +16,7 @@
 #include "error.hpp"
 #include "fmt/format.h"
 #include "isteamnetworkingsockets.h"
+#include "networking/connection.hpp"
 #include "object.hpp"
 #include "renderer/vulkanRenderer.hpp"
 #include "steamclientpublic.h"
@@ -253,10 +254,7 @@ void Engine::LoadUIFile(const std::string &name) {
         return;
     }
 
-    /* TODO: dynamic_cast CAN return nullptr */
-    VulkanRendererSharedContext sharedContext = dynamic_cast<VulkanRenderer *>(m_Renderer)->GetVulkanRendererSharedContext();
-
-    std::vector<UI::GenericElement *> UIElements = UI::LoadUIFile(sharedContext, name);
+    std::vector<UI::GenericElement *> UIElements = UI::LoadUIFile(m_Renderer, name);
     for (UI::GenericElement *element : UIElements) {
         m_Renderer->AddUIGenericElement(element);
 
@@ -490,8 +488,8 @@ bool Engine::ImportScene(const std::string &path) {
 //     sceneXML.clear();
 // }
 
-void Engine::AttachCameraToConnection(Camera *cam, HSteamNetConnection conn) {
-    m_ConnToCameraAttachment[conn] = cam;
+void Engine::AttachCameraToConnection(Camera *cam, SteamConnection &conn) {
+    m_ConnToCameraAttachment[&conn] = cam;
 }
 
 void Engine::ConnectToGameServer(SteamNetworkingIPAddr ipAddr) {
@@ -544,22 +542,22 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                 if (m_NetworkingThreadStates[1].status & NETWORKING_THREAD_ACTIVE_SERVER) {
                     NetworkingThreadState &state = m_NetworkingThreadStates[1];
 
-                    auto conn = std::find(state.netConnections.begin(), state.netConnections.end(), callbackInfo->m_hConn);
-                    UTILASSERT(conn != state.netConnections.end());
+                    auto conn = std::find(state.connections.begin(), state.connections.end(), callbackInfo->m_hConn);
+                    UTILASSERT(conn != state.connections.end());
 
-                    state.netConnections.erase(conn);
+                    FireNetworkEvent(EVENT_CLIENT_DISCONNECTED, *conn);
 
-                    FireNetworkEvent(EVENT_CLIENT_DISCONNECTED, callbackInfo->m_hConn);
+                    state.connections.erase(conn);
                 /* if its a client */
                 } else {
                     UTILASSERT(m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT);
 
                     NetworkingThreadState &state = m_NetworkingThreadStates[0];
-                    UTILASSERT(state.netConnections.size() == 1 && state.netConnections[0] == callbackInfo->m_hConn);
+                    UTILASSERT(state.connections.size() == 1 && state.connections[0] == callbackInfo->m_hConn);
 
-                    state.netConnections.erase(state.netConnections.begin());
+                    FireNetworkEvent(EVENT_DISCONNECTED_FROM_SERVER, state.connections[0]);
 
-                    FireNetworkEvent(EVENT_DISCONNECTED_FROM_SERVER, callbackInfo->m_hConn);
+                    state.connections.erase(state.connections.begin());
                 }
 
                 m_NetworkingSockets->CloseConnection(callbackInfo->m_hConn, 0, nullptr, false);
@@ -573,7 +571,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                 NetworkingThreadState &state = m_NetworkingThreadStates[1];
 
                 /* This callback only happens when a new client is connecting. */
-                UTILASSERT(std::find(state.netConnections.begin(), state.netConnections.end(), callbackInfo->m_hConn) == state.netConnections.end());
+                UTILASSERT(std::find(state.connections.begin(), state.connections.end(), callbackInfo->m_hConn) == state.connections.end());
 
                 if (m_NetworkingSockets->AcceptConnection(callbackInfo->m_hConn) != k_EResultOK) {
                     m_NetworkingSockets->CloseConnection(callbackInfo->m_hConn, 0, nullptr, false);
@@ -587,22 +585,26 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
                     break;
                 }
 
-                FireNetworkEvent(EVENT_CLIENT_CONNECTED, callbackInfo->m_hConn);
+                SteamConnection connection(m_NetworkingSockets, callbackInfo->m_hConn);
 
-                SendFullUpdateToConnection(callbackInfo->m_hConn, state.tickNumber);
+                FireNetworkEvent(EVENT_CLIENT_CONNECTED, connection);
 
-                state.netConnections.push_back(callbackInfo->m_hConn);
+                SendFullUpdateToConnection(connection, state.tickNumber);
+
+                state.connections.push_back(connection);
             }
 
             break;
         
         case k_ESteamNetworkingConnectionState_Connected:
             if (m_NetworkingThreadStates[0].status & NETWORKING_THREAD_ACTIVE_CLIENT) {
-                UTILASSERT(m_NetworkingThreadStates[0].netConnections.size() < 1);
+                UTILASSERT(m_NetworkingThreadStates[0].connections.size() < 1);
 
-                m_NetworkingThreadStates[0].netConnections.push_back(callbackInfo->m_hConn);
+                SteamConnection conn(m_NetworkingSockets, callbackInfo->m_hConn);
 
-                FireNetworkEvent(EVENT_CONNECTED_TO_SERVER, callbackInfo->m_hConn);
+                m_NetworkingThreadStates[0].connections.push_back(conn);
+
+                FireNetworkEvent(EVENT_CONNECTED_TO_SERVER, conn);
             }
 
             break;
@@ -612,16 +614,16 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
     }
 }
 
-void Engine::RegisterNetworkEventListener(const std::function<void(HSteamNetConnection)> listener, NetworkingEventType listenerTarget) {
+void Engine::RegisterNetworkEventListener(const std::function<void(SteamConnection &)> listener, NetworkingEventType listenerTarget) {
     if (m_EventTypeToListenerMap.find(listenerTarget) == m_EventTypeToListenerMap.end()) {
-        m_EventTypeToListenerMap[listenerTarget] = std::vector<std::function<void(HSteamNetConnection)>>();
+        m_EventTypeToListenerMap[listenerTarget] = std::vector<std::function<void(SteamConnection &)>>();
     }
 
     m_EventTypeToListenerMap[listenerTarget].push_back(listener);
 }
 
 
-void Engine::RegisterNetworkDataListener(const std::function<void(HSteamNetConnection, std::vector<std::byte> &)> listener) {
+void Engine::RegisterNetworkDataListener(const std::function<void(SteamConnection &, std::vector<std::byte> &)> listener) {
     m_DataListeners.push_back(listener);
 }
 
@@ -718,70 +720,57 @@ void Engine::NetworkingThreadClient_Main(NetworkingThreadState &state) {
         m_CallbackInstance = this;
         m_NetworkingSockets->RunCallbacks();
 
-        if (state.netConnections.size() >= 1) {
+        if (state.connections.size() >= 1) {
             /* Receiving */
-            ISteamNetworkingMessage *incomingMessages;
-            int msgCount = m_NetworkingSockets->ReceiveMessagesOnConnection(state.netConnections[0], &incomingMessages, 1);
+            std::vector<std::vector<std::byte>> incomingMessages = state.connections[0].ReceiveMessages(1);
 
-            if (msgCount < 0) {
-                throw std::runtime_error("Error receiving messages from server!");
-            }
-            if (msgCount > 0) {
-                for (int i = 0; i < msgCount; i++) {
-                    ISteamNetworkingMessage *incomingMessage = &incomingMessages[i];
+            for (auto &incomingMessage : incomingMessages) {
+                if (incomingMessage.size() < sizeof(size_t)) {
+                    fmt::println("Invalid packet!");
+                    continue;
+                }
 
-                    if (incomingMessage->GetSize() < sizeof(size_t)) {
-                        fmt::println("Invalid packet!");
-                        continue;
-                    }
-                    const void *data = incomingMessage->GetData();
-                    
-                    std::vector<std::byte> message{reinterpret_cast<const std::byte *>(data), reinterpret_cast<const std::byte *>(data) + incomingMessage->GetSize()};
-
-                    Networking_StatePacket packet = DeserializePacket(message);
+                Networking_StatePacket packet = DeserializePacket(incomingMessage);
 #ifdef LOG_FRAME
-                    fmt::println("New state packet just dropped! {} objects sent by server", packet.objects.size());
+                fmt::println("New state packet just dropped! {} objects sent by server", packet.objects.size());
 #endif
-                    /* add a dummy type */
-                    Networking_Event event{NETWORKING_NULL, {}, {}, {}};
-                    std::lock_guard<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
+                /* add a dummy type */
+                Networking_Event event{NETWORKING_NULL, {}, {}, {}};
+                std::lock_guard<std::mutex> networkingEventsLockGuard(m_NetworkingEventsLock);
 
-                    state.tickNumber = packet.tickNumber;
+                state.tickNumber = packet.tickNumber;
 
-                    if (state.lastSyncedTickNumber == -1) {
-                        event.type = NETWORKING_INITIAL_UPDATE;
-                        event.packet = packet;
+                if (state.lastSyncedTickNumber == -1) {
+                    event.type = NETWORKING_INITIAL_UPDATE;
+                    event.packet = packet;
 
-                        m_NetworkingEvents.push_back(event);
-                    } else {
-                        for (Networking_Object &networkingObject : packet.objects) {
-                            auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [networkingObject] (Object *obj) { return obj->GetObjectID() == networkingObject.ObjectID; });
+                    m_NetworkingEvents.push_back(event);
+                } else {
+                    for (Networking_Object &networkingObject : packet.objects) {
+                        auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [networkingObject] (Object *obj) { return obj->GetObjectID() == networkingObject.ObjectID; });
 
-                            event.object = networkingObject;
+                        event.object = networkingObject;
 
-                            /* If the scene changed, we should wait until the scene is properly loaded */
-                            if (it == m_Objects.end()) {
-                                event.type = NETWORKING_NEW_OBJECT;
-
-                                m_NetworkingEvents.push_back(event);
-
-                                continue;
-                            }
-
-                            // Object *obj = m_Objects.at(std::distance(m_Objects.begin(), it));
-
-                            // UTILASSERT(obj);
-
-                            event.type = NETWORKING_UPDATE_OBJECT;
+                        /* If the scene changed, we should wait until the scene is properly loaded */
+                        if (it == m_Objects.end()) {
+                            event.type = NETWORKING_NEW_OBJECT;
 
                             m_NetworkingEvents.push_back(event);
-                        }
-                    }
 
-                    state.lastSyncedTickNumber = packet.tickNumber;
-                
-                    incomingMessage->Release();
+                            continue;
+                        }
+
+                        // Object *obj = m_Objects.at(std::distance(m_Objects.begin(), it));
+
+                        // UTILASSERT(obj);
+
+                        event.type = NETWORKING_UPDATE_OBJECT;
+
+                        m_NetworkingEvents.push_back(event);
+                    }
                 }
+
+                state.lastSyncedTickNumber = packet.tickNumber;
             }
         }
 
@@ -863,12 +852,15 @@ void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
 
                     DeserializeClientRequest(message, packet);
 
+                    auto connection = std::find(state.connections.begin(), state.connections.end(), incomingMessage->GetConnection());
+                    UTILASSERT(connection != state.connections.end());
+
                     switch (packet.requestType) {
                         case CLIENT_REQUEST_DISCONNECT:
-                            DisconnectClientFromServer(incomingMessage->GetConnection());
+                            DisconnectClientFromServer(*connection);
                             break;
                         case CLIENT_REQUEST_APPLICATION:
-                            FireNetworkEvent(EVENT_RECEIVED_CLIENT_REQUEST, incomingMessage->GetConnection(), packet.data);
+                            FireNetworkEvent(EVENT_RECEIVED_CLIENT_REQUEST, *connection, packet.data);
                             break;
                     }
                 }
@@ -877,8 +869,8 @@ void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
             }
         }
 
-        for (HSteamNetConnection &netConnection : state.netConnections) {
-            SendUpdateToConnection(netConnection, state.tickNumber);
+        for (SteamConnection &connection : state.connections) {
+            SendUpdateToConnection(connection, state.tickNumber);
         }
 
         lastTickTime = now;
@@ -896,47 +888,40 @@ void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
 void Engine::DisconnectFromServer() {
     NetworkingThreadState &state = m_NetworkingThreadStates[0];
 
-    if (state.netConnections.empty()) {
+    if (state.connections.empty()) {
         return;
     }
 
-    UTILASSERT(state.netConnections.size() == 1);
+    UTILASSERT(state.connections.size() == 1);
 
-    FireNetworkEvent(EVENT_DISCONNECTED_FROM_SERVER, state.netConnections[0]);
+    FireNetworkEvent(EVENT_DISCONNECTED_FROM_SERVER, state.connections[0]);
 
     /* TODO: this should work but idk why the server doesn't receive anything. */
     std::vector<std::byte> serializedDisconnectRequest;
     Networking_ClientRequest clientRequest{CLIENT_REQUEST_DISCONNECT};
     SerializeClientRequest(clientRequest, serializedDisconnectRequest);
-    EResult result = m_NetworkingSockets->SendMessageToConnection(state.netConnections[0], serializedDisconnectRequest.data(), serializedDisconnectRequest.size(), k_nSteamNetworkingSend_Reliable, nullptr);
-    if (result != k_EResultOK) {
-        fmt::println("Couldn't send disconnect to server! {}", (int)result);
-    } else {
-        fmt::println("Sent disconnect request to server!");
-    }
+    state.connections[0].SendMessage(serializedDisconnectRequest, k_nSteamNetworkingSend_Reliable);
 
-    m_NetworkingSockets->CloseConnection(state.netConnections[0], 0, nullptr, true);
+    state.connections.erase(state.connections.begin());
 }
 
-void Engine::DisconnectClientFromServer(HSteamNetConnection connection) {
+void Engine::DisconnectClientFromServer(SteamConnection &connection) {
     NetworkingThreadState &state = m_NetworkingThreadStates[1];
 
-    auto it = std::find(state.netConnections.begin(), state.netConnections.end(), connection);
-    UTILASSERT(it != state.netConnections.end());
+    auto it = std::find(state.connections.begin(), state.connections.end(), connection);
+    UTILASSERT(it != state.connections.end());
 
     FireNetworkEvent(EVENT_CLIENT_DISCONNECTED, connection);
 
-    m_NetworkingSockets->CloseConnection(connection, 0, nullptr, true);
-
-    state.netConnections.erase(it);
+    state.connections.erase(it);
 }
 
 void Engine::StopHostingGameServer() {
     NetworkingThreadState &state = m_NetworkingThreadStates[1];
 
     if (state.status & NETWORKING_THREAD_ACTIVE_SERVER) {
-        while (state.netConnections.size() != 0) {
-            DisconnectClientFromServer(state.netConnections[0]);
+        while (state.connections.size() != 0) {
+            DisconnectClientFromServer(state.connections[0]);
         }
 
         if (m_NetListenSocket != k_HSteamListenSocket_Invalid) {
@@ -1141,7 +1126,7 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
 }
 
 bool Engine::IsConnectedToGameServer() {
-    return m_NetworkingThreadStates[0].netConnections.size() == 1;
+    return m_NetworkingThreadStates[0].connections.size() == 1;
 }
 
 void Engine::RegisterSDLEventListener(const std::function<void(SDL_Event *)> &func, SDL_EventType types) {
@@ -1159,7 +1144,7 @@ void Engine::SendRequestToServer(std::vector<std::byte> &data) {
         return;
     }
 
-    UTILASSERT(state.netConnections.size() == 1);
+    UTILASSERT(state.connections.size() == 1);
 
     Networking_ClientRequest request{};
     request.requestType = CLIENT_REQUEST_APPLICATION;
@@ -1168,7 +1153,7 @@ void Engine::SendRequestToServer(std::vector<std::byte> &data) {
     std::vector<std::byte> serializedRequest;
     SerializeClientRequest(request, serializedRequest);
 
-    m_NetworkingSockets->SendMessageToConnection(state.netConnections[0], serializedRequest.data(), serializedRequest.size(), k_nSteamNetworkingSend_Reliable, nullptr);
+    state.connections[0].SendMessage(serializedRequest, k_nSteamNetworkingSend_Reliable);
 }
 
 Object *Engine::GetObjectByID(int ObjectID) {
@@ -1405,6 +1390,7 @@ void Engine::AddCameraToStatePacketIfChanged(Camera *cam, Networking_StatePacket
         cam->Up != lastPacketCameraEquivalent->up ||
         cam->FOV != lastPacketCameraEquivalent->fov ||
         /* TODO: This constantly syncs the camera if there's more than one player connected because isMainCamera could change across connections. */
+        /* Potential solution: Abstract connections behind a Connection class, and store the last packet for each connection. */
         isMainCamera != lastPacketCameraEquivalent->isMainCamera))
         anythingChanged = true;
 
@@ -1419,14 +1405,14 @@ void Engine::AddCameraToStatePacketIfChanged(Camera *cam, Networking_StatePacket
     }
 }
 
-void Engine::SendFullUpdateToConnection(HSteamNetConnection connection, int tickNumber) {
+void Engine::SendFullUpdateToConnection(SteamConnection &connection, int tickNumber) {
     Networking_StatePacket statePacket{};
     
     statePacket.tickNumber = tickNumber;
 
     for (Camera *cam : m_Cameras) {
         bool isMainCamera = false;
-        if (m_ConnToCameraAttachment.find(connection) != m_ConnToCameraAttachment.end() && m_ConnToCameraAttachment[connection] == cam) {
+        if (m_ConnToCameraAttachment.find(&connection) != m_ConnToCameraAttachment.end() && m_ConnToCameraAttachment[&connection] == cam) {
             isMainCamera = true;
         }
 
@@ -1453,20 +1439,20 @@ void Engine::SendFullUpdateToConnection(HSteamNetConnection connection, int tick
         SerializeNetworkingObject(objectPacket, serializedPacket);
     }
 
-    m_NetworkingSockets->SendMessageToConnection(connection, serializedPacket.data(), serializedPacket.size(), k_nSteamNetworkingSend_Reliable, nullptr);
+    connection.SendMessage(serializedPacket, k_nSteamNetworkingSend_Reliable);
 
     m_LastPacket = statePacket;
 }
 
 
-void Engine::SendUpdateToConnection(HSteamNetConnection connection, int tickNumber) {
+void Engine::SendUpdateToConnection(SteamConnection &connection, int tickNumber) {
     Networking_StatePacket statePacket{};
 
     statePacket.tickNumber = tickNumber;
 
     for (Camera *camera : m_Cameras) {
         bool isMainCamera = false;
-        if (m_ConnToCameraAttachment.find(connection) != m_ConnToCameraAttachment.end() && m_ConnToCameraAttachment[connection] == camera) {
+        if (m_ConnToCameraAttachment.find(&connection) != m_ConnToCameraAttachment.end() && m_ConnToCameraAttachment[&connection] == camera) {
             isMainCamera = true;
         }
 
@@ -1493,7 +1479,7 @@ void Engine::SendUpdateToConnection(HSteamNetConnection connection, int tickNumb
         SerializeNetworkingObject(objectPacket, serializedPacket);
     }
 
-    m_NetworkingSockets->SendMessageToConnection(connection, serializedPacket.data(), serializedPacket.size(), k_nSteamNetworkingSend_Reliable, nullptr);
+    connection.SendMessage(serializedPacket, k_nSteamNetworkingSend_Reliable);
 }
 
 void Engine::SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest) {
@@ -1564,7 +1550,7 @@ void Engine::DeserializeClientRequest(std::vector<std::byte> &serializedClientRe
     dest.data = serializedClientRequest;
 }
 
-void Engine::FireNetworkEvent(NetworkingEventType type, HSteamNetConnection conn, std::optional<std::reference_wrapper<std::vector<std::byte>>> data) {
+void Engine::FireNetworkEvent(NetworkingEventType type, SteamConnection &conn, std::optional<std::reference_wrapper<std::vector<std::byte>>> data) {
     if (type == EVENT_RECEIVED_CLIENT_REQUEST) {
         UTILASSERT(data.has_value());
 

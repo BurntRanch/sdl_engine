@@ -1,6 +1,5 @@
 #pragma once
 #include "common.hpp"
-#include "renderer/vulkanRenderer.hpp"
 #include <ft2build.h>
 #include <glm/ext/vector_float2.hpp>
 #include <map>
@@ -19,7 +18,7 @@ public:
 
     ~Label();
 
-    Label(VulkanRendererSharedContext &sharedContext, std::string text, std::filesystem::path fontPath, glm::vec2 position = glm::vec2(0.0f, 0.0f), float zDepth = 0.0f);
+    Label(BaseRenderer *renderer, std::string text, std::filesystem::path fontPath, glm::vec2 position = glm::vec2(0.0f, 0.0f), float zDepth = 0.0f);
 
     /* Calculates the minimum scale required to fit this entire label. */
     glm::vec2 CalculateMinimumScaleToFit();
@@ -39,6 +38,6 @@ private:
     FT_Library m_FTLibrary;
     FT_Face m_FTFace;
 
-    VulkanRendererSharedContext m_SharedContext;
+    BaseRenderer *m_Renderer;
 };
 }
