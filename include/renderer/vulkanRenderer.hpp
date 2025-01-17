@@ -183,21 +183,3 @@ protected:
     std::vector<VkImageView> m_CreatedImageViews;
     std::vector<VkSampler> m_CreatedSamplers;
 };
-
-static Uint8 getChannelsFromFormats(VkFormat format) {
-    switch (format) {
-        case VK_FORMAT_R8_SRGB:
-            return 1;
-        case VK_FORMAT_D32_SFLOAT:
-            return 1;
-        case VK_FORMAT_R8G8_UINT:
-            return 2;
-        // unsupported by many hardware, make sure to throw an error.
-        // case VK_FORMAT_R8G8B8_UINT:
-        //  return 3;
-        case VK_FORMAT_R8G8B8A8_SRGB:
-            return 4;
-        default:
-            throw std::runtime_error(engineError::UNSUPPORTED_FORMAT);
-    }
-}
