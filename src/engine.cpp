@@ -109,7 +109,7 @@ void Engine::InitPhysics() {
 
     m_DynamicsWorld = std::make_unique<btDiscreteDynamicsWorld>(m_Dispatcher.get(), m_Broadphase.get(), m_Solver.get(), m_CollisionConfig.get());
 
-    m_DynamicsWorld->setGravity(btVector3(0, -0.1, 0));
+    m_DynamicsWorld->setGravity(btVector3(0, -0.25, 0));
 
     for (auto &rigidBodyPtr : m_RigidBodies) {
         m_DynamicsWorld->addRigidBody(rigidBodyPtr.get());
