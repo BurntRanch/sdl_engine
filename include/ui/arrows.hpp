@@ -16,8 +16,7 @@ public:
 
     Arrows(Object &highlightedModel);
 
-    inline void SetPosition(glm::vec3 position) { throw std::runtime_error("SetPosition is not to be called on UI::Arrows objects, Modify the object that it highlights directly and the Arrow will follow it!"); };
-
-    inline glm::vec2 GetPosition() { throw std::runtime_error("GetPosition is not to be called on UI::Arrows objects, Read the position from the object that it highlights directly."); };
+    void SetPosition(glm::vec2) { throw std::runtime_error("SetPosition is not to be called on UI::Arrows objects, Modify the object that it highlights directly and the Arrow will follow it!"); };
+    glm::vec2 GetPosition() { throw std::runtime_error("GetPosition is not to be called on UI::Arrows objects, Read the position from the object that it highlights directly."); };
 };
 }

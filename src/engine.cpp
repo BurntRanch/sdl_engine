@@ -109,13 +109,13 @@ void Engine::InitPhysics() {
 
     m_DynamicsWorld = std::make_unique<btDiscreteDynamicsWorld>(m_Dispatcher.get(), m_Broadphase.get(), m_Solver.get(), m_CollisionConfig.get());
 
-    m_DynamicsWorld->setGravity(btVector3(0, -0.25, 0));
+    m_DynamicsWorld->setGravity(btVector3(0, -5, 0));
 
     for (auto &rigidBodyPtr : m_RigidBodies) {
         m_DynamicsWorld->addRigidBody(rigidBodyPtr.get());
     }
 
-    RegisterTickUpdateHandler(std::bind(&Engine::PhysicsStep, this, std::placeholders::_1), NETWORKING_THREAD_ACTIVE_SERVER);
+    RegisterFixedUpdateFunction(std::bind(&Engine::PhysicsStep, this));
 }
 
 void Engine::DeinitPhysics() {
@@ -202,16 +202,17 @@ void Engine::CheckButtonClicks(SDL_Event *event) {
 void Engine::Start() {
     using namespace std::chrono;
 
-    high_resolution_clock::time_point lastLoopStartTime, loopStartTime = high_resolution_clock::now();
+    high_resolution_clock::time_point lastLoopStartTime = high_resolution_clock::now(), loopStartTime = high_resolution_clock::now();
+
     bool shouldQuit = false;
     SDL_Event event;
 
     /* Each loop turn will add its delta time to this variable, and this will be used to execute certain tasks only every x seconds. */
-    float accumulative = 0.f;
+    double accumulative = 0.0;
 
     while (!shouldQuit) {
         loopStartTime = high_resolution_clock::now();
-        accumulative += duration_cast<seconds>(lastLoopStartTime - loopStartTime).count();
+        accumulative += duration_cast<duration<double>>(loopStartTime - lastLoopStartTime).count();
 
         while (SDL_PollEvent(&event)) {
             if (QuitEventCheck(event))
@@ -233,7 +234,7 @@ void Engine::Start() {
         }
 
         /* Fixed updates, every 60th of a second. */
-        if (accumulative > ENGINE_FIXED_UPDATE_DELTATIME) {
+        if (accumulative >= ENGINE_FIXED_UPDATE_DELTATIME) {
             accumulative -= ENGINE_FIXED_UPDATE_DELTATIME;
 
             for (auto &fixedUpdateFunc : m_FixedUpdateFunctions) {
@@ -1248,12 +1249,12 @@ void Engine::DeserializeNetworkingCamera(std::vector<std::byte> &serializedCamer
     Deserialize(serializedCameraPacket, dest.isMainCamera);
 }
 
-void Engine::PhysicsStep(int _) {
+void Engine::PhysicsStep() {
     if (!m_DynamicsWorld) {
         return;
     }
 
-    m_DynamicsWorld->stepSimulation(1.0f / 64.0f, 4, (1.0f / 4.0f) / 64.0f);
+    m_DynamicsWorld->stepSimulation(ENGINE_FIXED_UPDATE_DELTATIME, 4, ENGINE_FIXED_UPDATE_DELTATIME / 4.0f);
 
     /* TODO: in the far future, we might be able to do softbodies! */
     for (int i = m_DynamicsWorld->getNumCollisionObjects() - 1; i >= 0; i--) {
@@ -1272,11 +1273,12 @@ void Engine::PhysicsStep(int _) {
         btQuaternion rotation = transform.getRotation();
 
         fmt::println("origin: {} {} {}", origin.getX(), origin.getY(), origin.getZ());
+        fmt::println("rotation: {} {} {} {}", rotation.getX(), rotation.getY(), rotation.getZ(), rotation.getW());
 
-        Object *obj = reinterpret_cast<Object *>(collisionObject->getUserPointer());
+        Object *obj = reinterpret_cast<Object *>(body->getUserPointer());
         UTILASSERT(obj);
 
-        obj->SetPosition(glm::vec3(origin.getX(), origin.getZ(), origin.getY()));
+        obj->SetPosition(glm::vec3(origin.getX(), origin.getY(), origin.getZ()));
         obj->SetRotation(glm::quat(rotation.getW(), rotation.getX(), rotation.getY(), rotation.getZ()));
     }
 }

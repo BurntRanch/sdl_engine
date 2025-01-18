@@ -13,8 +13,10 @@
 #include "rapidxml.hpp"
 #include "ui/label.hpp"
 #include "common.hpp"
+#include <SDL3/SDL_stdinc.h>
 #include <algorithm>
 #include <assimp/metadata.h>
+#include <assimp/vector3.h>
 #include <sstream>
 #include <stdexcept>
 #include "switch_fnv1a.h"
@@ -286,18 +288,32 @@ struct glTFRigidBody getColliderInfoFromNode(const aiNode *node, const aiScene *
         aiString shapeType;
         shapeData.Get("type", shapeType);
 
+        aiMetadata shapeTypeData;
+        shapeData.Get(shapeType, shapeTypeData);
+
         switch (fnv1a32::hash(shapeType.C_Str())) {
             case "box"_fnv1a32:
-                glm::vec3 boxSize{};
+                /* The KHR_physics_rigid_bodies add-on for blender is broken and does not export proper sizes. */
+                // glm::vec3 boxSize{};
+                // Uint64 boxSizeX = 0;
+                // Uint64 boxSizeY = 0;
+                // Uint64 boxSizeZ = 0;
 
-                aiMetadata shapeSize;
-                geometryParams.Get("size", shapeSize);
+                // aiMetadata shapeSize;
+                // shapeTypeData.Get("size", shapeSize);
 
-                shapeSize.Get(0, boxSize.x);
-                shapeSize.Get(1, boxSize.y);
-                shapeSize.Get(2, boxSize.z);
+                // shapeSize.Get(0, boxSizeX);
+                // shapeSize.Get(1, boxSizeY);
+                // shapeSize.Get(2, boxSizeZ);
 
-                rigidBody.colliderInfo.shape = createBoxShape(boxSize);
+                // boxSize = glm::vec3(boxSizeX, boxSizeY, boxSizeZ);
+
+                aiVector3D _;
+                aiVector3D scale;
+
+                node->mTransformation.Decompose(scale, _, _);
+
+                rigidBody.colliderInfo.shape = createBoxShape(glm::vec3(scale.x, scale.y, scale.z));
             }
 
         fmt::println("Shape: {}", shapeType.C_Str());
@@ -308,6 +324,8 @@ struct glTFRigidBody getColliderInfoFromNode(const aiNode *node, const aiScene *
         if (isConvexHull) {
             throw std::runtime_error("Convex Hull rigid bodies are not supported!");
         }
+
+        /* TODO: Broken. */
 
         int targetNodeIdx = 0;
         geometryParams.Get("node", targetNodeIdx);

@@ -14,11 +14,12 @@ public:
 
     Waypoint(glm::vec3 position, float zDepth, glm::vec3 scale) : m_Position(position) { genericType = WAYPOINT, SetDepth(zDepth); };
 
-    inline void SetPosition(glm::vec3 position) { m_Position = position; };
+    inline void SetWorldSpacePosition(glm::vec3 position) { m_Position = position; };
 
     inline glm::vec3 GetWorldSpacePosition() { return m_Position + (m_Parent != nullptr && m_Parent->genericType == WAYPOINT ? reinterpret_cast<Waypoint *>(m_Parent)->GetWorldSpacePosition() : glm::vec3(0.0f)); };
 
-    inline glm::vec2 GetPosition() { throw std::runtime_error("Use GetWorldSpacePosition() for UI::Waypoint objects!"); };
+    glm::vec2 GetPosition() { throw std::runtime_error("Use GetWorldSpacePosition() for UI::Waypoint objects!"); };
+    void SetPosition(glm::vec2) { throw std::runtime_error("Use SetWorldSpacePosition() for UI::Waypoint objects!"); };
 private:
     glm::vec3 m_Position;
 };

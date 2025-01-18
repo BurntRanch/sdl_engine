@@ -1,5 +1,6 @@
 #include "object.hpp"
 #include "BulletCollision/CollisionDispatch/btCollisionObject.h"
+#include "BulletCollision/CollisionShapes/btBoxShape.h"
 #include "BulletCollision/CollisionShapes/btCollisionShape.h"
 #include "BulletDynamics/Dynamics/btRigidBody.h"
 #include "LinearMath/btDefaultMotionState.h"
@@ -131,7 +132,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
     node->mTransformation.Decompose(scale, rotation, position);
 
-    obj->SetPosition(glm::vec3(position.x, position.z, -position.y));
+    obj->SetPosition(glm::vec3(position.x, position.z, position.y));
     obj->SetRotation(glm::quat(rotation.w, rotation.x, rotation.y, rotation.z));
     obj->SetScale(glm::vec3(scale.x, scale.y, scale.z));
 
@@ -153,7 +154,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
         btTransform transform;
         transform.setIdentity();
-        transform.setOrigin(btVector3(position.x, position.y, -position.z));
+        transform.setOrigin(btVector3(position.x, position.y, position.z));
         transform.setRotation(btQuaternion(rotation.x, rotation.y, rotation.z, rotation.w));
 
         btRigidBody::btRigidBodyConstructionInfo cInfo{static_cast<btScalar>(rigidBody.mass), new btDefaultMotionState(transform), colliderInfo.shape, localInertia};
@@ -223,7 +224,7 @@ void Object::SynchronizePhysicsTransform() {
         return;
     }
 
-    m_RigidBody->getMotionState()->setWorldTransform(btTransform(btQuaternion(m_Rotation.x, m_Rotation.y, m_Rotation.z, m_Rotation.w), btVector3(m_Position.x, m_Position.z, m_Position.y)));
+    m_RigidBody->getMotionState()->setWorldTransform(btTransform(btQuaternion(m_Rotation.x, m_Rotation.y, m_Rotation.z, m_Rotation.w), btVector3(m_Position.x, m_Position.y, m_Position.z)));
 }
 
 void Object::AddModelAttachment(Model *model) {

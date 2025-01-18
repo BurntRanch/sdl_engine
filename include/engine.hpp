@@ -93,16 +93,16 @@ struct Networking_Object {
 };
 
 struct Networking_Camera {
-    int cameraID;
+    int cameraID = 0;
 
     bool isOrthographic = false;
-    float aspectRatio;
-    float orthographicWidth;
+    float aspectRatio = 0;
+    float orthographicWidth = 0;
     
-    float pitch;
-    float yaw;
-    glm::vec3 up;
-    float fov;
+    float pitch = 0;
+    float yaw = 0;
+    glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+    float fov = 0.0f;
     bool isMainCamera = false;
 };
 
@@ -122,7 +122,7 @@ enum Networking_ClientRequestType {
 struct Networking_ClientRequest {
     Networking_ClientRequestType requestType;
 
-    std::vector<std::byte> data;
+    std::vector<std::byte> data = {};
 };
 
 enum Networking_EventType {
@@ -197,7 +197,7 @@ public:
 
     void InitNetworking();
 
-    /* Initializes the Bullet Physics engine, Relies on Networking being enabled. */
+    /* Initializes the Bullet Physics engine. */
     void InitPhysics();
 
     /* Stops the physics engine. */
@@ -333,8 +333,8 @@ private:
         return false;
     }
 
-    /* Steps through the physics engine assuming a tickrate of 64.0f (TODO: change) */
-    void PhysicsStep(int _);
+    /* Steps through the physics engine at ENGINE_FIXED_UPDATE_DELTATIME */
+    void PhysicsStep();
 
     /* Do not set isRecursive to true, This is only there to recursively add objs children BEFORE obj. This is a requirement in the protocol.
      * The return is optional (empty if obj is a child and isRecursive == false) but that doesn't mean you have to put it in the statePacket yourself. It's just there incase you want it.
