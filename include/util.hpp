@@ -52,7 +52,7 @@ std::vector<std::string> split(const std::string_view text, const char delim);
 Object                  *DeepSearchObjectTree(Object *obj, std::function<bool(Object *)> pred);
 
 /* This function is recursive, int = index in candidates */
-std::vector<std::pair<Networking_Object *, int>> FilterRelatedNetworkingObjects(std::vector<Networking_Object> &candidates, Networking_Object *object);
+std::vector<int> FilterRelatedNetworkingObjects(std::vector<Networking_Object> &candidates, Networking_Object *object);
 
 bool                     endsWith(const std::string_view fullString, const std::string_view ending);
 glm::vec2                adjustScaleToFitType(UI::Scalable *self, glm::vec2 scale, UI::FitType fitType = UI::UNSET);

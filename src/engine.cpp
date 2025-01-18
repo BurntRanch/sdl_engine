@@ -1012,11 +1012,11 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
 
                     object->ImportFromFile(absoluteSourcePath);
 
-                    std::vector<std::pair<Networking_Object *, int>> relatedObjects = FilterRelatedNetworkingObjects(m_ObjectsFromImportedObject, &objectPacket);
+                    std::vector<int> relatedObjects = FilterRelatedNetworkingObjects(m_ObjectsFromImportedObject, &objectPacket);
 
                     int offset = 0;
-                    for (auto &generatedObjectPair : relatedObjects) {
-                        Networking_Object *generatedObject = generatedObjectPair.first;
+                    for (size_t i = 0; i < relatedObjects.size(); i++) {
+                        auto generatedObject = (m_ObjectsFromImportedObject.begin() + (relatedObjects[0] - offset++));
 
                         Object *childEquivalent = DeepSearchObjectTree(object, [generatedObject] (Object *child) { return child->GetSourceID() == generatedObject->objectSourceID; });
                         UTILASSERT(childEquivalent);
@@ -1055,8 +1055,9 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
                                 }
                             }
                         }
-                        
-                        m_ObjectsFromImportedObject.erase(m_ObjectsFromImportedObject.begin() + (generatedObjectPair.second - offset++));
+
+                        relatedObjects.erase(relatedObjects.begin());
+                        m_ObjectsFromImportedObject.erase(generatedObject);
                     }
                 } else if (objectPacket.isGeneratedFromFile) {
                     m_ObjectsFromImportedObject.push_back(objectPacket);
@@ -1241,6 +1242,7 @@ void Engine::DeserializeNetworkingCamera(std::vector<std::byte> &serializedCamer
 
     Deserialize(serializedCameraPacket, dest.up.x);
     Deserialize(serializedCameraPacket, dest.up.y);
+    Deserialize(serializedCameraPacket, dest.up.z);
 
     Deserialize(serializedCameraPacket, dest.fov);
     Deserialize(serializedCameraPacket, dest.isMainCamera);
@@ -1523,6 +1525,7 @@ void Engine::SerializeNetworkingCamera(Networking_Camera &cameraPacket, std::vec
 
     Serialize(cameraPacket.up.x, dest);
     Serialize(cameraPacket.up.y, dest);
+    Serialize(cameraPacket.up.z, dest);
 
     Serialize(cameraPacket.fov, dest);
     Serialize(cameraPacket.isMainCamera, dest);

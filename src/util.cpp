@@ -50,17 +50,17 @@ Object *DeepSearchObjectTree(Object *obj, std::function<bool(Object *)> pred) {
     return nullptr;
 }
 
-std::vector<std::pair<Networking_Object *, int>> FilterRelatedNetworkingObjects(std::vector<Networking_Object> &candidates, Networking_Object *object) {
-    std::vector<std::pair<Networking_Object *, int>> relatedObjects;
+std::vector<int> FilterRelatedNetworkingObjects(std::vector<Networking_Object> &candidates, Networking_Object *object) {
+    std::vector<int> relatedObjects;
 
     for (size_t i = 0; i < candidates.size(); i++) {
         if (std::find(object->children.begin(), object->children.end(), candidates[i].ObjectID) != object->children.end()) {
-            relatedObjects.push_back(std::make_pair(&candidates[i], i));
+            relatedObjects.push_back(i);
 
             /* Go over any candidates that we may have missed. */
             std::vector<Networking_Object> previousCandidates{candidates.begin(), candidates.begin() + i};
 
-            std::vector<std::pair<Networking_Object *, int>> relatedPreviousCandidates = FilterRelatedNetworkingObjects(previousCandidates, &candidates[i]);
+            std::vector<int> relatedPreviousCandidates = FilterRelatedNetworkingObjects(previousCandidates, &candidates[i]);
 
             if (!relatedPreviousCandidates.empty()) {
                 relatedObjects.insert(relatedObjects.end(), relatedPreviousCandidates.begin(), relatedPreviousCandidates.end());
