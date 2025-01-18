@@ -303,8 +303,8 @@ private:
     std::vector<std::function<void()>> m_UpdateFunctions;
     std::vector<std::function<void()>> m_FixedUpdateFunctions;
     
-    Settings *m_Settings;
-    Camera *m_MainCamera;
+    Settings *m_Settings = nullptr;
+    Camera *m_MainCamera = nullptr;
 
     /* Next 2 variables are for ProcessNetworkEvents */
     /* Objects that were created as a result of ImportFromFile may not have the same ObjectIDs, and will be hard to track. So we store them to compare their SourceIDs */
