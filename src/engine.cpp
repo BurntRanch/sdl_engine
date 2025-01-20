@@ -1272,9 +1272,6 @@ void Engine::PhysicsStep() {
         btVector3 origin = transform.getOrigin();
         btQuaternion rotation = transform.getRotation();
 
-        fmt::println("origin: {} {} {}", origin.getX(), origin.getY(), origin.getZ());
-        fmt::println("rotation: {} {} {} {}", rotation.getX(), rotation.getY(), rotation.getZ(), rotation.getW());
-
         Object *obj = reinterpret_cast<Object *>(body->getUserPointer());
         UTILASSERT(obj);
 
