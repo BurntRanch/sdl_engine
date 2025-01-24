@@ -4,15 +4,18 @@
 #include "common.hpp"
 #include "settings.hpp"
 #include "ui/arrows.hpp"
+#include "ui/label.hpp"
+#include "ui/panel.hpp"
 #include "ui/waypoint.hpp"
 #include <SDL3/SDL_events.h>
+#include <any>
 #include <freetype/freetype.h>
 #include <functional>
+#include <optional>
 
-namespace UI {
-    class Panel;
-    class Label;
-}
+class RenderPass;
+class GraphicsPipeline;
+struct PipelineBinding;
 
 const std::vector<const char *> requiredDeviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
@@ -95,8 +98,6 @@ struct RenderUIWaypoint {
 
     UIWaypointUBO waypointUBO;
     BufferAndMemory waypointUBOBuffer;
-
-    VkDescriptorSet descriptorSet;
 };
 
 struct RenderUIArrows {
@@ -125,15 +126,8 @@ struct RenderUIPanel {
 struct RenderUILabel {
     UI::Label *label;
 
-    std::vector<std::pair<char, std::pair<VkImageView, VkSampler>>> textureShaderData;
-
     UILabelPositionUBO ubo;
     BufferAndMemory uboBuffer;
-};
-
-struct RenderPass {
-    VkRenderPass vulkanRenderPass;
-    PipelineAndLayout graphicsPipeline;
 };
 
 class BaseRenderer {
@@ -181,6 +175,12 @@ public:
     
     virtual TextureImageAndMemory CreateSinglePixelImage(glm::vec3 color) = 0;
 
+    /* The "any" object is up to interpretation by the derived Renderer, for VulkanRenderer, this is a pointer to a VkShaderModule_T object. */
+    virtual std::any CreateShaderModule(const std::vector<std::byte> &code) = 0;
+    virtual void DestroyShaderModule(std::any shaderModule) = 0;
+
+    virtual std::any CreateDescriptorLayout(std::vector<PipelineBinding> &bindings) = 0;
+
     /* This contains Vulkan flags that can be safely ignored by any renderer not utilizing Vulkan. You may also translate them to your API of choice. */
     virtual void AllocateBuffer(uint64_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, BufferAndMemory &bufferAndMemory) = 0;
 
@@ -193,6 +193,17 @@ public:
     virtual BufferAndMemory CreateSimpleVertexBuffer(const std::vector<SimpleVertex> &simpleVerts) = 0;
     virtual BufferAndMemory CreateVertexBuffer(const std::vector<Vertex> &verts) = 0;
     virtual BufferAndMemory CreateIndexBuffer(const std::vector<Uint32> &inds) = 0;
+
+    virtual void BeginRenderPass(RenderPass *renderPass, std::any framebuffer) = 0;
+
+    virtual void StartNextSubpass() = 0;
+
+    virtual void BeginPipeline(GraphicsPipeline *pipeline) = 0;
+
+    /* vertexCount can typically be set to any arbitrary value ONLY IF INDEX BUFFER IS DEFINED! */
+    virtual void Draw(GraphicsPipeline *pipeline, BufferAndMemory vertexBuffer, Uint32 vertexCount = 0, std::optional<BufferAndMemory> indexBuffer = {}, Uint32 indexCount = 0) = 0;
+
+    virtual void EndRenderPass() = 0;
 
     virtual void Init() = 0;
 

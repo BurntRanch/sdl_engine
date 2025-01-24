@@ -1,7 +1,12 @@
 #pragma once
 #include "common.hpp"
+#include "renderer/GraphicsPipeline.hpp"
+#include "renderer/DescriptorLayout.hpp"
+#include "renderer/RenderPass.hpp"
+#include "renderer/Shader.hpp"
 #include "renderer/baseRenderer.hpp"
 #include <freetype/freetype.h>
+#include <vulkan/vulkan_core.h>
 
 class VulkanRenderer : public BaseRenderer {
 public:
@@ -50,6 +55,11 @@ public:
     virtual Glyph GenerateGlyph(FT_Face ftFace, char c, float &x, float &y, float depth) override;
 
     TextureImageAndMemory CreateSinglePixelImage(glm::vec3 color) override;
+
+    std::any CreateShaderModule(const std::vector<std::byte> &code) override;
+    void DestroyShaderModule(std::any shaderModule) override;
+    
+    std::any CreateDescriptorLayout(std::vector<PipelineBinding> &pipelineBindings) override;
     
     void AllocateBuffer(uint64_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, BufferAndMemory &bufferAndMemory) override;
 
@@ -58,7 +68,7 @@ public:
 
     TextureImageAndMemory CreateImage(Uint32 width, Uint32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties) override;
 
-    void ChangeImageLayout(VkImage image, VkFormat format, VkImageLayout oldImageLayout, VkImageLayout newImageLayout);
+    void ChangeImageLayout(ImageAndMemory &imageAndMemory, VkFormat format, VkImageLayout oldImageLayout, VkImageLayout newImageLayout);
     void CopyBufferToImage(TextureBufferAndMemory textureBuffer, ImageAndMemory imageAndMemory) override;
 
     void DestroyImage(ImageAndMemory imageAndMemory) override;
@@ -67,25 +77,208 @@ public:
     BufferAndMemory CreateVertexBuffer(const std::vector<Vertex> &verts) override;
     BufferAndMemory CreateIndexBuffer(const std::vector<Uint32> &inds) override;
 
+    void BeginRenderPass(RenderPass *renderPass, std::any framebuffer) override;
+    void StartNextSubpass() override;
+    void BeginPipeline(GraphicsPipeline *pipeline) override;
+    void Draw(GraphicsPipeline *pipeline, BufferAndMemory vertexBuffer, Uint32 vertexCount, std::optional<BufferAndMemory> indexBuffer = {}, Uint32 indexCount = 0) override;
+    void EndRenderPass() override;
+
+    std::any CreateDescriptorSetLayout(std::vector<PipelineBinding> &pipelineBindings);
+
+    /* TODO: This isn't general enough to make it to BaseRenderer */
+    GraphicsPipeline *CreateGraphicsPipeline(const std::vector<Shader> &shaders, RenderPass *renderPass, Uint32 subpassIndex, VkFrontFace frontFace, glm::vec4 viewport, glm::vec4 scissor, const DescriptorLayout &descriptorSetLayout, bool isSimple = VK_TRUE, bool enableDepth = VK_TRUE);
+
     void Init() override;
 
     void StepRender() override;
-
 protected:
     PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSet;
 
+    void MainRenderFunction(GraphicsPipeline *pipeline) {
+        glm::mat4 viewMatrix, projectionMatrix;
+
+        if (m_PrimaryCamera) {
+            viewMatrix = m_PrimaryCamera->GetViewMatrix();
+
+            if (m_PrimaryCamera->type == CAMERA_PERSPECTIVE) {
+                projectionMatrix = glm::perspective(
+                    glm::radians(m_PrimaryCamera->FOV), (float)m_Settings.RenderWidth / (float)m_Settings.RenderHeight, m_Settings.CameraNear, CAMERA_FAR
+                );
+            } else {
+                projectionMatrix = glm::ortho(0.0f, m_PrimaryCamera->OrthographicWidth, 0.0f, m_PrimaryCamera->OrthographicWidth*m_PrimaryCamera->AspectRatio);
+            }
+
+            // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
+            projectionMatrix[1][1] *= -1;
+
+            for (RenderModel &renderModel : m_RenderModels) {
+                renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
+
+                renderModel.matricesUBO.viewMatrix = viewMatrix;
+                renderModel.matricesUBO.projectionMatrix = projectionMatrix;
+
+                SDL_memcpy(renderModel.matricesUBOBuffer.mappedData, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
+
+                pipeline->UpdateBindingValue(0, renderModel.matricesUBOBuffer);
+                pipeline->UpdateBindingValue(1, renderModel.diffTexture.imageAndMemory);
+
+                Draw(pipeline, renderModel.vertexBuffer, 0, renderModel.indexBuffer, renderModel.indexBufferSize);
+            }
+        }
+    }
+    void UIWaypointRenderFunction(GraphicsPipeline *pipeline) {
+        glm::mat4 viewMatrix, projectionMatrix;
+
+        if (m_PrimaryCamera) {
+            viewMatrix = m_PrimaryCamera->GetViewMatrix();
+
+            if (m_PrimaryCamera->type == CAMERA_PERSPECTIVE) {
+                projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), (float)m_Settings.RenderWidth / (float)m_Settings.RenderHeight, m_Settings.CameraNear, CAMERA_FAR);
+            } else {
+                projectionMatrix = glm::ortho(0.0f, m_PrimaryCamera->OrthographicWidth, 0.0f, m_PrimaryCamera->OrthographicWidth*m_PrimaryCamera->AspectRatio);
+            }
+
+            for (RenderUIWaypoint &renderUIWaypoint : m_RenderUIWaypoints) {
+                if (!renderUIWaypoint.waypoint->GetVisible()) {
+                    continue;
+                }
+
+                // There is no model matrix for render waypoints, We already know where it is in world-space.
+                renderUIWaypoint.matricesUBO.viewMatrix = viewMatrix;
+                renderUIWaypoint.matricesUBO.projectionMatrix = projectionMatrix;
+
+                SDL_memcpy(renderUIWaypoint.matricesUBOBuffer.mappedData, &renderUIWaypoint.matricesUBO, sizeof(renderUIWaypoint.matricesUBO));
+
+                renderUIWaypoint.waypointUBO.Position = renderUIWaypoint.waypoint->GetWorldSpacePosition();
+
+                SDL_memcpy(renderUIWaypoint.waypointUBOBuffer.mappedData, &renderUIWaypoint.waypointUBO, sizeof(renderUIWaypoint.waypointUBO));
+
+                pipeline->UpdateBindingValue(0, renderUIWaypoint.matricesUBOBuffer);
+                pipeline->UpdateBindingValue(1, renderUIWaypoint.waypointUBOBuffer);
+
+                Draw(pipeline, m_FullscreenQuadVertexBuffer, 6);
+            }
+        }
+    }
+    void UIArrowsRenderFunction(GraphicsPipeline *pipeline) {
+        glm::mat4 viewMatrix, projectionMatrix;
+
+        if (m_PrimaryCamera) {
+            viewMatrix = m_PrimaryCamera->GetViewMatrix();
+
+            if (m_PrimaryCamera->type == CAMERA_PERSPECTIVE) {
+                projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), (float)m_Settings.RenderWidth / (float)m_Settings.RenderHeight, m_Settings.CameraNear, CAMERA_FAR);
+            } else {
+                projectionMatrix = glm::ortho(0.0f, m_PrimaryCamera->OrthographicWidth, 0.0f, m_PrimaryCamera->OrthographicWidth*m_PrimaryCamera->AspectRatio);
+            }
+            
+            for (RenderUIArrows &renderUIArrows : m_RenderUIArrows) {
+                if (!renderUIArrows.arrows->GetVisible()) {
+                    continue;
+                }
+
+                // index for arrowBuffers
+                int i = 0;
+
+                for (RenderModel &arrowRenderModel : renderUIArrows.arrowRenderModels) {
+                    MatricesUBO &matricesUBO = renderUIArrows.arrowBuffers[i].first.first;
+                    UIArrowsUBO &arrowsUBO = renderUIArrows.arrowBuffers[i].first.second;
+
+                    BufferAndMemory &matricesUBOBuffer = renderUIArrows.arrowBuffers[i].second.first;
+                    BufferAndMemory &arrowsUBOBuffer = renderUIArrows.arrowBuffers[i].second.second;
+
+                    matricesUBO.modelMatrix = arrowRenderModel.model->GetModelMatrix();
+                    matricesUBO.viewMatrix = viewMatrix;
+                    matricesUBO.projectionMatrix = projectionMatrix;
+
+                    SDL_memcpy(matricesUBOBuffer.mappedData, &matricesUBO, sizeof(matricesUBO));
+
+                    arrowsUBO.Color = arrowRenderModel.diffColor;
+
+                    SDL_memcpy(arrowsUBOBuffer.mappedData, &arrowsUBO, sizeof(arrowsUBO));
+
+                    pipeline->UpdateBindingValue(0, matricesUBOBuffer);
+                    pipeline->UpdateBindingValue(1, arrowsUBOBuffer);
+
+                    Draw(pipeline, arrowRenderModel.vertexBuffer, 0, arrowRenderModel.indexBuffer, arrowRenderModel.indexBufferSize);
+
+                    i++;
+                }
+            }
+        }
+    }
+    void RescaleRenderFunction(GraphicsPipeline *pipeline) {
+        pipeline->UpdateBindingValue(0, m_RenderImageAndMemory);
+
+        Draw(pipeline, m_FullscreenQuadVertexBuffer, 6);
+    }
+    void UIPanelRenderFunction(GraphicsPipeline *pipeline) {
+        for (RenderUIPanel &renderUIPanel : m_UIPanels) {
+            if (!renderUIPanel.panel->GetVisible()) {
+                continue;
+            }
+
+            renderUIPanel.ubo.Dimensions = renderUIPanel.panel->GetDimensions();
+            
+            /* Double the scales for some odd reason.. */
+            renderUIPanel.ubo.Dimensions.z *= 2;
+            renderUIPanel.ubo.Dimensions.w *= 2;
+
+            /* Convert [0, 1] to [-1, 1] */
+            renderUIPanel.ubo.Dimensions.x *= 2;
+            renderUIPanel.ubo.Dimensions.x -= 1;
+            
+            renderUIPanel.ubo.Dimensions.y *= 2;
+            renderUIPanel.ubo.Dimensions.y -= 1;
+
+            renderUIPanel.ubo.Depth = renderUIPanel.panel->GetDepth();
+
+            SDL_memcpy(renderUIPanel.uboBuffer.mappedData, &(renderUIPanel.ubo), sizeof(renderUIPanel.ubo));
+
+            pipeline->UpdateBindingValue(0, renderUIPanel.uboBuffer);
+            pipeline->UpdateBindingValue(1, renderUIPanel.panel->texture.imageAndMemory);                          
+
+            Draw(pipeline, m_FullscreenQuadVertexBuffer, 6);
+        }
+    }
+    void UILabelRenderFunction(GraphicsPipeline *pipeline) {
+        for (RenderUILabel &renderUILabel : m_UILabels) {
+            if (!renderUILabel.label->GetVisible()) {
+                continue;
+            }
+
+            renderUILabel.ubo.PositionOffset = renderUILabel.label->GetPosition();
+            renderUILabel.ubo.PositionOffset.x *= 2;
+            renderUILabel.ubo.PositionOffset.y *= 2;
+
+            renderUILabel.ubo.Depth = renderUILabel.label->GetDepth();
+
+            SDL_memcpy(renderUILabel.uboBuffer.mappedData, &(renderUILabel.ubo), sizeof(renderUILabel.ubo));
+
+            for (Glyph &glyph : renderUILabel.label->Glyphs) {
+                glyph.glyphUBO.Offset = glyph.offset;
+                
+                SDL_memcpy(glyph.glyphUBOBuffer.mappedData, &(glyph.glyphUBO), sizeof(glyph.glyphUBO));
+
+                pipeline->UpdateBindingValue(0, renderUILabel.uboBuffer);
+                pipeline->UpdateBindingValue(1, glyph.glyphBuffer->first.imageAndMemory);
+                pipeline->UpdateBindingValue(2, glyph.glyphUBOBuffer);
+
+                Draw(pipeline, glyph.glyphBuffer.value().second, 6);
+            }
+        }
+    }
+
     void InitInstance();
     void InitSwapchain();
-    void InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageView);
+    void InitFramebuffers(RenderPass *renderPass, VkImageView depthImageView);
     VkImageView CreateDepthImage(Uint32 width, Uint32 height);
-    PipelineAndLayout CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts = {}, bool isSimple = false, bool enableDepth = VK_TRUE);
-    VkRenderPass CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, bool shouldContainDepthImage = true);
-    VkFramebuffer CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkExtent2D resolution, VkImageView depthImageView = nullptr);
+    RenderPass *CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, glm::vec2 resolution, bool shouldContainDepthImage = true);
+    VkFramebuffer CreateFramebuffer(RenderPass *renderPass, VkImageView imageView, VkImageView depthImageView = nullptr);
 
     void UnloadRenderModel(RenderModel &renderModel) override;
 
     SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface);
-    VkShaderModule CreateShaderModule(VkDevice device, const std::vector<char> &code);
     Uint32 FindMemoryType(Uint32 typeFilter, VkMemoryPropertyFlags properties);
 
     void CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size);
@@ -125,38 +318,34 @@ protected:
     VkDescriptorSetLayout m_UIWaypointDescriptorSetLayout = nullptr;
     VkDescriptorSetLayout m_UIArrowsDescriptorSetLayout = nullptr;
 
-    VkDescriptorPool m_RenderDescriptorPool = nullptr;
-    VkDescriptorPool m_UIWaypointDescriptorPool = nullptr;
-
-    VkDescriptorSet m_RenderDescriptorSet = nullptr;
-
     VkDescriptorSetLayout m_UIPanelDescriptorSetLayout = nullptr;
     VkDescriptorSetLayout m_UILabelDescriptorSetLayout = nullptr;
 
     VkDescriptorSetLayout m_RescaleDescriptorSetLayout = nullptr;
-    VkDescriptorPool m_RescaleDescriptorPool = nullptr;
-    VkDescriptorSet m_RescaleDescriptorSet = nullptr;
-    VkSampler m_RescaleRenderSampler = nullptr;
 
-    PipelineAndLayout m_MainGraphicsPipeline; // Used to render the 3D scene
-    PipelineAndLayout m_UIWaypointGraphicsPipeline; // Used to add shiny waypoints
-    PipelineAndLayout m_UIArrowsGraphicsPipeline; // Used for UI arrows, commonly used in the Map Editor (WIP at the time of writing this comment).
-    PipelineAndLayout m_RescaleGraphicsPipeline; // Used to rescale.
-    PipelineAndLayout m_UIPanelGraphicsPipeline; // Used for UI Panels.
-    PipelineAndLayout m_UILabelGraphicsPipeline; // Used for UI Labels.
+    GraphicsPipeline *m_MainGraphicsPipeline; // Used to render the 3D scene
+    GraphicsPipeline *m_UIWaypointGraphicsPipeline; // Used to add shiny waypoints
+    GraphicsPipeline *m_UIArrowsGraphicsPipeline; // Used for UI arrows, commonly used in the Map Editor (WIP at the time of writing this comment).
+    GraphicsPipeline *m_RescaleGraphicsPipeline; // Used to rescale.
+    GraphicsPipeline *m_UIPanelGraphicsPipeline; // Used for UI Panels.
+    GraphicsPipeline *m_UILabelGraphicsPipeline; // Used for UI Labels.
 
-    BufferAndMemory m_FullscreenQuadVertexBuffer = {nullptr, nullptr};
+    BufferAndMemory m_FullscreenQuadVertexBuffer = {nullptr, nullptr, 0};
 
     VkSwapchainKHR m_Swapchain = nullptr;
-    std::vector<VkRenderPass> m_RenderPasses;
-    std::vector<PipelineAndLayout> m_PipelineAndLayouts;
+    std::vector<RenderPass *> m_RenderPasses;
+    std::vector<GraphicsPipeline *> m_Pipelines;
 
-    VkRenderPass m_MainRenderPass;
+    RenderPass *m_MainRenderPass;
     VkFramebuffer m_RenderFramebuffer;
     ImageAndMemory m_RenderImageAndMemory;
     VkFormat m_RenderImageFormat;
 
-    VkRenderPass m_RescaleRenderPass;   // This uses the swapchain framebuffers
+    RenderPass *m_RescaleRenderPass;   // This uses the swapchain framebuffers
+
+    /* To avoid object deletion, these are members. */
+    VkViewport m_PipelineViewport;
+    VkRect2D m_PipelineScissor;
 
     std::vector<VkImage> m_SwapchainImages;
     std::vector<VkImageView> m_SwapchainImageViews;
@@ -170,11 +359,6 @@ protected:
     std::vector<VkFence> m_InFlightFences;
 
     std::mutex m_SingleTimeCommandMutex;
-
-    VkViewport m_RenderViewport;
-    VkViewport m_DisplayViewport;
-    VkRect2D m_RenderScissor;
-    VkRect2D m_DisplayScissor;
 
     // memory cleanup related, will not include any buffer that is already above (e.g. m_VertexBuffer)
     std::vector<VkImage> m_AllocatedImages;

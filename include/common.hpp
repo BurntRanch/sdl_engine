@@ -18,12 +18,17 @@ class BaseRenderer;
 struct BufferAndMemory {
     VkBuffer buffer;
     VkDeviceMemory memory;
+    Uint32 size;
     void *mappedData = nullptr;
 };
 
 struct ImageAndMemory {
     VkImage image;
     VkDeviceMemory memory;
+    VkImageView view;
+    VkSampler sampler;
+
+    Uint32 size;
 };
 
 struct TextureBufferAndMemory {

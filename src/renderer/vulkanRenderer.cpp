@@ -1,9 +1,15 @@
 #include "renderer/vulkanRenderer.hpp"
 #include "common.hpp"
+#include "renderer/GraphicsPipeline.hpp"
+#include "renderer/DescriptorLayout.hpp"
+#include "renderer/RenderPass.hpp"
+#include "renderer/Shader.hpp"
+#include "renderer/baseRenderer.hpp"
 #include "util.hpp"
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_vulkan.h>
+#include <any>
 #include <set>
 #include <thread>
 #include <vulkan/vk_enum_string_helper.h>
@@ -12,7 +18,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 
-static std::vector<char> readFile(const std::string &name) {
+static std::vector<std::byte> readFile(const std::string &name) {
     std::ifstream file(name, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
@@ -20,10 +26,10 @@ static std::vector<char> readFile(const std::string &name) {
     }
 
     size_t fileSize = file.tellg();
-    std::vector<char> output(file.tellg());
+    std::vector<std::byte> output(file.tellg());
 
     file.seekg(0);
-    file.read(output.data(), fileSize);
+    file.read(reinterpret_cast<char *>(output.data()), fileSize);
 
     return output;
 }
@@ -108,12 +114,12 @@ VulkanRenderer::~VulkanRenderer() {
         this->RemoveUIArrows(renderUIArrows.arrows);
     }
 
-    for (PipelineAndLayout pipelineAndLayout : m_PipelineAndLayouts) {
-        vkDestroyPipeline(m_EngineDevice, pipelineAndLayout.pipeline, NULL);
-        vkDestroyPipelineLayout(m_EngineDevice, pipelineAndLayout.layout, NULL);
+    for (GraphicsPipeline *pipeline : m_Pipelines) {
+        vkDestroyPipeline(m_EngineDevice, std::any_cast<VkPipeline>(pipeline->GetRawPipeline()), NULL);
+        vkDestroyPipelineLayout(m_EngineDevice, std::any_cast<VkPipelineLayout>(pipeline->GetRawPipelineLayout()), NULL);
     }
-    for (VkRenderPass renderPass : m_RenderPasses)
-        vkDestroyRenderPass(m_EngineDevice, renderPass, NULL);
+    for (RenderPass *renderPass : m_RenderPasses)
+        vkDestroyRenderPass(m_EngineDevice, std::any_cast<VkRenderPass>(renderPass->GetRawRenderPass()), NULL);
     for (VkFramebuffer framebuffer : m_SwapchainFramebuffers)
         if (framebuffer)
             vkDestroyFramebuffer(m_EngineDevice, framebuffer, NULL);
@@ -150,26 +156,14 @@ VulkanRenderer::~VulkanRenderer() {
     for (size_t i = 0; i < m_SwapchainImageViews.size(); i++)
         vkDestroyImageView(m_EngineDevice, m_SwapchainImageViews[i], NULL);
 
-    if (m_RenderDescriptorPool)
-        vkDestroyDescriptorPool(m_EngineDevice, m_RenderDescriptorPool, NULL);
-
     if (m_RenderDescriptorSetLayout)
         vkDestroyDescriptorSetLayout(m_EngineDevice, m_RenderDescriptorSetLayout, NULL);
-
-    if (m_UIWaypointDescriptorPool)
-        vkDestroyDescriptorPool(m_EngineDevice, m_UIWaypointDescriptorPool, NULL);
-
-    if (m_UIWaypointDescriptorSetLayout)
-        vkDestroyDescriptorSetLayout(m_EngineDevice, m_UIWaypointDescriptorSetLayout, NULL);
 
     if (m_UIArrowsDescriptorSetLayout)
         vkDestroyDescriptorSetLayout(m_EngineDevice, m_UIArrowsDescriptorSetLayout, NULL);
 
     if (m_UILabelDescriptorSetLayout)
         vkDestroyDescriptorSetLayout(m_EngineDevice, m_UILabelDescriptorSetLayout, NULL);
-
-    if (m_RescaleDescriptorPool)
-        vkDestroyDescriptorPool(m_EngineDevice, m_RescaleDescriptorPool, NULL);
 
     if (m_RescaleDescriptorSetLayout)
         vkDestroyDescriptorSetLayout(m_EngineDevice, m_RescaleDescriptorSetLayout, NULL);
@@ -193,17 +187,49 @@ VulkanRenderer::~VulkanRenderer() {
     SDL_Quit();
 }
 
-VkShaderModule VulkanRenderer::CreateShaderModule(VkDevice device, const std::vector<char> &code) {
+std::any VulkanRenderer::CreateShaderModule(const std::vector<std::byte> &code) {
     VkShaderModuleCreateInfo shaderCreateInfo = {};
     shaderCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     shaderCreateInfo.codeSize = code.size();
     shaderCreateInfo.pCode = reinterpret_cast<const Uint32*>(code.data());
 
     VkShaderModule out = nullptr;
-    if (vkCreateShaderModule(device, &shaderCreateInfo, NULL, &out) != VK_SUCCESS)
+    if (vkCreateShaderModule(m_EngineDevice, &shaderCreateInfo, NULL, &out) != VK_SUCCESS)
         throw std::runtime_error("Failed to create shader module!");
 
     return out;
+}
+
+void VulkanRenderer::DestroyShaderModule(std::any shaderModule) {
+    vkDestroyShaderModule(m_EngineDevice, std::any_cast<VkShaderModule>(shaderModule), NULL);
+}
+
+std::any VulkanRenderer::CreateDescriptorLayout(std::vector<PipelineBinding> &pipelineBindings) {
+    std::vector<VkDescriptorSetLayoutBinding> bindings;
+
+    for (PipelineBinding &binding : pipelineBindings) {
+        VkDescriptorSetLayoutBinding descriptorSetLayoutBinding{};
+        descriptorSetLayoutBinding.binding = binding.bindingIndex;
+        descriptorSetLayoutBinding.descriptorCount = 1;
+        descriptorSetLayoutBinding.descriptorType = binding.type;
+        descriptorSetLayoutBinding.stageFlags = binding.shaderStageBits;
+        descriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+        bindings.push_back(descriptorSetLayoutBinding);
+    }
+
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptorSetLayoutCreateInfo.flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT;
+    descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
+    descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+
+    VkDescriptorSetLayout layout;
+
+    if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &layout) != VK_SUCCESS)
+        throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
+
+    return layout;
 }
 
 SwapChainSupportDetails VulkanRenderer::QuerySwapChainSupport(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface) {
@@ -275,12 +301,12 @@ std::array<TextureImageAndMemory, 1> VulkanRenderer::LoadTexturesFromMesh(Mesh &
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
             );
-        ChangeImageLayout(textures[0].imageAndMemory.image, 
+        ChangeImageLayout(textures[0].imageAndMemory, 
                     textureFormat, 
                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
                 );
         CopyBufferToImage(textureBufferAndMemory, textures[0].imageAndMemory);
-        ChangeImageLayout(textures[0].imageAndMemory.image, 
+        ChangeImageLayout(textures[0].imageAndMemory, 
                     textureFormat, 
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                 );
@@ -315,6 +341,9 @@ TextureBufferAndMemory VulkanRenderer::LoadTextureFromFile(const std::string &na
     BufferAndMemory textureBuffer;
 
     AllocateBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, textureBuffer);
+
+    textureBuffer.size = imageSize;
+
     m_AllocatedBuffers.push_back(textureBuffer.buffer);
     m_AllocatedMemory.push_back(textureBuffer.memory);
 
@@ -413,12 +442,12 @@ RenderModel VulkanRenderer::LoadMesh(Mesh &mesh, Model *model, bool loadTextures
         VkFormat textureFormat = getBestFormatFromChannels(renderModel.diffTexture.channels);
 
         // Image view, for sampling.
-        renderModel.diffTextureImageView = CreateImageView(renderModel.diffTexture, textureFormat, VK_IMAGE_ASPECT_COLOR_BIT, false);
+        renderModel.diffTexture.imageAndMemory.view = CreateImageView(renderModel.diffTexture, textureFormat, VK_IMAGE_ASPECT_COLOR_BIT, false);
 
         VkPhysicalDeviceProperties properties{};
         vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
 
-        renderModel.diffTextureSampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
+        renderModel.diffTexture.imageAndMemory.sampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
     }
 
     renderModel.diffColor = mesh.diffuse;
@@ -431,6 +460,8 @@ RenderModel VulkanRenderer::LoadMesh(Mesh &mesh, Model *model, bool loadTextures
     AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer);
 
     vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOBuffer.mappedData);
+
+    renderModel.matricesUBOBuffer.size = uniformBufferSize;
 
     return renderModel;
 }
@@ -566,6 +597,8 @@ void VulkanRenderer::AddUIWaypoint(UI::Waypoint *waypoint) {
 
     vkMapMemory(m_EngineDevice, renderUIWaypoint.matricesUBOBuffer.memory, 0, matricesUniformBufferSize, 0, &renderUIWaypoint.matricesUBOBuffer.mappedData);
 
+    renderUIWaypoint.matricesUBOBuffer.size = matricesUniformBufferSize;
+
     // waypoint UBO
     VkDeviceSize waypointUniformBufferSize = sizeof(UIWaypointUBO);
 
@@ -575,49 +608,7 @@ void VulkanRenderer::AddUIWaypoint(UI::Waypoint *waypoint) {
 
     vkMapMemory(m_EngineDevice, renderUIWaypoint.waypointUBOBuffer.memory, 0, waypointUniformBufferSize, 0, &renderUIWaypoint.waypointUBOBuffer.mappedData);
 
-    std::array<VkDescriptorSetLayout, 1> layouts = { m_UIWaypointDescriptorSetLayout };
-    VkDescriptorSetAllocateInfo allocInfo = {};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_UIWaypointDescriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = layouts.data();
-
-    VkResult result = vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, &renderUIWaypoint.descriptorSet);
-
-    if (result != VK_SUCCESS)
-        throw std::runtime_error(fmt::format("Failed to allocate descriptor set! ({})", string_VkResult(result)));
-
-    // update descriptor set with buffers
-    VkDescriptorBufferInfo matricesBufferInfo{};
-    matricesBufferInfo.buffer = renderUIWaypoint.matricesUBOBuffer.buffer;
-    matricesBufferInfo.offset = 0;
-    matricesBufferInfo.range = matricesUniformBufferSize;
-
-    // update descriptor set with buffer
-    VkDescriptorBufferInfo waypointBufferInfo{};
-    waypointBufferInfo.buffer = renderUIWaypoint.waypointUBOBuffer.buffer;
-    waypointBufferInfo.offset = 0;
-    waypointBufferInfo.range = waypointUniformBufferSize;
-
-    std::array<VkWriteDescriptorSet, 2> descriptorWrites;
-    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptorWrites[0].pNext = nullptr;
-    descriptorWrites[0].dstSet = renderUIWaypoint.descriptorSet;
-    descriptorWrites[0].dstBinding = 0;
-    descriptorWrites[0].dstArrayElement = 0;
-    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    descriptorWrites[0].descriptorCount = 1;
-    descriptorWrites[0].pBufferInfo = &matricesBufferInfo;
-    descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptorWrites[1].pNext = nullptr;
-    descriptorWrites[1].dstSet = renderUIWaypoint.descriptorSet;
-    descriptorWrites[1].dstBinding = 1;
-    descriptorWrites[1].dstArrayElement = 0;
-    descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    descriptorWrites[1].descriptorCount = 1;
-    descriptorWrites[1].pBufferInfo = &waypointBufferInfo;
-
-    vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+    renderUIWaypoint.waypointUBOBuffer.size = waypointUniformBufferSize;
 
     m_RenderUIWaypoints.push_back(renderUIWaypoint);
 }
@@ -642,6 +633,8 @@ void VulkanRenderer::AddUIArrows(UI::Arrows *arrows) {
 
         vkMapMemory(m_EngineDevice, arrowBuffer.second.first.memory, 0, matricesUniformBufferSize, 0, &arrowBuffer.second.first.mappedData);
 
+        arrowBuffer.second.first.size = matricesUniformBufferSize;
+
         // waypoint UBO
         VkDeviceSize arrowsUniformBufferSize = sizeof(UIArrowsUBO);
 
@@ -650,6 +643,8 @@ void VulkanRenderer::AddUIArrows(UI::Arrows *arrows) {
         AllocateBuffer(arrowsUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, arrowBuffer.second.second);
 
         vkMapMemory(m_EngineDevice, arrowBuffer.second.second.memory, 0, arrowsUniformBufferSize, 0, &arrowBuffer.second.second.mappedData);
+
+        arrowBuffer.second.second.size = arrowsUniformBufferSize;
     }
 
     m_RenderUIArrows.push_back(renderUIArrows);
@@ -719,8 +714,6 @@ bool VulkanRenderer::RemoveUIWaypoint(UI::Waypoint *waypoint) {
 
         vkDestroyBuffer(m_EngineDevice, renderUIWaypoint.waypointUBOBuffer.buffer, NULL);
         vkFreeMemory(m_EngineDevice, renderUIWaypoint.waypointUBOBuffer.memory, NULL);
-
-        vkFreeDescriptorSets(m_EngineDevice, m_UIWaypointDescriptorPool, 1, &renderUIWaypoint.descriptorSet);
     }
 
     AddUIChildren(waypoint);
@@ -732,14 +725,16 @@ void VulkanRenderer::AddUIPanel(UI::Panel *panel) {
     RenderUIPanel renderUIPanel{};
 
     renderUIPanel.panel = panel;
-    renderUIPanel.textureView = CreateImageView(panel->texture, panel->texture.format, VK_IMAGE_ASPECT_COLOR_BIT, false);
-    renderUIPanel.textureSampler = CreateSampler(1.0f, false);
+    panel->texture.imageAndMemory.view = CreateImageView(panel->texture, panel->texture.format, VK_IMAGE_ASPECT_COLOR_BIT, false);
+    panel->texture.imageAndMemory.sampler = CreateSampler(1.0f, false);
 
     renderUIPanel.ubo.Dimensions = panel->GetDimensions();
     renderUIPanel.ubo.Depth = panel->GetDepth();
 
     AllocateBuffer(sizeof(renderUIPanel.ubo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, renderUIPanel.uboBuffer);
     vkMapMemory(m_EngineDevice, renderUIPanel.uboBuffer.memory, 0, sizeof(renderUIPanel.ubo), 0, &(renderUIPanel.uboBuffer.mappedData));
+
+    renderUIPanel.uboBuffer.size = sizeof(renderUIPanel.ubo);
 
     m_UIPanels.push_back(renderUIPanel);
 }
@@ -780,12 +775,10 @@ void VulkanRenderer::AddUILabel(UI::Label *label) {
     renderUILabel.label = label;
 
     for (auto &glyph : label->Glyphs) {
-        auto glyphBuffer = glyph.glyphBuffer.value();
+        auto &glyphBuffer = glyph.glyphBuffer.value();
 
-        VkImageView textureView = CreateImageView(glyphBuffer.first, glyphBuffer.first.format, VK_IMAGE_ASPECT_COLOR_BIT, false);
-        VkSampler textureSampler = CreateSampler(1.0f, false);
-
-        renderUILabel.textureShaderData.push_back(std::make_pair(glyph.character, std::make_pair(textureView, textureSampler)));
+        glyphBuffer.first.imageAndMemory.view = CreateImageView(glyphBuffer.first, glyphBuffer.first.format, VK_IMAGE_ASPECT_COLOR_BIT, false);
+        glyphBuffer.first.imageAndMemory.sampler = CreateSampler(1.0f, false);
     }
 
     renderUILabel.ubo.PositionOffset = label->GetPosition();
@@ -795,6 +788,8 @@ void VulkanRenderer::AddUILabel(UI::Label *label) {
 
     AllocateBuffer(sizeof(renderUILabel.ubo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, renderUILabel.uboBuffer);
     vkMapMemory(m_EngineDevice, renderUILabel.uboBuffer.memory, 0, sizeof(renderUILabel.ubo), 0, &(renderUILabel.uboBuffer.mappedData));
+
+    renderUILabel.uboBuffer.size = sizeof(renderUILabel.ubo);
 
     m_UILabels.push_back(renderUILabel);
 }
@@ -817,12 +812,14 @@ bool VulkanRenderer::RemoveUILabel(UI::Label *label) {
 
         vkDeviceWaitIdle(m_EngineDevice);
 
-        for (auto shaderData : renderUILabel.textureShaderData) {
-            vkDestroyImageView(m_EngineDevice, shaderData.second.first, NULL);
-            vkDestroySampler(m_EngineDevice, shaderData.second.second, NULL);
-        }
+        for (Glyph &glyph: renderUILabel.label->Glyphs) {
+            if (!glyph.glyphBuffer) {
+                continue;
+            }
 
-        renderUILabel.textureShaderData.clear();
+            vkDestroyImageView(m_EngineDevice, glyph.glyphBuffer->first.imageAndMemory.view, NULL);
+            vkDestroySampler(m_EngineDevice, glyph.glyphBuffer->first.imageAndMemory.sampler, NULL);
+        }
 
         vkDestroyBuffer(m_EngineDevice, renderUILabel.uboBuffer.buffer, NULL);
         vkFreeMemory(m_EngineDevice, renderUILabel.uboBuffer.memory, NULL);
@@ -885,6 +882,8 @@ Glyph VulkanRenderer::GenerateGlyph(FT_Face ftFace, char c, float &x, float &y, 
                 AllocateBuffer(sizeof(glyph.glyphUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyph.glyphUBOBuffer);
                 vkMapMemory(m_EngineDevice, glyph.glyphUBOBuffer.memory, 0, sizeof(glyph.glyphUBO), 0, &(glyph.glyphUBOBuffer.mappedData));
 
+                glyph.glyphUBOBuffer.size = sizeof(glyph.glyphUBO);
+
                 return glyph;
             }
     }
@@ -900,14 +899,16 @@ Glyph VulkanRenderer::GenerateGlyph(FT_Face ftFace, char c, float &x, float &y, 
     vkMapMemory(m_EngineDevice, glyphBuffer.bufferAndMemory.memory, 0, glyphBufferSize, 0, &(glyphBuffer.bufferAndMemory.mappedData));
     SDL_memcpy(glyphBuffer.bufferAndMemory.mappedData, ftFace->glyph->bitmap.buffer, glyphBufferSize);
 
+    glyphBuffer.bufferAndMemory.size = glyphBufferSize;
+
     TextureImageAndMemory textureImageAndMemory = CreateImage(ftFace->glyph->bitmap.width, ftFace->glyph->bitmap.rows, VK_FORMAT_R8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
+    ChangeImageLayout(textureImageAndMemory.imageAndMemory, 
                 VK_FORMAT_R8_SRGB, 
                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
             );
     CopyBufferToImage(glyphBuffer, textureImageAndMemory.imageAndMemory);
-    ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
+    ChangeImageLayout(textureImageAndMemory.imageAndMemory, 
                 VK_FORMAT_R8_SRGB, 
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
             );
@@ -949,6 +950,8 @@ Glyph VulkanRenderer::GenerateGlyph(FT_Face ftFace, char c, float &x, float &y, 
     AllocateBuffer(sizeof(glyph.glyphUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, glyph.glyphUBOBuffer);
     vkMapMemory(m_EngineDevice, glyph.glyphUBOBuffer.memory, 0, sizeof(glyph.glyphUBO), 0, &(glyph.glyphUBOBuffer.mappedData));
 
+    glyph.glyphUBOBuffer.size = sizeof(glyph.glyphUBO);
+
     m_GlyphCache.push_back(glyph);
 
     return glyph;
@@ -969,18 +972,20 @@ TextureImageAndMemory VulkanRenderer::CreateSinglePixelImage(glm::vec3 color) {
     SDL_memcpy(textureBufferAndMemory.mappedData, (void *)texColors.data(), bufferSize);
     vkUnmapMemory(m_EngineDevice, textureBufferAndMemory.memory);
 
+    textureBufferAndMemory.size = bufferSize;
+
     /* Transfer our newly created texture to an image */
     TextureImageAndMemory textureImageAndMemory = CreateImage(1, 1,
     VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
     VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
         );
-    ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
+    ChangeImageLayout(textureImageAndMemory.imageAndMemory, 
                 VK_FORMAT_R8G8B8A8_SRGB, 
                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
             );
     CopyBufferToImage({textureBufferAndMemory, 1, 1, 4}, textureImageAndMemory.imageAndMemory);
-    ChangeImageLayout(textureImageAndMemory.imageAndMemory.image, 
+    ChangeImageLayout(textureImageAndMemory.imageAndMemory, 
                 VK_FORMAT_R8G8B8A8_SRGB, 
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
             );
@@ -1086,6 +1091,8 @@ TextureImageAndMemory VulkanRenderer::CreateImage(Uint32 width, Uint32 height, V
         throw std::runtime_error(engineError::CANT_ALLOCATE_MEMORY);
     }
 
+    textureImageAndMemory.imageAndMemory.size = memRequirements.size;
+
     textureImageAndMemory.width = width;
     textureImageAndMemory.height = height;
     textureImageAndMemory.channels = getChannelsFromFormats(format);
@@ -1096,12 +1103,12 @@ TextureImageAndMemory VulkanRenderer::CreateImage(Uint32 width, Uint32 height, V
     return textureImageAndMemory;
 }
 
-void VulkanRenderer::ChangeImageLayout(VkImage image, VkFormat format, VkImageLayout oldImageLayout, VkImageLayout newImageLayout) {
+void VulkanRenderer::ChangeImageLayout(ImageAndMemory &imageAndMemory, VkFormat format, VkImageLayout oldImageLayout, VkImageLayout newImageLayout) {
     VkCommandBuffer commandBuffer = BeginSingleTimeCommands();
 
     VkImageMemoryBarrier memoryBarrier{};
     memoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    memoryBarrier.image = image;
+    memoryBarrier.image = imageAndMemory.image;
     memoryBarrier.oldLayout = oldImageLayout;
     memoryBarrier.newLayout = newImageLayout;
     memoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -1230,6 +1237,8 @@ BufferAndMemory VulkanRenderer::CreateSimpleVertexBuffer(const std::vector<Simpl
 
     CopyHostBufferToDeviceBuffer(stagingBuffer.buffer, vertexBuffer.buffer, stagingBufferSize);
 
+    vertexBuffer.size = stagingBufferSize;
+
     vkDestroyBuffer(m_EngineDevice, stagingBuffer.buffer, NULL);
     vkFreeMemory(m_EngineDevice, stagingBuffer.memory, NULL);
 
@@ -1260,6 +1269,8 @@ BufferAndMemory VulkanRenderer::CreateVertexBuffer(const std::vector<Vertex> &ve
 
     CopyHostBufferToDeviceBuffer(stagingBuffer.buffer, vertexBuffer.buffer, stagingBufferSize);
 
+    vertexBuffer.size = stagingBufferSize;
+
     vkDestroyBuffer(m_EngineDevice, stagingBuffer.buffer, NULL);
     vkFreeMemory(m_EngineDevice, stagingBuffer.memory, NULL);
 
@@ -1288,10 +1299,196 @@ BufferAndMemory VulkanRenderer::CreateIndexBuffer(const std::vector<Uint32> &ind
 
     CopyHostBufferToDeviceBuffer(stagingBuffer.buffer, indexBuffer.buffer, stagingBufferSize);
 
+    indexBuffer.size = stagingBufferSize;
+
     vkDestroyBuffer(m_EngineDevice, stagingBuffer.buffer, NULL);
     vkFreeMemory(m_EngineDevice, stagingBuffer.memory, NULL);
 
     return indexBuffer;
+}
+
+void VulkanRenderer::BeginRenderPass(RenderPass *renderPass, std::any framebuffer) {
+    glm::vec2 renderPassResolution = renderPass->GetResolution();
+
+    // begin a render pass, this could be for example HDR pass, SSAO pass, lighting pass.
+    VkRenderPassBeginInfo renderPassBeginInfo{};
+    renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassBeginInfo.renderPass = std::any_cast<VkRenderPass>(renderPass->GetRawRenderPass());
+    renderPassBeginInfo.framebuffer = std::any_cast<VkFramebuffer>(framebuffer);
+    renderPassBeginInfo.renderArea.offset = {0, 0};
+    renderPassBeginInfo.renderArea.extent = {static_cast<uint32_t>(renderPassResolution.x), static_cast<uint32_t>(renderPassResolution.y)};
+
+    std::array<VkClearValue, 2> clearColors{};
+    glm::vec4 renderPassClearColors = renderPass->GetClearColor();
+
+    clearColors[0].color = {{renderPassClearColors.r, renderPassClearColors.g, renderPassClearColors.b, renderPassClearColors.a}};
+    clearColors[1].depthStencil = {1.0f, 0};
+
+    renderPassBeginInfo.clearValueCount = clearColors.size();
+    renderPassBeginInfo.pClearValues = clearColors.data();
+
+    /* This should work under normal cases, but I don't feel too good about using m_FrameIndex, this feels like it could be better.. */
+    vkCmdBeginRenderPass(m_CommandBuffers[m_FrameIndex], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+}
+
+void VulkanRenderer::StartNextSubpass() {
+    vkCmdNextSubpass(m_CommandBuffers[m_FrameIndex], VK_SUBPASS_CONTENTS_INLINE);
+}
+
+void VulkanRenderer::BeginPipeline(GraphicsPipeline *pipeline) {
+    vkCmdBindPipeline(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, std::any_cast<VkPipeline>(pipeline->GetRawPipeline()));
+
+    glm::vec4 pipelineViewport = pipeline->GetViewport();
+    m_PipelineViewport = {pipelineViewport.x, pipelineViewport.y, pipelineViewport.z, pipelineViewport.w, 0.0f, 1.0f};
+    vkCmdSetViewport(m_CommandBuffers[m_FrameIndex], 0, 1, &m_PipelineViewport);
+
+    glm::vec4 pipelineScissor = pipeline->GetScissor();
+    m_PipelineScissor = {
+        {static_cast<int32_t>(pipelineScissor.x), static_cast<int32_t>(pipelineScissor.y)},
+        {static_cast<uint32_t>(pipelineScissor.z), static_cast<uint32_t>(pipelineScissor.w)}
+    };
+    
+    vkCmdSetScissor(m_CommandBuffers[m_FrameIndex], 0, 1, &m_PipelineScissor);
+}
+
+void VulkanRenderer::Draw(GraphicsPipeline *pipeline, BufferAndMemory vertexBuffer, Uint32 vertexCount, std::optional<BufferAndMemory> indexBuffer, Uint32 indexCount) {
+    // glm::mat4 viewMatrix;
+    // glm::mat4 projectionMatrix;
+
+    // if (m_PrimaryCamera) {
+    //     viewMatrix = m_PrimaryCamera->GetViewMatrix();
+
+    //     if (m_PrimaryCamera->type == CAMERA_PERSPECTIVE) {
+    //         projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), (float)m_Settings.RenderWidth / (float)m_Settings.RenderHeight, m_Settings.CameraNear, CAMERA_FAR);
+    //     } else {
+    //         projectionMatrix = glm::ortho(0.0f, m_PrimaryCamera->OrthographicWidth, 0.0f, m_PrimaryCamera->OrthographicWidth*m_PrimaryCamera->AspectRatio);
+    //     }
+
+    //     // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
+    //     projectionMatrix[1][1] *= -1;
+
+    //     for (RenderModel &renderModel : m_RenderModels) {
+    //         renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
+
+    //         renderModel.matricesUBO.viewMatrix = viewMatrix;
+    //         renderModel.matricesUBO.projectionMatrix = projectionMatrix;
+
+    //         SDL_memcpy(renderModel.matricesUBOBuffer.mappedData, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
+
+    // vertex buffer binding!!
+    VkDeviceSize mainOffsets[] = {0};
+    vkCmdBindVertexBuffers(m_CommandBuffers[m_FrameIndex], 0, 1, &vertexBuffer.buffer, mainOffsets);
+
+    if (indexBuffer.has_value()) {
+        vkCmdBindIndexBuffer(m_CommandBuffers[m_FrameIndex], indexBuffer.value().buffer, 0, VK_INDEX_TYPE_UINT32);
+    }
+
+    std::vector<PipelineBinding> pipelineBindings = pipeline->GetDescriptorLayout().GetBindings();
+
+    std::vector<VkDescriptorBufferInfo> bufferInfos(pipelineBindings.size());
+    std::vector<VkDescriptorImageInfo> imageInfos(pipelineBindings.size());
+    std::vector<VkWriteDescriptorSet> descriptorWrites;
+
+    for (PipelineBinding &binding : pipelineBindings) {
+        BufferAndMemory bufferAndMemory;
+        ImageAndMemory imageAndMemory;
+
+        VkDescriptorBufferInfo &bufferInfo = bufferInfos.emplace_back();
+        VkDescriptorImageInfo &imageInfo = imageInfos.emplace_back();
+
+        VkWriteDescriptorSet descriptorWrite{};
+        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.pNext = nullptr;
+        descriptorWrite.dstSet = 0x0; // Ignored
+        descriptorWrite.dstBinding = binding.bindingIndex;
+        descriptorWrite.dstArrayElement = 0;
+        descriptorWrite.descriptorType = binding.type;
+        descriptorWrite.descriptorCount = 1;
+
+        switch (binding.type) {
+            /* TODO: implement all */
+            case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+                bufferAndMemory = std::any_cast<BufferAndMemory>(pipeline->GetBindingValue(binding.bindingIndex));
+
+                bufferInfo.buffer = bufferAndMemory.buffer;
+                bufferInfo.offset = 0;
+                bufferInfo.range = bufferAndMemory.size;
+
+                descriptorWrite.pBufferInfo = &bufferInfo;
+
+                break;
+            case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+                imageAndMemory = std::any_cast<ImageAndMemory>(pipeline->GetBindingValue(binding.bindingIndex));
+
+                imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                imageInfo.imageView = imageAndMemory.view;
+                imageInfo.sampler = imageAndMemory.sampler;
+
+                descriptorWrite.pImageInfo = &imageInfo;
+
+                break;
+            case VK_DESCRIPTOR_TYPE_SAMPLER:
+            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+            case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+            case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+            case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+            case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+            case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+            case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+            case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+            case VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK:
+            case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
+            case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV:
+            case VK_DESCRIPTOR_TYPE_SAMPLE_WEIGHT_IMAGE_QCOM:
+            case VK_DESCRIPTOR_TYPE_BLOCK_MATCH_IMAGE_QCOM:
+            case VK_DESCRIPTOR_TYPE_MUTABLE_EXT:
+            case VK_DESCRIPTOR_TYPE_MAX_ENUM:
+                break;
+        }
+
+        descriptorWrites.push_back(descriptorWrite);
+    }
+
+    vkCmdPushDescriptorSet(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, std::any_cast<VkPipelineLayout>(pipeline->GetRawPipelineLayout()), 0, descriptorWrites.size(), descriptorWrites.data());
+
+    if (indexBuffer.has_value()) {
+        vkCmdDrawIndexed(m_CommandBuffers[m_FrameIndex], indexCount, 1, 0, 0, 0);
+    } else {
+        vkCmdDraw(m_CommandBuffers[m_FrameIndex], vertexCount, 1, 0, 0);
+    }
+}
+
+void VulkanRenderer::EndRenderPass() {
+    /* This should work under normal cases, but I don't feel too good about using m_FrameIndex, this feels like it could be better.. */
+    vkCmdEndRenderPass(m_CommandBuffers[m_FrameIndex]);
+}
+
+std::any VulkanRenderer::CreateDescriptorSetLayout(std::vector<PipelineBinding> &pipelineBindings) {
+    std::vector<VkDescriptorSetLayoutBinding> bindings;
+
+    for (PipelineBinding &binding : pipelineBindings) {
+        VkDescriptorSetLayoutBinding descriptorSetLayoutBinding{};
+        descriptorSetLayoutBinding.binding = binding.bindingIndex;
+        descriptorSetLayoutBinding.descriptorCount = 1;
+        descriptorSetLayoutBinding.descriptorType = binding.type;
+        descriptorSetLayoutBinding.stageFlags = binding.shaderStageBits;
+        descriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+        bindings.push_back(descriptorSetLayoutBinding);
+    }
+
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptorSetLayoutCreateInfo.flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT;
+    descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
+    descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+
+    VkDescriptorSetLayout layout;
+
+    if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &layout) != VK_SUCCESS)
+        throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
+
+    return layout;
 }
 
 void VulkanRenderer::InitSwapchain() {
@@ -1399,7 +1596,7 @@ void VulkanRenderer::InitSwapchain() {
     }
 }
 
-void VulkanRenderer::InitFramebuffers(VkRenderPass renderPass, VkImageView depthImageView) {
+void VulkanRenderer::InitFramebuffers(RenderPass *renderPass, VkImageView depthImageView) {
     for (VkFramebuffer framebuffer : m_SwapchainFramebuffers)
         if (framebuffer)
             vkDestroyFramebuffer(m_EngineDevice, framebuffer, NULL);
@@ -1407,7 +1604,7 @@ void VulkanRenderer::InitFramebuffers(VkRenderPass renderPass, VkImageView depth
     m_SwapchainFramebuffers.resize(m_SwapchainImageViews.size());
 
     for (size_t i = 0; i < m_SwapchainFramebuffers.size(); i++)
-        m_SwapchainFramebuffers[i] = CreateFramebuffer(renderPass, m_SwapchainImageViews[i], {m_Settings.DisplayWidth, m_Settings.DisplayHeight}, depthImageView);
+        m_SwapchainFramebuffers[i] = CreateFramebuffer(renderPass, m_SwapchainImageViews[i], depthImageView);
 }
 
 VkImageView VulkanRenderer::CreateDepthImage(Uint32 width, Uint32 height) {
@@ -1478,36 +1675,31 @@ void VulkanRenderer::InitInstance() {
         throw std::runtime_error(engineError::INSTANCE_CREATION_FAILURE);
 }
 
-/* Creates a Vulkan graphics pipeline, shaderName will be used as a part of the path.
+/*
+ * Creates a Vulkan graphics pipeline, shaderName will be used as a part of the path.
  * Sanitization is the job of the caller.
  */
-PipelineAndLayout VulkanRenderer::CreateGraphicsPipeline(const std::string &shaderName, VkRenderPass renderPass, Uint32 subpassIndex, VkFrontFace frontFace, VkViewport viewport, VkRect2D scissor, const std::vector<VkDescriptorSetLayout> &descriptorSetLayouts, bool isSimple, bool enableDepth) {
-    auto vertShader = readFile("shaders/" + shaderName + ".vert.spv");
-    auto fragShader = readFile("shaders/" + shaderName + ".frag.spv");
-
-    VkShaderModule vertShaderModule = CreateShaderModule(m_EngineDevice, vertShader);
-    VkShaderModule fragShaderModule = CreateShaderModule(m_EngineDevice, fragShader);
-
+GraphicsPipeline *VulkanRenderer::CreateGraphicsPipeline(const std::vector<Shader> &shaders, RenderPass *renderPass, Uint32 subpassIndex, VkFrontFace frontFace, glm::vec4 viewport, glm::vec4 scissor, const DescriptorLayout &descriptorSetLayout, bool isSimple, bool enableDepth) {
     PipelineAndLayout pipelineAndLayout;
 
-    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
-    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertShaderStageInfo.module = vertShaderModule;
-    vertShaderStageInfo.pName = "main";
+    std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
 
-    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
-    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragShaderStageInfo.module = fragShaderModule;
-    fragShaderStageInfo.pName = "main";
+    for (const Shader &shader : shaders) {
+        VkPipelineShaderStageCreateInfo shaderStageInfo{};
+        shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStageInfo.stage = shader.GetShaderStageBits();
+        shaderStageInfo.module = std::any_cast<VkShaderModule>(shader.GetShaderModule());
+        shaderStageInfo.pName = "main";
 
-    VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+        shaderStages.push_back(shaderStageInfo);
+    }
+
+    VkDescriptorSetLayout descriptorSetLayoutRaw = std::any_cast<VkDescriptorSetLayout>(descriptorSetLayout.Get());
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = descriptorSetLayouts.size();
-    pipelineLayoutInfo.pSetLayouts = descriptorSetLayouts.data();
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &descriptorSetLayoutRaw;
     pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
     pipelineLayoutInfo.pPushConstantRanges = nullptr; // Optional
 
@@ -1528,12 +1720,12 @@ PipelineAndLayout VulkanRenderer::CreateGraphicsPipeline(const std::string &shad
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInputInfo.vertexBindingDescriptionCount = 1;
 
-
     auto bindingDescriptionSimple = getSimpleVertexBindingDescription();
     auto attributeDescriptionsSimple = getSimpleVertexAttributeDescriptions();
     auto bindingDescription = getVertexBindingDescription();
     auto attributeDescriptions = getVertexAttributeDescriptions();
 
+    /* TODO: Allow for dynamic vertex binding descriptions. */
     if (isSimple) {
         vertexInputInfo.pVertexBindingDescriptions = &bindingDescriptionSimple;
         vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptionsSimple.size();
@@ -1549,12 +1741,17 @@ PipelineAndLayout VulkanRenderer::CreateGraphicsPipeline(const std::string &shad
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
+    VkViewport vkViewport{viewport.x, viewport.y, viewport.z, viewport.w, 0.0f, 1.0f};
+    VkRect2D vkScissor{{static_cast<int32_t>(scissor.x), static_cast<int32_t>(scissor.y)}, 
+        {static_cast<uint32_t>(scissor.z), static_cast<uint32_t>(scissor.w)}
+    };
+
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     viewportState.viewportCount = 1;
-    viewportState.pViewports = &viewport;
+    viewportState.pViewports = &vkViewport;
     viewportState.scissorCount = 1;
-    viewportState.pScissors = &scissor;
+    viewportState.pScissors = &vkScissor;
 
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -1613,8 +1810,8 @@ PipelineAndLayout VulkanRenderer::CreateGraphicsPipeline(const std::string &shad
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.stageCount = shaderStages.size();
+    pipelineInfo.pStages = shaderStages.data();
     pipelineInfo.pVertexInputState = &vertexInputInfo;
     pipelineInfo.pInputAssemblyState = &inputAssembly;
     pipelineInfo.pTessellationState = nullptr;
@@ -1625,27 +1822,32 @@ PipelineAndLayout VulkanRenderer::CreateGraphicsPipeline(const std::string &shad
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
     pipelineInfo.layout = pipelineAndLayout.layout;
-    pipelineInfo.renderPass = renderPass;
+    pipelineInfo.renderPass = std::any_cast<VkRenderPass>(renderPass->GetRawRenderPass());
     pipelineInfo.subpass = subpassIndex;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
     pipelineInfo.basePipelineIndex = -1;
 
     if (vkCreateGraphicsPipelines(m_EngineDevice, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &pipelineAndLayout.pipeline) != VK_SUCCESS) {
-        vkDestroyShaderModule(m_EngineDevice, vertShaderModule, NULL);
-        vkDestroyShaderModule(m_EngineDevice, fragShaderModule, NULL);
+        for (const Shader &shader : shaders) {
+            DestroyShaderModule(shader.GetShaderModule());
+        }
 
         throw std::runtime_error(engineError::PIPELINE_CREATION_FAILURE);
     }
 
-    vkDestroyShaderModule(m_EngineDevice, vertShaderModule, NULL);
-    vkDestroyShaderModule(m_EngineDevice, fragShaderModule, NULL);
+    for (const Shader &shader : shaders) {
+        DestroyShaderModule(shader.GetShaderModule());
+    }
 
-    m_PipelineAndLayouts.push_back(pipelineAndLayout);
+    GraphicsPipeline *pipeline = new GraphicsPipeline(pipelineAndLayout.pipeline, pipelineAndLayout.layout, descriptorSetLayout, this, viewport, scissor);
 
-    return pipelineAndLayout;
+    renderPass->SetSubpass(subpassIndex, pipeline);
+    m_Pipelines.push_back(pipeline);
+
+    return pipeline;
 }
 
-VkRenderPass VulkanRenderer::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, bool shouldContainDepthImage) {
+RenderPass *VulkanRenderer::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, glm::vec2 resolution, bool shouldContainDepthImage) {
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = imageFormat;
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -1722,25 +1924,29 @@ VkRenderPass VulkanRenderer::CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttac
     renderPassInfo.dependencyCount = subpassDependencies.size();
     renderPassInfo.pDependencies = subpassDependencies.data();
 
-    VkRenderPass renderPass;
-    if (vkCreateRenderPass(m_EngineDevice, &renderPassInfo, NULL, &renderPass))
+    VkRenderPass vulkanRenderPass;
+    if (vkCreateRenderPass(m_EngineDevice, &renderPassInfo, NULL, &vulkanRenderPass))
         throw std::runtime_error(engineError::RENDERPASS_CREATION_FAILURE);
+
+    RenderPass *renderPass = new RenderPass(this, vulkanRenderPass, resolution);
 
     m_RenderPasses.push_back(renderPass);
 
     return renderPass;
 }
 
-VkFramebuffer VulkanRenderer::CreateFramebuffer(VkRenderPass renderPass, VkImageView imageView, VkExtent2D resolution, VkImageView depthImageView) {
+VkFramebuffer VulkanRenderer::CreateFramebuffer(RenderPass *renderPass, VkImageView imageView, VkImageView depthImageView) {
     std::array<VkImageView, 2> attachments = {imageView, depthImageView};
+
+    glm::vec2 resolution = renderPass->GetResolution();
 
     VkFramebufferCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    createInfo.renderPass = renderPass;
+    createInfo.renderPass = std::any_cast<VkRenderPass>(renderPass->GetRawRenderPass());
     createInfo.attachmentCount = 1 + (depthImageView != nullptr);   // Bools get converted to ints, This will be 1 if depthImageView == nullptr, 2 if it isn't.
     createInfo.pAttachments = attachments.data();
-    createInfo.width = resolution.width;
-    createInfo.height = resolution.height;
+    createInfo.width = resolution.x;
+    createInfo.height = resolution.y;
     createInfo.layers = 1;
 
     VkFramebuffer framebuffer;
@@ -1748,6 +1954,16 @@ VkFramebuffer VulkanRenderer::CreateFramebuffer(VkRenderPass renderPass, VkImage
         throw std::runtime_error(engineError::FRAMEBUFFER_CREATION_FAILURE);
     
     return framebuffer;
+}
+
+/* Basic Shaders are those with only vertex/fragment shaders */
+GraphicsPipeline *CreateBasicShader(VulkanRenderer *renderer, std::string name, RenderPass *renderPass, Uint32 subpassIndex, VkFrontFace frontFace, glm::vec4 viewport, glm::vec4 scissor, const DescriptorLayout &descriptorSetLayout, bool isSimple = VK_FALSE, bool enableDepth = VK_TRUE) {
+    std::vector<Shader> shaders;
+
+    shaders.emplace_back(renderer, VK_SHADER_STAGE_VERTEX_BIT, std::filesystem::path("shaders") / (name + ".vert.spv"));
+    shaders.emplace_back(renderer, VK_SHADER_STAGE_FRAGMENT_BIT, std::filesystem::path("shaders") / (name + ".frag.spv"));
+
+    return renderer->CreateGraphicsPipeline(shaders, renderPass, subpassIndex, frontFace, viewport, scissor, descriptorSetLayout, isSimple, enableDepth);
 }
 
 void VulkanRenderer::Init() {
@@ -1883,14 +2099,25 @@ void VulkanRenderer::Init() {
 
     m_RenderImageFormat = getBestFormatFromChannels(4);
 
-    m_MainRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 3, m_RenderImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    m_RescaleRenderPass = CreateRenderPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 3, m_SwapchainImageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    m_MainRenderPass = CreateRenderPass(
+        VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 
+        3, m_RenderImageFormat, 
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 
+        {m_Settings.RenderWidth, m_Settings.RenderHeight}
+    );
+
+    m_RescaleRenderPass = CreateRenderPass(
+        VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, 
+        3, m_SwapchainImageFormat, 
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        {m_Settings.DisplayWidth, m_Settings.DisplayHeight}
+    );
 
     VkImageView depthImageView = CreateDepthImage(m_Settings.RenderWidth, m_Settings.RenderHeight);
     VkImageView rescaleDepthImageView = CreateDepthImage(m_Settings.DisplayWidth, m_Settings.DisplayHeight);
 
     TextureImageAndMemory renderImage = CreateImage(m_Settings.RenderWidth, m_Settings.RenderHeight, m_RenderImageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    VkImageView renderImageView = CreateImageView(renderImage, m_RenderImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
+    renderImage.imageAndMemory.view = CreateImageView(renderImage, m_RenderImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 
     m_AllocatedImages.push_back(renderImage.imageAndMemory.image);
     m_AllocatedMemory.push_back(renderImage.imageAndMemory.memory);
@@ -1911,7 +2138,7 @@ void VulkanRenderer::Init() {
     
     m_RenderImageAndMemory = renderImage.imageAndMemory;
 
-    m_RenderFramebuffer = CreateFramebuffer(m_MainRenderPass, renderImageView, {m_Settings.RenderWidth, m_Settings.RenderHeight}, depthImageView);
+    m_RenderFramebuffer = CreateFramebuffer(m_MainRenderPass, renderImage.imageAndMemory.view, depthImageView);
     InitFramebuffers(m_RescaleRenderPass, rescaleDepthImageView);
 
     // VkPhysicalDeviceProperties properties{};
@@ -1928,286 +2155,155 @@ void VulkanRenderer::Init() {
     // matricesUBO.viewMatrix = glm::mat4(1.0f);
     // matricesUBO.modelMatrix = glm::mat4(1.0f);
     // matricesUBO.projectionMatrix = glm::mat4(1.0f);
-    {
-        VkDescriptorSetLayoutBinding samplerDescriptorSetLayoutBinding{};
-        samplerDescriptorSetLayoutBinding.binding = 1;
-        samplerDescriptorSetLayoutBinding.descriptorCount = 1;
-        samplerDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        samplerDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        samplerDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+    DescriptorLayout renderLayout(this);
 
-        VkDescriptorSetLayoutBinding uboDescriptorSetLayoutBinding{};
-        uboDescriptorSetLayoutBinding.binding = 0;
-        uboDescriptorSetLayoutBinding.descriptorCount = 1;
-        uboDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uboDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        uboDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+    /* Matrices UBO */
+    renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
 
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboDescriptorSetLayoutBinding, samplerDescriptorSetLayoutBinding};
+    /* Texture */
+    renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
 
-        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        descriptorSetLayoutCreateInfo.flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT;
-        descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
-        descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+    m_RenderDescriptorSetLayout = std::any_cast<VkDescriptorSetLayout>(renderLayout.Create());
 
-        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_RenderDescriptorSetLayout) != VK_SUCCESS)
-            throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
-    }
 
-    {
-        VkDescriptorSetLayoutBinding matricesUBODescriptorSetLayoutBinding{};
-        matricesUBODescriptorSetLayoutBinding.binding = 0;
-        matricesUBODescriptorSetLayoutBinding.descriptorCount = 1;
-        matricesUBODescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        matricesUBODescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        matricesUBODescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+    DescriptorLayout waypointLayout(this);
 
-        VkDescriptorSetLayoutBinding waypointsUBODescriptorSetLayoutBinding{};
-        waypointsUBODescriptorSetLayoutBinding.binding = 1;
-        waypointsUBODescriptorSetLayoutBinding.descriptorCount = 1;
-        waypointsUBODescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        waypointsUBODescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        waypointsUBODescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+    /* Matrices UBO */
+    waypointLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 0});
 
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {matricesUBODescriptorSetLayoutBinding, waypointsUBODescriptorSetLayoutBinding};
+    /* waypoint UBO */
+    waypointLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
 
-        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
-        descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+    m_UIWaypointDescriptorSetLayout = std::any_cast<VkDescriptorSetLayout>(waypointLayout.Create());
+    
 
-        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_UIWaypointDescriptorSetLayout) != VK_SUCCESS)
-            throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
-    }
-    {
-        VkDescriptorSetLayoutBinding arrowInfoDescriptorSetLayoutBinding{};
-        arrowInfoDescriptorSetLayoutBinding.binding = 1;
-        arrowInfoDescriptorSetLayoutBinding.descriptorCount = 1;
-        arrowInfoDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        arrowInfoDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        arrowInfoDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+    DescriptorLayout arrowLayout(this);
 
-        VkDescriptorSetLayoutBinding uboDescriptorSetLayoutBinding{};
-        uboDescriptorSetLayoutBinding.binding = 0;
-        uboDescriptorSetLayoutBinding.descriptorCount = 1;
-        uboDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uboDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        uboDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+    /* Matrices UBO */
+    arrowLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
 
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboDescriptorSetLayoutBinding, arrowInfoDescriptorSetLayoutBinding};
+    /* Arrow info */
+    arrowLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
 
-        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        descriptorSetLayoutCreateInfo.flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT;
-        descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
-        descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+    m_UIArrowsDescriptorSetLayout = std::any_cast<VkDescriptorSetLayout>(arrowLayout.Create());
 
-        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_UIArrowsDescriptorSetLayout) != VK_SUCCESS)
-            throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
-    }
 
-    {
-        VkDescriptorSetLayoutBinding samplerDescriptorSetLayoutBinding{};
-        samplerDescriptorSetLayoutBinding.binding = 0;
-        samplerDescriptorSetLayoutBinding.descriptorCount = 1;
-        samplerDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        samplerDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        samplerDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+    DescriptorLayout rescaleLayout(this);
 
-        std::array<VkDescriptorSetLayoutBinding, 1> bindings = {samplerDescriptorSetLayoutBinding};
+    /* Render image */
+    rescaleLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0});
 
-        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
-        descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+    m_RescaleDescriptorSetLayout = std::any_cast<VkDescriptorSetLayout>(rescaleLayout.Create());
 
-        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_RescaleDescriptorSetLayout) != VK_SUCCESS)
-            throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
-    }
 
-    {
-        VkDescriptorSetLayoutBinding samplerDescriptorSetLayoutBinding{};
-        samplerDescriptorSetLayoutBinding.binding = 1;
-        samplerDescriptorSetLayoutBinding.descriptorCount = 1;
-        samplerDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        samplerDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        samplerDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+    DescriptorLayout panelLayout(this);
 
-        VkDescriptorSetLayoutBinding uboDescriptorSetLayoutBinding{};
-        uboDescriptorSetLayoutBinding.binding = 0;
-        uboDescriptorSetLayoutBinding.descriptorCount = 1;
-        uboDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uboDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        uboDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+    /* Dimensions UBO */
+    panelLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
 
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {samplerDescriptorSetLayoutBinding, uboDescriptorSetLayoutBinding};
+    /* Color/Texture */
+    panelLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
 
-        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        descriptorSetLayoutCreateInfo.flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT;
-        descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
-        descriptorSetLayoutCreateInfo.pBindings = bindings.data();
+    m_UIPanelDescriptorSetLayout = std::any_cast<VkDescriptorSetLayout>(panelLayout.Create());
 
-        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_UIPanelDescriptorSetLayout) != VK_SUCCESS)
-            throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
-    }
 
-    {
-        VkDescriptorSetLayoutBinding samplerDescriptorSetLayoutBinding{};
-        samplerDescriptorSetLayoutBinding.binding = 1;
-        samplerDescriptorSetLayoutBinding.descriptorCount = 1;
-        samplerDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        samplerDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        samplerDescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+    DescriptorLayout labelLayout(this);
 
-        VkDescriptorSetLayoutBinding labelUBODescriptorSetLayoutBinding{};
-        labelUBODescriptorSetLayoutBinding.binding = 0;
-        labelUBODescriptorSetLayoutBinding.descriptorCount = 1;
-        labelUBODescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        labelUBODescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        labelUBODescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+    /* Label info */
+    labelLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
 
-        VkDescriptorSetLayoutBinding glyphUBODescriptorSetLayoutBinding{};
-        glyphUBODescriptorSetLayoutBinding.binding = 2;
-        glyphUBODescriptorSetLayoutBinding.descriptorCount = 1;
-        glyphUBODescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        glyphUBODescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        glyphUBODescriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+    /* Glyph texture */
+    labelLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
 
-        std::array<VkDescriptorSetLayoutBinding, 3> bindings = {labelUBODescriptorSetLayoutBinding, samplerDescriptorSetLayoutBinding, glyphUBODescriptorSetLayoutBinding};
+    /* Glyph info */
+    labelLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 2});
 
-        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-        descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        descriptorSetLayoutCreateInfo.flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT;
-        descriptorSetLayoutCreateInfo.bindingCount = bindings.size();
-        descriptorSetLayoutCreateInfo.pBindings = bindings.data();
-
-        if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &m_UILabelDescriptorSetLayout) != VK_SUCCESS)
-            throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
-    }
+    m_UILabelDescriptorSetLayout = std::any_cast<VkDescriptorSetLayout>(labelLayout.Create());
 
     // Render
-    m_RenderViewport.x = 0.0f;
-    m_RenderViewport.y = 0.0f;
-    m_RenderViewport.width = (float) m_Settings.RenderWidth;
-    m_RenderViewport.height = (float) m_Settings.RenderHeight;
-    m_RenderViewport.minDepth = 0.0f;
-    m_RenderViewport.maxDepth = 1.0f;
+    glm::vec4 renderViewport, renderScissor;
 
-    m_RenderScissor.offset = {0, 0};
-    m_RenderScissor.extent = {m_Settings.RenderWidth, m_Settings.RenderHeight};
+    renderViewport.x = 0.0f;
+    renderViewport.y = 0.0f;
+    renderViewport.z = (float) m_Settings.RenderWidth;
+    renderViewport.w = (float) m_Settings.RenderHeight;
 
+    renderScissor.x = 0;
+    renderScissor.y = 0;
+    renderScissor.z = m_Settings.RenderWidth;
+    renderScissor.w = m_Settings.RenderHeight;
 
     // Rescale
-    m_DisplayViewport.x = 0.0f;
-    m_DisplayViewport.y = 0.0f;
-    m_DisplayViewport.width = (float) m_Settings.DisplayWidth;
-    m_DisplayViewport.height = (float) m_Settings.DisplayHeight;
-    m_DisplayViewport.minDepth = 0.0f;
-    m_DisplayViewport.maxDepth = 1.0f;
+    glm::vec4 displayViewport, displayScissor;
 
-    m_DisplayScissor.offset = {0, 0};
-    m_DisplayScissor.extent = {m_Settings.DisplayWidth, m_Settings.DisplayHeight};
+    displayViewport.x = 0.0f;
+    displayViewport.y = 0.0f;
+    displayViewport.z = (float) m_Settings.DisplayWidth;
+    displayViewport.w = (float) m_Settings.DisplayHeight;
 
-    m_MainGraphicsPipeline = CreateGraphicsPipeline("lighting", m_MainRenderPass, 0, VK_FRONT_FACE_COUNTER_CLOCKWISE, m_RenderViewport, m_RenderScissor, {m_RenderDescriptorSetLayout});
-    m_UIWaypointGraphicsPipeline = CreateGraphicsPipeline("uiwaypoint", m_MainRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_RenderScissor, {m_UIWaypointDescriptorSetLayout}, true);
-    m_UIArrowsGraphicsPipeline = CreateGraphicsPipeline("uiarrows", m_MainRenderPass, 2, VK_FRONT_FACE_CLOCKWISE, m_RenderViewport, m_RenderScissor, {m_UIArrowsDescriptorSetLayout}, false, VK_FALSE);
-    m_RescaleGraphicsPipeline = CreateGraphicsPipeline("rescale", m_RescaleRenderPass, 0, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_RescaleDescriptorSetLayout}, true);
-    m_UIPanelGraphicsPipeline = CreateGraphicsPipeline("uipanel", m_RescaleRenderPass, 1, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UIPanelDescriptorSetLayout}, true);
-    m_UILabelGraphicsPipeline = CreateGraphicsPipeline("uilabel", m_RescaleRenderPass, 2, VK_FRONT_FACE_CLOCKWISE, m_DisplayViewport, m_DisplayScissor, {m_UILabelDescriptorSetLayout}, true);
+    displayScissor.x = 0;
+    displayScissor.y = 0;
+    displayScissor.z = m_Settings.DisplayWidth;
+    displayScissor.w = m_Settings.DisplayHeight;
 
-    /* RENDER DESCRIPTOR POOL INITIALIZATION */
-    {
-        std::array<VkDescriptorPoolSize, 2> poolSizes = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT,
-                                                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT};
-
-        VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
-        descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        descriptorPoolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        descriptorPoolCreateInfo.poolSizeCount = poolSizes.size();
-        descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
-        descriptorPoolCreateInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
-
-        if (vkCreateDescriptorPool(m_EngineDevice, &descriptorPoolCreateInfo, NULL, &m_RenderDescriptorPool) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create descriptor pool!");
-    }
-    
-    /* UI WAYPOINT DESCRIPTOR POOL INITIALIZATION */
-    {
-        std::array<VkDescriptorPoolSize, 2> poolSizes = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT,
-                                                         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT};
-
-        VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
-        descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        descriptorPoolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        descriptorPoolCreateInfo.poolSizeCount = poolSizes.size();
-        descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
-        descriptorPoolCreateInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
-
-        if (vkCreateDescriptorPool(m_EngineDevice, &descriptorPoolCreateInfo, NULL, &m_UIWaypointDescriptorPool) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create descriptor pool!");
-    }
-    
-    /* RESCALE DESCRIPTOR POOL INITIALIZATION */
-    {
-        std::array<VkDescriptorPoolSize, 1> poolSizes = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT};
-
-        VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
-        descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        descriptorPoolCreateInfo.poolSizeCount = poolSizes.size();
-        descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
-        descriptorPoolCreateInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
-
-        if (vkCreateDescriptorPool(m_EngineDevice, &descriptorPoolCreateInfo, NULL, &m_RescaleDescriptorPool) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create descriptor pool!");
-    }
+    m_MainGraphicsPipeline = CreateBasicShader(this, 
+        "lighting", m_MainRenderPass, 
+        0, VK_FRONT_FACE_CLOCKWISE, 
+        renderViewport, renderScissor, 
+        {renderLayout}
+    );
+    m_MainGraphicsPipeline->SetRenderFunction(std::bind(&VulkanRenderer::MainRenderFunction, this, std::placeholders::_1));
+    m_UIWaypointGraphicsPipeline = CreateBasicShader(this,
+        "uiwaypoint", m_MainRenderPass, 
+        1, VK_FRONT_FACE_CLOCKWISE, 
+        renderViewport, renderScissor, 
+        {waypointLayout}, 
+        true);
+    m_UIWaypointGraphicsPipeline->SetRenderFunction(std::bind(&VulkanRenderer::UIWaypointRenderFunction, this, std::placeholders::_1));
+    m_UIArrowsGraphicsPipeline = CreateBasicShader(this, 
+        "uiarrows", m_MainRenderPass, 
+        2, VK_FRONT_FACE_CLOCKWISE, 
+        renderViewport, renderScissor, 
+        {arrowLayout}, 
+        false, VK_FALSE);
+    m_UIArrowsGraphicsPipeline->SetRenderFunction(std::bind(&VulkanRenderer::UIArrowsRenderFunction, this, std::placeholders::_1));
+    m_RescaleGraphicsPipeline = CreateBasicShader(this, 
+        "rescale", m_RescaleRenderPass, 
+        0, VK_FRONT_FACE_CLOCKWISE, 
+        displayViewport, displayScissor,
+        {rescaleLayout},
+        true);
+    m_RescaleGraphicsPipeline->SetRenderFunction(std::bind(&VulkanRenderer::RescaleRenderFunction, this, std::placeholders::_1));
+    m_UIPanelGraphicsPipeline = CreateBasicShader(this, 
+        "uipanel", m_RescaleRenderPass, 
+        1, VK_FRONT_FACE_CLOCKWISE, 
+        displayViewport, displayScissor,
+        {panelLayout}, 
+        true);
+    m_UIPanelGraphicsPipeline->SetRenderFunction(std::bind(&VulkanRenderer::UIPanelRenderFunction, this, std::placeholders::_1));
+    m_UILabelGraphicsPipeline = CreateBasicShader(this, 
+        "uilabel", m_RescaleRenderPass, 
+        2, VK_FRONT_FACE_CLOCKWISE, 
+        displayViewport, displayScissor, 
+        {labelLayout}, 
+        true);
+    m_UILabelGraphicsPipeline->SetRenderFunction(std::bind(&VulkanRenderer::UILabelRenderFunction, this, std::placeholders::_1));
 
     // Image view, for sampling the render texture for rescaling.
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
 
-    m_RescaleRenderSampler = CreateSampler(properties.limits.maxSamplerAnisotropy);
-
-    {
-        std::vector<VkDescriptorSetLayout> layouts(1, m_RescaleDescriptorSetLayout);
-        VkDescriptorSetAllocateInfo allocInfo = {};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = m_RescaleDescriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = layouts.data();
-
-        if (vkAllocateDescriptorSets(m_EngineDevice, &allocInfo, &m_RescaleDescriptorSet) != VK_SUCCESS)
-            throw std::runtime_error("Failed to allocate descriptor set for rescale render pass!");
-
-        // update descriptor set with image
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = renderImageView;
-        imageInfo.sampler = m_RescaleRenderSampler;
-
-        std::array<VkWriteDescriptorSet, 1> descriptorWrites;
-        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[0].pNext = nullptr;
-        descriptorWrites[0].dstSet = m_RescaleDescriptorSet;
-        descriptorWrites[0].dstBinding = 0;
-        descriptorWrites[0].dstArrayElement = 0;
-        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[0].descriptorCount = 1;
-        descriptorWrites[0].pImageInfo = &imageInfo;
-
-        vkUpdateDescriptorSets(m_EngineDevice, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
+    m_RenderImageAndMemory.sampler = CreateSampler(properties.limits.maxSamplerAnisotropy);
         
-        // Fullscreen Quad initialization
-        m_FullscreenQuadVertexBuffer = CreateSimpleVertexBuffer({
-                                                            {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, 1.0f)},
-                                                            {glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec2(0.0f, 1.0f)},
-                                                            {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
-                                                            {glm::vec3(1.0f, -1.0f, 0.0f), glm::vec2(1.0f, 0.0f)},
-                                                            {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, 1.0f)}
-                                                        });
-    }
+    // Fullscreen Quad initialization
+    m_FullscreenQuadVertexBuffer = CreateSimpleVertexBuffer({
+                                                        {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
+                                                        {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, 1.0f)},
+                                                        {glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec2(0.0f, 1.0f)},
+                                                        {glm::vec3(-1.0f, -1.0f, 0.0f), glm::vec2(0.0f, 0.0f)},
+                                                        {glm::vec3(1.0f, -1.0f, 0.0f), glm::vec2(1.0f, 0.0f)},
+                                                        {glm::vec3(1.0f, 1.0f, 0.0f), glm::vec2(1.0f, 1.0f)}
+                                                    });
 
     // {
     //     std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_RenderDescriptorSetLayout);
@@ -2296,404 +2392,8 @@ void VulkanRenderer::StepRender() {
     if (vkBeginCommandBuffer(m_CommandBuffers[m_FrameIndex], &commandBufferBeginInfo) != VK_SUCCESS)
         throw std::runtime_error(engineError::COMMAND_BUFFER_BEGIN_FAILURE);
 
-    {
-        // begin a render pass, this could be for example HDR pass, SSAO pass, lighting pass.
-        VkRenderPassBeginInfo renderPassBeginInfo{};
-        renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassBeginInfo.renderPass = m_MainRenderPass;
-        renderPassBeginInfo.framebuffer = m_RenderFramebuffer;
-        renderPassBeginInfo.renderArea.offset = {0, 0};
-        renderPassBeginInfo.renderArea.extent = {m_Settings.RenderWidth, m_Settings.RenderHeight};
-
-        std::array<VkClearValue, 2> clearColors{};
-        clearColors[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-        clearColors[1].depthStencil = {1.0f, 0};
-
-        renderPassBeginInfo.clearValueCount = clearColors.size();
-        renderPassBeginInfo.pClearValues = clearColors.data();
-
-        vkCmdBeginRenderPass(m_CommandBuffers[m_FrameIndex], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        vkCmdBindPipeline(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainGraphicsPipeline.pipeline);
-
-        vkCmdSetViewport(m_CommandBuffers[m_FrameIndex], 0, 1, &m_RenderViewport);
-
-        vkCmdSetScissor(m_CommandBuffers[m_FrameIndex], 0, 1, &m_RenderScissor);
-
-        glm::mat4 viewMatrix;
-        glm::mat4 projectionMatrix;
-
-        if (m_PrimaryCamera) {
-            viewMatrix = m_PrimaryCamera->GetViewMatrix();
-
-            if (m_PrimaryCamera->type == CAMERA_PERSPECTIVE) {
-                projectionMatrix = glm::perspective(glm::radians(m_PrimaryCamera->FOV), (float)m_Settings.RenderWidth / (float)m_Settings.RenderHeight, m_Settings.CameraNear, CAMERA_FAR);
-            } else {
-                projectionMatrix = glm::ortho(0.0f, m_PrimaryCamera->OrthographicWidth, 0.0f, m_PrimaryCamera->OrthographicWidth*m_PrimaryCamera->AspectRatio);
-            }
-
-            // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
-            projectionMatrix[1][1] *= -1;
-
-            for (RenderModel &renderModel : m_RenderModels) {
-                renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
-
-                renderModel.matricesUBO.viewMatrix = viewMatrix;
-                renderModel.matricesUBO.projectionMatrix = projectionMatrix;
-
-                SDL_memcpy(renderModel.matricesUBOBuffer.mappedData, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
-
-                // vertex buffer binding!!
-                VkDeviceSize mainOffsets[] = {0};
-                vkCmdBindVertexBuffers(m_CommandBuffers[m_FrameIndex], 0, 1, &renderModel.vertexBuffer.buffer, mainOffsets);
-
-                vkCmdBindIndexBuffer(m_CommandBuffers[m_FrameIndex], renderModel.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-                size_t uniformBufferSize = sizeof(MatricesUBO);
-
-                // update descriptor set with buffer
-                VkDescriptorBufferInfo bufferInfo{};
-                bufferInfo.buffer = renderModel.matricesUBOBuffer.buffer;
-                bufferInfo.offset = 0;
-                bufferInfo.range = uniformBufferSize;
-
-                // update descriptor set with image
-                VkDescriptorImageInfo imageInfo{};
-                imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                imageInfo.imageView = renderModel.diffTextureImageView;
-                imageInfo.sampler = renderModel.diffTextureSampler;
-
-                std::array<VkWriteDescriptorSet, 2> descriptorWrites;
-                descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                descriptorWrites[0].pNext = nullptr;
-                descriptorWrites[0].dstSet = m_RenderDescriptorSet; // Ignored
-                descriptorWrites[0].dstBinding = 0;
-                descriptorWrites[0].dstArrayElement = 0;
-                descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                descriptorWrites[0].descriptorCount = 1;
-                descriptorWrites[0].pBufferInfo = &bufferInfo;
-                descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                descriptorWrites[1].pNext = nullptr;
-                descriptorWrites[1].dstSet = m_RenderDescriptorSet; // Ignored
-                descriptorWrites[1].dstBinding = 1;
-                descriptorWrites[1].dstArrayElement = 0;
-                descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                descriptorWrites[1].descriptorCount = 1;
-                descriptorWrites[1].pImageInfo = &imageInfo;
-
-                vkCmdPushDescriptorSet(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
-
-                //vkCmdBindDescriptorSets(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_MainGraphicsPipeline.layout, 0, 1, &m_RenderDescriptorSet, 0, nullptr);
-                vkCmdDrawIndexed(m_CommandBuffers[m_FrameIndex], renderModel.indexBufferSize, 1, 0, 0, 0);
-            }
-        }
-
-        // WAYPOINT SHADER!
-        vkCmdNextSubpass(m_CommandBuffers[m_FrameIndex], VK_SUBPASS_CONTENTS_INLINE);
-
-        vkCmdBindPipeline(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIWaypointGraphicsPipeline.pipeline);
-
-        vkCmdSetViewport(m_CommandBuffers[m_FrameIndex], 0, 1, &m_RenderViewport);
-
-        vkCmdSetScissor(m_CommandBuffers[m_FrameIndex], 0, 1, &m_RenderScissor);
-
-        if (m_PrimaryCamera) {
-            for (RenderUIWaypoint &renderUIWaypoint : m_RenderUIWaypoints) {
-                if (!renderUIWaypoint.waypoint->GetVisible()) {
-                    continue;
-                }
-
-                // There is no model matrix for render waypoints, We already know where it is in world-space.
-                renderUIWaypoint.matricesUBO.viewMatrix = viewMatrix;
-                renderUIWaypoint.matricesUBO.projectionMatrix = projectionMatrix;
-
-                SDL_memcpy(renderUIWaypoint.matricesUBOBuffer.mappedData, &renderUIWaypoint.matricesUBO, sizeof(renderUIWaypoint.matricesUBO));
-
-                renderUIWaypoint.waypointUBO.Position = renderUIWaypoint.waypoint->GetWorldSpacePosition();
-
-                SDL_memcpy(renderUIWaypoint.waypointUBOBuffer.mappedData, &renderUIWaypoint.waypointUBO, sizeof(renderUIWaypoint.waypointUBO));
-
-                // vertex buffer binding!!
-                VkDeviceSize waypointVertexOffsets[] = {0};
-                vkCmdBindVertexBuffers(m_CommandBuffers[m_FrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), waypointVertexOffsets);
-
-                vkCmdBindDescriptorSets(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIWaypointGraphicsPipeline.layout, 0, 1, &renderUIWaypoint.descriptorSet, 0, nullptr);
-                vkCmdDraw(m_CommandBuffers[m_FrameIndex], 6, 1, 0, 0);
-            }
-        }
-
-        // ARROWS SHADER!
-        vkCmdNextSubpass(m_CommandBuffers[m_FrameIndex], VK_SUBPASS_CONTENTS_INLINE);
-
-        vkCmdBindPipeline(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIArrowsGraphicsPipeline.pipeline);
-
-        vkCmdSetViewport(m_CommandBuffers[m_FrameIndex], 0, 1, &m_RenderViewport);
-
-        vkCmdSetScissor(m_CommandBuffers[m_FrameIndex], 0, 1, &m_RenderScissor);
-
-        if (m_PrimaryCamera) {
-            for (RenderUIArrows &renderUIArrows : m_RenderUIArrows) {
-                if (!renderUIArrows.arrows->GetVisible()) {
-                    continue;
-                }
-
-                // index for arrowBuffers
-                int i = 0;
-
-                for (RenderModel &arrowRenderModel : renderUIArrows.arrowRenderModels) {
-                    MatricesUBO &matricesUBO = renderUIArrows.arrowBuffers[i].first.first;
-                    UIArrowsUBO &arrowsUBO = renderUIArrows.arrowBuffers[i].first.second;
-
-                    BufferAndMemory &matricesUBOBuffer = renderUIArrows.arrowBuffers[i].second.first;
-                    BufferAndMemory &arrowsUBOBuffer = renderUIArrows.arrowBuffers[i].second.second;
-
-                    matricesUBO.modelMatrix = arrowRenderModel.model->GetModelMatrix();
-                    matricesUBO.viewMatrix = viewMatrix;
-                    matricesUBO.projectionMatrix = projectionMatrix;
-
-                    SDL_memcpy(matricesUBOBuffer.mappedData, &matricesUBO, sizeof(matricesUBO));
-
-                    arrowsUBO.Color = arrowRenderModel.diffColor;
-
-                    SDL_memcpy(arrowsUBOBuffer.mappedData, &arrowsUBO, sizeof(arrowsUBO));
-
-                    // vertex buffer binding!!
-                    VkDeviceSize arrowsVertexOffsets[] = {0};
-                    vkCmdBindVertexBuffers(m_CommandBuffers[m_FrameIndex], 0, 1, &(arrowRenderModel.vertexBuffer.buffer), arrowsVertexOffsets);
-
-                    vkCmdBindIndexBuffer(m_CommandBuffers[m_FrameIndex], arrowRenderModel.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-                    // update descriptor set with buffer
-                    VkDescriptorBufferInfo bufferInfo{};
-                    bufferInfo.buffer = matricesUBOBuffer.buffer;
-                    bufferInfo.offset = 0;
-                    bufferInfo.range = sizeof(matricesUBO);
-
-                    // update descriptor set with buffer
-                    VkDescriptorBufferInfo bufferInfo2{};
-                    bufferInfo2.buffer = arrowsUBOBuffer.buffer;
-                    bufferInfo2.offset = 0;
-                    bufferInfo2.range = sizeof(arrowsUBO);
-
-                    std::array<VkWriteDescriptorSet, 2> descriptorWrites;
-                    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    descriptorWrites[0].pNext = nullptr;
-                    descriptorWrites[0].dstSet = m_RenderDescriptorSet; // Ignored
-                    descriptorWrites[0].dstBinding = 0;
-                    descriptorWrites[0].dstArrayElement = 0;
-                    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                    descriptorWrites[0].descriptorCount = 1;
-                    descriptorWrites[0].pBufferInfo = &bufferInfo;
-                    descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    descriptorWrites[1].pNext = nullptr;
-                    descriptorWrites[1].dstSet = m_RenderDescriptorSet; // Ignored
-                    descriptorWrites[1].dstBinding = 1;
-                    descriptorWrites[1].dstArrayElement = 0;
-                    descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                    descriptorWrites[1].descriptorCount = 1;
-                    descriptorWrites[1].pBufferInfo = &bufferInfo2;
-
-                    vkCmdPushDescriptorSet(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIArrowsGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
-                    vkCmdDrawIndexed(m_CommandBuffers[m_FrameIndex], arrowRenderModel.indexBufferSize, 1, 0, 0, 0);
-
-                    i++;
-                }
-            }
-        }
-
-        vkCmdEndRenderPass(m_CommandBuffers[m_FrameIndex]);
-    }
-
-    //ChangeImageLayout(m_RenderImageAndMemory.image, m_RenderImageFormat, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-    {
-        // begin a render pass, this could be for example HDR pass, SSAO pass, lighting pass.
-        VkRenderPassBeginInfo renderPassBeginInfo{};
-        renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassBeginInfo.renderPass = m_RescaleRenderPass;
-        renderPassBeginInfo.framebuffer = m_SwapchainFramebuffers[imageIndex];
-        renderPassBeginInfo.renderArea.offset = {0, 0};
-        renderPassBeginInfo.renderArea.extent = {m_Settings.DisplayWidth, m_Settings.DisplayHeight};
-
-        std::array<VkClearValue, 2> clearColors{};
-        clearColors[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-        clearColors[1].depthStencil = {1.0f, 0};
-
-        renderPassBeginInfo.clearValueCount = clearColors.size();
-        renderPassBeginInfo.pClearValues = clearColors.data();
-
-        vkCmdBeginRenderPass(m_CommandBuffers[m_FrameIndex], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        vkCmdBindPipeline(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_RescaleGraphicsPipeline.pipeline);
-
-        vkCmdSetViewport(m_CommandBuffers[m_FrameIndex], 0, 1, &m_DisplayViewport);
-
-        vkCmdSetScissor(m_CommandBuffers[m_FrameIndex], 0, 1, &m_DisplayScissor);
-
-        // vertex buffer binding!!
-        VkDeviceSize mainOffsets[] = {0};
-        vkCmdBindVertexBuffers(m_CommandBuffers[m_FrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), mainOffsets);
-
-        vkCmdBindDescriptorSets(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_RescaleGraphicsPipeline.layout, 0, 1, &m_RescaleDescriptorSet, 0, nullptr);
-        vkCmdDraw(m_CommandBuffers[m_FrameIndex], 6, 1, 0, 0);
-
-        // Panel Shader
-        vkCmdNextSubpass(m_CommandBuffers[m_FrameIndex], VK_SUBPASS_CONTENTS_INLINE);
-
-        vkCmdBindPipeline(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIPanelGraphicsPipeline.pipeline);
-
-        vkCmdSetViewport(m_CommandBuffers[m_FrameIndex], 0, 1, &m_DisplayViewport);
-
-        vkCmdSetScissor(m_CommandBuffers[m_FrameIndex], 0, 1, &m_DisplayScissor);
-
-        for (RenderUIPanel &renderUIPanel : m_UIPanels) {
-            if (!renderUIPanel.panel->GetVisible()) {
-                continue;
-            }
-
-            // vertex buffer binding!!
-            VkDeviceSize panelVertexOffsets[] = {0};
-            vkCmdBindVertexBuffers(m_CommandBuffers[m_FrameIndex], 0, 1, &(m_FullscreenQuadVertexBuffer.buffer), panelVertexOffsets);
-
-            renderUIPanel.ubo.Dimensions = renderUIPanel.panel->GetDimensions();
-            
-            /* Double the scales for some odd reason.. */
-            renderUIPanel.ubo.Dimensions.z *= 2;
-            renderUIPanel.ubo.Dimensions.w *= 2;
-
-            /* Convert [0, 1] to [-1, 1] */
-            renderUIPanel.ubo.Dimensions.x *= 2;
-            renderUIPanel.ubo.Dimensions.x -= 1;
-            
-            renderUIPanel.ubo.Dimensions.y *= 2;
-            renderUIPanel.ubo.Dimensions.y -= 1;
-
-            renderUIPanel.ubo.Depth = renderUIPanel.panel->GetDepth();
-
-            SDL_memcpy(renderUIPanel.uboBuffer.mappedData, &(renderUIPanel.ubo), sizeof(renderUIPanel.ubo));
-
-            // update descriptor set with image
-            VkDescriptorImageInfo imageInfo{};
-            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            imageInfo.imageView = renderUIPanel.textureView;
-            imageInfo.sampler = renderUIPanel.textureSampler;
-
-            // update descriptor set with UBO
-            VkDescriptorBufferInfo bufferInfo{};
-            bufferInfo.buffer = renderUIPanel.uboBuffer.buffer;
-            bufferInfo.offset = 0;
-            bufferInfo.range = sizeof(renderUIPanel.ubo);
-
-            std::array<VkWriteDescriptorSet, 2> descriptorWrites;
-            descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[0].pNext = nullptr;
-            descriptorWrites[0].dstSet = m_RescaleDescriptorSet; // Ignored
-            descriptorWrites[0].dstBinding = 0;
-            descriptorWrites[0].dstArrayElement = 0;
-            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            descriptorWrites[0].descriptorCount = 1;
-            descriptorWrites[0].pBufferInfo = &bufferInfo;
-            descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[1].pNext = nullptr;
-            descriptorWrites[1].dstSet = m_RescaleDescriptorSet; // Ignored
-            descriptorWrites[1].dstBinding = 1;
-            descriptorWrites[1].dstArrayElement = 0;
-            descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrites[1].descriptorCount = 1;
-            descriptorWrites[1].pImageInfo = &imageInfo;
-
-            vkCmdPushDescriptorSet(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UIPanelGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
-            vkCmdDraw(m_CommandBuffers[m_FrameIndex], 6, 1, 0, 0);
-        }
-
-        // Label Shader
-        vkCmdNextSubpass(m_CommandBuffers[m_FrameIndex], VK_SUBPASS_CONTENTS_INLINE);
-
-        vkCmdBindPipeline(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UILabelGraphicsPipeline.pipeline);
-
-        vkCmdSetViewport(m_CommandBuffers[m_FrameIndex], 0, 1, &m_DisplayViewport);
-
-        vkCmdSetScissor(m_CommandBuffers[m_FrameIndex], 0, 1, &m_DisplayScissor);
-
-        for (RenderUILabel &renderUILabel : m_UILabels) {
-            if (!renderUILabel.label->GetVisible()) {
-                continue;
-            }
-
-            // vertex buffer binding!!
-            VkDeviceSize labelVertexOffsets[] = {0};
-
-            renderUILabel.ubo.PositionOffset = renderUILabel.label->GetPosition();
-            renderUILabel.ubo.PositionOffset.x *= 2;
-            renderUILabel.ubo.PositionOffset.y *= 2;
-
-            renderUILabel.ubo.Depth = renderUILabel.label->GetDepth();
-
-            SDL_memcpy(renderUILabel.uboBuffer.mappedData, &(renderUILabel.ubo), sizeof(renderUILabel.ubo));
-
-            size_t i = 0;
-            for (auto &shaderData : renderUILabel.textureShaderData) {
-                auto &glyph = renderUILabel.label->Glyphs[i++];
-
-                vkCmdBindVertexBuffers(m_CommandBuffers[m_FrameIndex], 0, 1, &(glyph.glyphBuffer.value().second.buffer), labelVertexOffsets);
-
-                glyph.glyphUBO.Offset = glyph.offset;
-                
-                SDL_memcpy(glyph.glyphUBOBuffer.mappedData, &(glyph.glyphUBO), sizeof(glyph.glyphUBO));
-
-                // update descriptor set with image
-                VkDescriptorImageInfo imageInfo{};
-                imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                imageInfo.imageView = shaderData.second.first;
-                imageInfo.sampler = shaderData.second.second;
-
-                // update descriptor set with UBO
-                VkDescriptorBufferInfo labelBufferInfo{};
-                labelBufferInfo.offset = 0;
-                labelBufferInfo.range = sizeof(renderUILabel.ubo);
-                labelBufferInfo.buffer = renderUILabel.uboBuffer.buffer;
-
-                // update descriptor set with UBO
-                VkDescriptorBufferInfo glyphBufferInfo{};
-                glyphBufferInfo.offset = 0;
-                glyphBufferInfo.range = sizeof(glyph.glyphUBO);
-                glyphBufferInfo.buffer = glyph.glyphUBOBuffer.buffer;
-
-                std::array<VkWriteDescriptorSet, 3> descriptorWrites;
-                descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                descriptorWrites[0].pNext = nullptr;
-                descriptorWrites[0].dstSet = m_RenderDescriptorSet; // Ignored
-                descriptorWrites[0].dstBinding = 0;
-                descriptorWrites[0].dstArrayElement = 0;
-                descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                descriptorWrites[0].descriptorCount = 1;
-                descriptorWrites[0].pBufferInfo = &labelBufferInfo;
-                descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                descriptorWrites[1].pNext = nullptr;
-                descriptorWrites[1].dstSet = m_RenderDescriptorSet; // Ignored
-                descriptorWrites[1].dstBinding = 1;
-                descriptorWrites[1].dstArrayElement = 0;
-                descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                descriptorWrites[1].descriptorCount = 1;
-                descriptorWrites[1].pImageInfo = &imageInfo;
-                descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                descriptorWrites[2].pNext = nullptr;
-                descriptorWrites[2].dstSet = m_RenderDescriptorSet; // Ignored
-                descriptorWrites[2].dstBinding = 2;
-                descriptorWrites[2].dstArrayElement = 0;
-                descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                descriptorWrites[2].descriptorCount = 1;
-                descriptorWrites[2].pBufferInfo = &glyphBufferInfo;
-
-                vkCmdPushDescriptorSet(m_CommandBuffers[m_FrameIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, m_UILabelGraphicsPipeline.layout, 0, descriptorWrites.size(), descriptorWrites.data());
-                vkCmdDraw(m_CommandBuffers[m_FrameIndex], 6, 1, 0, 0);
-            }
-        }
-
-        vkCmdEndRenderPass(m_CommandBuffers[m_FrameIndex]);
-    }
-
-    //ChangeImageLayout(m_RenderImageAndMemory.image, m_RenderImageFormat, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    m_MainRenderPass->Execute(m_RenderFramebuffer);
+    m_RescaleRenderPass->Execute(m_SwapchainFramebuffers[imageIndex]);
 
     if (vkEndCommandBuffer(m_CommandBuffers[m_FrameIndex]) != VK_SUCCESS)
         throw std::runtime_error(engineError::COMMAND_BUFFER_END_FAILURE);
