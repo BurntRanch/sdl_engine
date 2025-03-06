@@ -1,7 +1,6 @@
 #ifndef CAMERA_HPP
 #define CAMERA_HPP
 
-#include "fmt/base.h"
 #define CAMERA_NEAR 0.1f
 #define CAMERA_FAR 100.0f
 
@@ -9,8 +8,6 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-
-#include <vector>
 
 // Defines several possible options for camera movement. Used as abstraction to stay away from window-system specific input methods
 enum Camera_Movement {
@@ -63,7 +60,7 @@ public:
     Camera(float aspectRatio, float upX = 0.0f, float upY = 0.0f, float upZ = 1.0f, float yaw = YAW, float pitch = PITCH);
 
     // returns the view matrix calculated using Euler Angles and the LookAt Matrix
-    glm::mat4 GetViewMatrix();
+    glm::mat4 GetViewMatrix() const;
 
     // // processes input received from any keyboard-like input system. Accepts input parameter in the form of camera defined ENUM (to abstract it from windowing systems)
     // void ProcessKeyboard(const Camera_Movement& direction, float deltaTime);
@@ -75,11 +72,11 @@ public:
     // void ProcessMouseScroll(float yoffset);
 
     void SetCameraID(int cameraID);
-    int GetCameraID();
+    int GetCameraID() const;
 
     void SetObjectAttachment(Object *obj);
 
-    Object *GetObjectAttachment() {
+    Object *GetObjectAttachment() const {
         return m_ObjectAttachment;
     }
 private:

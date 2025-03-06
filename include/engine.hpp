@@ -1,5 +1,5 @@
-#ifndef ENGINE_HPP
-#define ENGINE_HPP
+#ifndef _ENGINE_HPP_
+#define _ENGINE_HPP_
 
 #include <BulletCollision/BroadphaseCollision/btBroadphaseInterface.h>
 #include <BulletCollision/BroadphaseCollision/btDispatcher.h>
@@ -14,15 +14,14 @@
 #include "isteamnetworkingsockets.h"
 #include "networking/connection.hpp"
 #include "steamnetworkingtypes.h"
-#include "ui.hpp"
 #include "ui/button.hpp"
 #include "object.hpp"
 
 #include <LinearMath/btVector3.h>
 #include <btBulletDynamicsCommon.h>
 
-#include <future>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 #ifndef VK_EXT_DEBUG_REPORT_EXTENSION_NAME
 #define VK_EXT_DEBUG_REPORT_EXTENSION_NAME "VK_EXT_debug_report"
@@ -57,9 +56,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "fmt/core.h"
-#include "fmt/ranges.h"
 
-#include "error.hpp"
 #include "settings.hpp"
 #include "model.hpp"
 
@@ -205,11 +202,11 @@ public:
 
     /* UI::Button listeners will receive events when any button is pressed, along with its ID. */
     /* Due to how it works, this function can be called before the renderer is initialized. */
-    void RegisterUIButtonListener(const std::function<void(std::string)> listener);
+    void RegisterUIButtonListener(const std::function<void(std::string)> &listener);
 
     /* status is an indicator of which NetworkingThread should accept it, if it's set to NETWORKING_THREAD_ACTIVE_SERVER, it will register to the server, so on. 
      * This handler will be mostly responsible for prediction. */
-    void RegisterTickUpdateHandler(const std::function<void(int)> handler, NetworkingThreadStatus status);
+    void RegisterTickUpdateHandler(const std::function<void(int)> &handler, const NetworkingThreadStatus &status);
 
     BaseRenderer *GetRenderer();
 
@@ -235,8 +232,8 @@ public:
 
     void ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *callbackInfo);
 
-    void RegisterNetworkEventListener(const std::function<void(SteamConnection &)> listener, NetworkingEventType listenerTarget);
-    void RegisterNetworkDataListener(const std::function<void(SteamConnection &, std::vector<std::byte> &)> listener);
+    void RegisterNetworkEventListener(const std::function<void(SteamConnection &)> &listener, const NetworkingEventType &listenerTarget);
+    void RegisterNetworkDataListener(const std::function<void(SteamConnection &, std::vector<std::byte> &)> &listener);
 
     void DisconnectFromServer();    // Disconnects you from a game server, Safe to call in any situation but wont do anything if you aren't connected to a server.
 

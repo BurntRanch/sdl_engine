@@ -1,15 +1,11 @@
-#include "error.hpp"
-#include "fmt/format.h"
 #include "object.hpp"
 
-#include <algorithm>
 #include <assimp/material.h>
 #include <assimp/mesh.h>
 #include <assimp/postprocess.h>
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <model.hpp>
-#include <stdexcept>
 #include <vector>
 
 Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)

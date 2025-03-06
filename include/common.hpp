@@ -1,17 +1,14 @@
 #ifndef COMMON_HPP
 #define COMMON_HPP
 
-#include "error.hpp"
 #include "model.hpp"
 #include "settings.hpp"
 
 #include <glm/ext/vector_float3.hpp>
 #include <mutex>
-#include <stdexcept>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 #include <SDL3/SDL_stdinc.h>
-#include <array>
 
 class BaseRenderer;
 

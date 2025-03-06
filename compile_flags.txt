@@ -2,3 +2,4 @@
 -Iinclude/steam
 -I/usr/include/bullet
 -isystem/usr/include/freetype2
+-std=c++17

@@ -4,12 +4,10 @@
 #include "BulletCollision/CollisionShapes/btBvhTriangleMeshShape.h"
 #include "BulletCollision/CollisionShapes/btCollisionShape.h"
 #include "BulletCollision/CollisionShapes/btConcaveShape.h"
-#include "BulletCollision/CollisionShapes/btStridingMeshInterface.h"
 #include "BulletCollision/CollisionShapes/btTriangleIndexVertexArray.h"
 #include "LinearMath/btVector3.h"
 #include "camera.hpp"
 #include "engine.hpp"
-#include "isteamnetworkingsockets.h"
 #include "rapidxml.hpp"
 #include "ui/label.hpp"
 #include "common.hpp"
@@ -62,7 +60,7 @@ std::vector<int> FilterRelatedNetworkingObjects(std::vector<Networking_Object> &
             /* Go over any candidates that we may have missed. */
             std::vector<Networking_Object> previousCandidates{candidates.begin(), candidates.begin() + i};
 
-            std::vector<int> relatedPreviousCandidates = FilterRelatedNetworkingObjects(previousCandidates, &candidates[i]);
+            const std::vector<int>& relatedPreviousCandidates = FilterRelatedNetworkingObjects(previousCandidates, &candidates[i]);
 
             if (!relatedPreviousCandidates.empty()) {
                 relatedObjects.insert(relatedObjects.end(), relatedPreviousCandidates.begin(), relatedPreviousCandidates.end());

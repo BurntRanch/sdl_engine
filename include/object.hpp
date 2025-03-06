@@ -1,4 +1,5 @@
-#pragma once
+#ifndef _OBJECT_HPP_
+#define _OBJECT_HPP_
 
 #include "BulletDynamics/Dynamics/btRigidBody.h"
 #include "camera.hpp"
@@ -91,3 +92,5 @@ private:
 
     static int HighestObjectID;
 };
+
+#endif // _OBJECT_HPP_

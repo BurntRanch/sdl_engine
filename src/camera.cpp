@@ -30,7 +30,7 @@ Camera::Camera(float aspectRatio, float upX, float upY, float upZ, float yaw, fl
 }
 
 // returns the view matrix calculated using Euler Angles and the LookAt Matrix
-glm::mat4 Camera::GetViewMatrix()
+glm::mat4 Camera::GetViewMatrix() const
 {
     glm::vec3 position = (m_ObjectAttachment != nullptr ? m_ObjectAttachment->GetPosition() : glm::vec3(0.0f, 0.0f, 0.0f));
     float positionZ = position.z;
@@ -92,7 +92,7 @@ void Camera::SetCameraID(int cameraID) {
     m_CameraID = cameraID;
 }
 
-int Camera::GetCameraID() {
+int Camera::GetCameraID() const {
     return m_CameraID;
 }
 

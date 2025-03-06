@@ -1,5 +1,6 @@
 #pragma once
 #include "common.hpp"
+#include "error.hpp"
 #include "renderer/GraphicsPipeline.hpp"
 #include "renderer/DescriptorLayout.hpp"
 #include "renderer/RenderPass.hpp"
@@ -368,7 +369,7 @@ protected:
     std::vector<VkSampler> m_CreatedSamplers;
 };
 
-static Uint8 getChannelsFromFormats(VkFormat format) {
+inline Uint8 getChannelsFromFormats(VkFormat format) {
     switch (format) {
         case VK_FORMAT_R8_SRGB:
             return 1;
@@ -383,5 +384,6 @@ static Uint8 getChannelsFromFormats(VkFormat format) {
             return 4;
         default:
             throw std::runtime_error(engineError::UNSUPPORTED_FORMAT);
+            return 0; // [-Wreturn-type]
     }
 }

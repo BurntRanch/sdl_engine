@@ -1,6 +1,5 @@
 #include "object.hpp"
 #include "BulletCollision/CollisionDispatch/btCollisionObject.h"
-#include "BulletCollision/CollisionShapes/btBoxShape.h"
 #include "BulletCollision/CollisionShapes/btCollisionShape.h"
 #include "BulletDynamics/Dynamics/btRigidBody.h"
 #include "LinearMath/btDefaultMotionState.h"
@@ -20,7 +19,6 @@
 #include <functional>
 #include <glm/trigonometric.hpp>
 #include <memory>
-#include "switch_fnv1a.h"
 
 Object::~Object() {
     for (Object *obj : m_Children) {

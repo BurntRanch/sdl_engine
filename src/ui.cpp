@@ -1,11 +1,10 @@
 #include "ui.hpp"
 
 #include "common.hpp"
-#include "renderer/vulkanRenderer.hpp"
 #include "ui/arrows.hpp"
 #include "ui/button.hpp"
 #include "ui/label.hpp"
-#include "engine.hpp"
+#include "renderer/baseRenderer.hpp"
 #include "util.hpp"
 
 #include <SDL3/SDL_stdinc.h>

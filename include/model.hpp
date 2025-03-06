@@ -1,12 +1,9 @@
 #ifndef MODEL_HPP
 #define MODEL_HPP
 
-#include "fmt/base.h"
-
 #include <SDL3/SDL_stdinc.h>
 #include <assimp/material.h>
 #include <cmath>
-#include <complex>
 #include <filesystem>
 #include <glm/ext/vector_float2.hpp>
 #include <glm/glm.hpp>
@@ -17,8 +14,6 @@
 #include <assimp/postprocess.h>
 
 #include <stdexcept>
-#include <string>
-#include <string_view>
 #include <vector>
 #include <array>
 #include <vulkan/vulkan_core.h>
@@ -152,7 +147,8 @@ public:
 
     Mesh() = default;
 
-    Mesh(Model &parent, std::vector<Vertex> vertices, std::vector<Uint32> indices, path diffuseMapPath, /*float shininess = 0.0, float roughness = 0.0, float metallic = 0.0, glm::vec3 ambient = glm::vec3(0.2f, 0.2f, 0.2f), glm::vec3 specular = glm::vec3(1.0f, 1.0f, 1.0f), */glm::vec3 diffuse = glm::vec3(1.0f, 1.0f, 1.0f)) : m_Parent(&parent) {
+    Mesh(Model &parent, const std::vector<Vertex>& vertices, const std::vector<Uint32>& indices, const path& diffuseMapPath, /*float shininess = 0.0, float roughness = 0.0, float metallic = 0.0, glm::vec3 ambient = glm::vec3(0.2f, 0.2f, 0.2f), glm::vec3 specular = glm::vec3(1.0f, 1.0f, 1.0f), */const glm::vec3& diffuse = glm::vec3(1.0f, 1.0f, 1.0f))
+    : m_Parent(&parent) {
         this->vertices = vertices;
         this->indices = indices;
         this->diffuseMapPath = diffuseMapPath;
@@ -163,7 +159,7 @@ public:
         // this->roughness = roughness;
         // this->metallic = metallic;
 
-        for (Vertex &vertex : vertices) {
+        for (const Vertex &vertex : vertices) {
             m_BoundingBox[0].x = glm::max(vertex.Position.x, m_BoundingBox[0].x);
             m_BoundingBox[1].x = glm::min(vertex.Position.x, m_BoundingBox[1].x);
 
@@ -180,7 +176,10 @@ public:
             throw std::runtime_error("Tried to get the bounding box of an orphaned Mesh! (a Model parent is required for this)");
         }
 
-        return {glm::vec4(m_BoundingBox[0], 0.0f) * m_Parent->GetModelMatrix(), glm::vec4(m_BoundingBox[1], 0.0f) * m_Parent->GetModelMatrix()};
+        return {
+            glm::vec4(m_BoundingBox[0], 0.0f) * m_Parent->GetModelMatrix(),
+            glm::vec4(m_BoundingBox[1], 0.0f) * m_Parent->GetModelMatrix()
+        };
     }
 private:
     Model *m_Parent = nullptr;

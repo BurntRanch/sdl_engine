@@ -1,24 +1,24 @@
 #include "renderer/vulkanRenderer.hpp"
 #include "common.hpp"
+#include "error.hpp"
 #include "renderer/GraphicsPipeline.hpp"
 #include "renderer/DescriptorLayout.hpp"
 #include "renderer/RenderPass.hpp"
-#include "renderer/Shader.hpp"
 #include "renderer/baseRenderer.hpp"
 #include "util.hpp"
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_vulkan.h>
 #include <any>
+#include <future>
 #include <set>
-#include <thread>
 #include <vulkan/vk_enum_string_helper.h>
 #include <vulkan/vulkan_core.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 
-static std::vector<std::byte> readFile(const std::string &name) {
+/*static std::vector<std::byte> readFile(const std::string &name) {
     std::ifstream file(name, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
@@ -32,7 +32,7 @@ static std::vector<std::byte> readFile(const std::string &name) {
     file.read(reinterpret_cast<char *>(output.data()), fileSize);
 
     return output;
-}
+}*/
 
 VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
     for (const auto& availableFormat : availableFormats) {

@@ -2,18 +2,15 @@
 
 #include "BulletCollision/BroadphaseCollision/btDbvtBroadphase.h"
 #include "BulletCollision/BroadphaseCollision/btDispatcher.h"
-#include "BulletCollision/CollisionDispatch/btCollisionConfiguration.h"
 #include "BulletCollision/CollisionDispatch/btCollisionObject.h"
 #include "BulletCollision/CollisionDispatch/btDefaultCollisionConfiguration.h"
 #include "BulletDynamics/ConstraintSolver/btSequentialImpulseConstraintSolver.h"
 #include "BulletDynamics/Dynamics/btDiscreteDynamicsWorld.h"
-#include "BulletDynamics/Dynamics/btDynamicsWorld.h"
 #include "BulletDynamics/Dynamics/btRigidBody.h"
 #include "LinearMath/btVector3.h"
 #include "camera.hpp"
 #include "common.hpp"
 #include "fmt/base.h"
-#include "error.hpp"
 #include "fmt/format.h"
 #include "isteamnetworkingsockets.h"
 #include "networking/connection.hpp"
@@ -23,12 +20,9 @@
 #include "steamnetworkingsockets.h"
 #include "model.hpp"
 #include "steamnetworkingtypes.h"
-#include "steamtypes.h"
-#include "ui/arrows.hpp"
 #include "ui/button.hpp"
-#include "ui/label.hpp"
 #include "ui/panel.hpp"
-#include "ui/waypoint.hpp"
+#include "ui.hpp"
 #include "util.hpp"
 
 #include <SDL3/SDL_error.h>
@@ -42,21 +36,16 @@
 #include <SDL3/SDL_vulkan.h>
 #include <chrono>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <functional>
-#include <future>
 #include <glm/fwd.hpp>
 #include <iterator>
 #include <memory>
 #include <mutex>
-#include <set>
 #include <stdexcept>
 #include <algorithm>
 #include <thread>
-#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -150,11 +139,11 @@ void Engine::DeinitPhysics() {
     m_CollisionConfig.reset();
 }
 
-void Engine::RegisterUIButtonListener(const std::function<void(std::string)> listener) {
+void Engine::RegisterUIButtonListener(const std::function<void(std::string)>& listener) {
     m_UIButtonListeners.push_back(listener);
 }
 
-void Engine::RegisterTickUpdateHandler(const std::function<void(int)> handler, NetworkingThreadStatus status) {
+void Engine::RegisterTickUpdateHandler(const std::function<void(int)>& handler, const NetworkingThreadStatus& status) {
     NetworkingThreadState *state = nullptr;
 
     switch (status) {
@@ -219,9 +208,9 @@ void Engine::Start() {
                 shouldQuit = true;
 
             try {
-                auto &listeners = m_SDLEventToListenerMap.at((SDL_EventType)(event.type));
+                const auto &listeners = m_SDLEventToListenerMap.at(static_cast<SDL_EventType>(event.type));
 
-                for (auto &listener : listeners) {
+                for (const auto &listener : listeners) {
                     listener(&event);
                 }
             } catch (const std::out_of_range &e) {
@@ -229,7 +218,7 @@ void Engine::Start() {
             }
         }
 
-        for (auto &func : m_UpdateFunctions) {
+        for (const auto &func : m_UpdateFunctions) {
             func();
         }
 
@@ -237,7 +226,7 @@ void Engine::Start() {
         if (accumulative >= ENGINE_FIXED_UPDATE_DELTATIME) {
             accumulative -= ENGINE_FIXED_UPDATE_DELTATIME;
 
-            for (auto &fixedUpdateFunc : m_FixedUpdateFunctions) {
+            for (const auto &fixedUpdateFunc : m_FixedUpdateFunctions) {
                 fixedUpdateFunc();
             }
         }
@@ -255,7 +244,7 @@ void Engine::LoadUIFile(const std::string &name) {
         return;
     }
 
-    std::vector<UI::GenericElement *> UIElements = UI::LoadUIFile(m_Renderer, name);
+    const std::vector<UI::GenericElement *>& UIElements = UI::LoadUIFile(m_Renderer, name);
     for (UI::GenericElement *element : UIElements) {
         m_Renderer->AddUIGenericElement(element);
 
@@ -265,7 +254,7 @@ void Engine::LoadUIFile(const std::string &name) {
 
         m_UIElements.push_back(element);
 
-        std::vector<std::vector<UI::GenericElement *>> UIElementChildren = {element->GetChildren()};
+        std::vector<std::vector<UI::GenericElement *>> UIElementChildren {element->GetChildren()};
 
         /* Recursively check for elements to add and register (if they are buttons). */
         while (!UIElementChildren.empty()) {
@@ -321,7 +310,7 @@ std::vector<Camera *> &Engine::GetCameras() {
 }
 
 void Engine::RemoveCamera(Camera *cam) {
-    auto camIt = std::find(m_Cameras.begin(), m_Cameras.end(), cam);
+    const auto& camIt = std::find(m_Cameras.begin(), m_Cameras.end(), cam);
 
     if (camIt == m_Cameras.end()) {
         return;
@@ -611,7 +600,7 @@ void Engine::ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *
     }
 }
 
-void Engine::RegisterNetworkEventListener(const std::function<void(SteamConnection &)> listener, NetworkingEventType listenerTarget) {
+void Engine::RegisterNetworkEventListener(const std::function<void(SteamConnection &)> &listener, const NetworkingEventType &listenerTarget) {
     if (m_EventTypeToListenerMap.find(listenerTarget) == m_EventTypeToListenerMap.end()) {
         m_EventTypeToListenerMap[listenerTarget] = std::vector<std::function<void(SteamConnection &)>>();
     }
@@ -620,7 +609,7 @@ void Engine::RegisterNetworkEventListener(const std::function<void(SteamConnecti
 }
 
 
-void Engine::RegisterNetworkDataListener(const std::function<void(SteamConnection &, std::vector<std::byte> &)> listener) {
+void Engine::RegisterNetworkDataListener(const std::function<void(SteamConnection &, std::vector<std::byte> &)> &listener) {
     m_DataListeners.push_back(listener);
 }
 
