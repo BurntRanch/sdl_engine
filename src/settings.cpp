@@ -1,7 +1,7 @@
 #include "camera.hpp"
 #include "settings.hpp"
 
-Settings::Settings(const string_view fileName) {
+Settings::Settings(const std::string_view fileName) {
     try {
         m_SettingsTable = toml::parse_file(fileName);
     } 

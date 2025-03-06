@@ -23,10 +23,6 @@
 #include <array>
 #include <vulkan/vulkan_core.h>
 
-using std::vector;
-using std::string;
-using std::string_view;
-using std::array;
 using namespace std::filesystem;
 
 class Object;
@@ -53,8 +49,8 @@ inline struct VkVertexInputBindingDescription getVertexBindingDescription() {
     return bindingDescrption;
 }
 
-inline struct array<VkVertexInputAttributeDescription, 3> getVertexAttributeDescriptions() {
-    array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
+inline struct std::array<VkVertexInputAttributeDescription, 3> getVertexAttributeDescriptions() {
+    std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
 
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
@@ -83,8 +79,8 @@ inline struct VkVertexInputBindingDescription getSimpleVertexBindingDescription(
     return bindingDescrption;
 }
 
-inline struct array<VkVertexInputAttributeDescription, 2> getSimpleVertexAttributeDescriptions() {
-    array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+inline struct std::array<VkVertexInputAttributeDescription, 2> getSimpleVertexAttributeDescriptions() {
+    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
 
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
@@ -104,7 +100,7 @@ class Mesh;
 class Model 
 {
 public:
-    vector<Mesh> meshes;
+    std::vector<Mesh> meshes;
 
     Model() = default;
 
@@ -144,8 +140,8 @@ private:
 class Mesh {
 public:
     // mesh data
-    vector<Vertex>       vertices;
-    vector<Uint32>       indices;
+    std::vector<Vertex>  vertices;
+    std::vector<Uint32>  indices;
     path                 diffuseMapPath;
     // glm::vec3            ambient;
     // glm::vec3            specular;
@@ -156,7 +152,7 @@ public:
 
     Mesh() = default;
 
-    Mesh(Model &parent, vector<Vertex> vertices, vector<Uint32> indices, path diffuseMapPath, /*float shininess = 0.0, float roughness = 0.0, float metallic = 0.0, glm::vec3 ambient = glm::vec3(0.2f, 0.2f, 0.2f), glm::vec3 specular = glm::vec3(1.0f, 1.0f, 1.0f), */glm::vec3 diffuse = glm::vec3(1.0f, 1.0f, 1.0f)) : m_Parent(&parent) {
+    Mesh(Model &parent, std::vector<Vertex> vertices, std::vector<Uint32> indices, path diffuseMapPath, /*float shininess = 0.0, float roughness = 0.0, float metallic = 0.0, glm::vec3 ambient = glm::vec3(0.2f, 0.2f, 0.2f), glm::vec3 specular = glm::vec3(1.0f, 1.0f, 1.0f), */glm::vec3 diffuse = glm::vec3(1.0f, 1.0f, 1.0f)) : m_Parent(&parent) {
         this->vertices = vertices;
         this->indices = indices;
         this->diffuseMapPath = diffuseMapPath;

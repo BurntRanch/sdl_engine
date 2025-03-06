@@ -14,16 +14,16 @@
 
 Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
 {
-    vector<Vertex> vertices;
-    vector<Uint32> indices;
-    string diffuseMap;
+    std::vector<Vertex> vertices;
+    std::vector<Uint32> indices;
+    std::string diffuseMap;
 
     glm::vec3 diffuse;
     //float shininess = 0.0;
     //float roughness = 0.1;
     //float metallic = 0.0;
 
-    for(size_t i = 0; i < mesh->mNumVertices; i++)
+    for(size_t i = 0; i < mesh->mNumVertices; ++i)
     {
         Vertex vertex;
         // process vertex positions, normals and texture coordinates
@@ -93,10 +93,10 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
         vertices.push_back(vertex);
     }
     // process indices
-    for(unsigned int i = 0; i < mesh->mNumFaces; i++)
+    for(unsigned int i = 0; i < mesh->mNumFaces; ++i)
     {
         aiFace face = mesh->mFaces[i];
-        for (unsigned int j = 0; j < face.mNumIndices; j++) {
+        for (unsigned int j = 0; j < face.mNumIndices; ++j) {
             indices.push_back(face.mIndices[j]);
         }
     }
@@ -112,7 +112,7 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
         if (diffuseTextureCount >= 1) {
             aiString path;
             material->GetTexture(aiTextureType_DIFFUSE, 0, &path);
-            diffuseMap = string(std::filesystem::absolute(path.C_Str()));
+            diffuseMap = std::string(std::filesystem::absolute(path.C_Str()));
         }
 
         aiColor4D aiDiffuseColor;
@@ -167,7 +167,7 @@ void Model::SetModelID(int modelID) {
 //    Texture tex;
 //    string str = "default_" + typeName + ".png";
 //    bool skip = false;
-//    for(unsigned int j = 0; j < textures_loaded.size(); j++)
+//    for(unsigned int j = 0; j < textures_loaded.size(); ++j)
 //    {
 //        if(std::strcmp(textures_loaded[j].path.data(), str.c_str()) == 0)
 //        {
@@ -194,12 +194,12 @@ void Model::SetModelID(int modelID) {
 //    if (mat->GetTextureCount(type) == 0) {
 //        textures.push_back(loadDefaultTexture(typeName));
 //    }
-//    for(unsigned int i = 0; i < mat->GetTextureCount(type); i++)
+//    for(unsigned int i = 0; i < mat->GetTextureCount(type); ++i)
 //    {
 //        aiString str;
 //        mat->GetTexture(type, i, &str);
 //        bool skip = false;
-//        for(unsigned int j = 0; j < textures_loaded.size(); j++)
+//        for(unsigned int j = 0; j < textures_loaded.size(); ++j)
 //        {
 //            if(std::strcmp(textures_loaded[j].path.data(), str.C_Str()) == 0)
 //            {

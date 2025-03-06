@@ -828,12 +828,11 @@ void Engine::NetworkingThreadServer_Main(NetworkingThreadState &state) {
 
         /* TODO: This stupid thing doesn't receive client requests. */
         int msgCount = m_NetworkingSockets->ReceiveMessagesOnPollGroup(m_NetPollGroup, &incomingMessages, 1);
-        
         if (msgCount < 0) {
             throw std::runtime_error("Error receiving messages from a client!");
         }
         if (msgCount > 0) {
-            for (int i = 0; i < msgCount; i++) {
+            for (int i = 0; i < msgCount; ++i) {
                 ISteamNetworkingMessage *incomingMessage = &incomingMessages[i];
 
                 if (incomingMessage->GetSize() < sizeof(int)) {
@@ -1016,7 +1015,7 @@ void Engine::ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvent
                     std::vector<int> relatedObjects = FilterRelatedNetworkingObjects(m_ObjectsFromImportedObject, &objectPacket);
 
                     int offset = 0;
-                    for (size_t i = 0; i < relatedObjects.size(); i++) {
+                    for (size_t i = 0; i < relatedObjects.size(); ++i) {
                         auto generatedObject = (m_ObjectsFromImportedObject.begin() + (relatedObjects[0] - offset++));
 
                         Object *childEquivalent = DeepSearchObjectTree(object, [generatedObject] (Object *child) { return child->GetSourceID() == generatedObject->objectSourceID; });
@@ -1172,7 +1171,7 @@ Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &seriali
     size_t camerasCount;
     Deserialize(serializedPacket, camerasCount);
 
-    for (size_t i = 0; i < camerasCount; i++) {
+    for (size_t i = 0; i < camerasCount; ++i) {
         Networking_Camera cameraPacket;
 
         DeserializeNetworkingCamera(serializedPacket, cameraPacket);
@@ -1183,7 +1182,7 @@ Networking_StatePacket Engine::DeserializePacket(std::vector<std::byte> &seriali
     size_t objectsCount;
     Deserialize(serializedPacket, objectsCount);
 
-    for (size_t i = 0; i < objectsCount; i++) {
+    for (size_t i = 0; i < objectsCount; ++i) {
         Networking_Object objectPacket;
 
         DeserializeNetworkingObject(serializedPacket, objectPacket);
@@ -1220,7 +1219,7 @@ void Engine::DeserializeNetworkingObject(std::vector<std::byte> &serializedObjec
     size_t childrenListSize;
     Deserialize(serializedObjectPacket, childrenListSize);
 
-    for (size_t i = 0; i < childrenListSize; i++) {
+    for (size_t i = 0; i < childrenListSize; ++i) {
         int childObjectID;
         Deserialize(serializedObjectPacket, childObjectID);
 

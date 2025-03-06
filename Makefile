@@ -45,6 +45,7 @@ gamenetworkingsockets:
 ifeq ($(wildcard $(BUILDDIR)/steam/libGameNetworkingSockets.so),)
 	mkdir -p $(BUILDDIR)/steam
 	mkdir -p steam/GameNetworkingSockets/build
+	sed -i "s#CXX_STANDARD 11#CXX_STANDARD 17#g" steam/GameNetworkingSockets/CMakeLists.txt
 	cd steam/GameNetworkingSockets/build && cmake .. && make -j11
 	cp steam/GameNetworkingSockets/build/bin/libGameNetworkingSockets.so $(BUILDDIR)/steam/
 endif

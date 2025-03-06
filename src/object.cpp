@@ -167,7 +167,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
     }
 
     /* Check if this node is/has a camera. */
-    for (Uint32 i = 0; i < scene->mNumCameras; i++) {
+    for (Uint32 i = 0; i < scene->mNumCameras; ++i) {
         /* Found the camera! */
         if (scene->mCameras[i]->mName == node->mName) {
             aiCamera *sceneCam = scene->mCameras[i];
@@ -204,7 +204,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
 
         fmt::println("Object {} has atleast 1 mesh!", fmt::ptr(obj));
 
-        for (Uint32 i = 0; i < node->mNumMeshes; i++) {
+        for (Uint32 i = 0; i < node->mNumMeshes; ++i) {
             aiMesh *mesh = scene->mMeshes[node->mMeshes[i]];
 
             model->meshes.push_back(model->processMesh(mesh, scene));
@@ -213,7 +213,7 @@ void Object::ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Obje
         obj->AddModelAttachment(model);
     }
 
-    for (Uint32 i = 0; i < node->mNumChildren; i++) {
+    for (Uint32 i = 0; i < node->mNumChildren; ++i) {
         sourceID++;
         ProcessNode(node->mChildren[i], scene, sourceID, obj, primaryCamOutput);
     }

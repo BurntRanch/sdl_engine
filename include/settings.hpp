@@ -6,8 +6,6 @@
 #include <SDL3/SDL_stdinc.h>
 #include <string_view>
 
-using std::string_view;
-
 class Settings {
 public:
 // Video
@@ -28,10 +26,10 @@ public:
     bool InvertVertical;
     bool InvertHorizontal;
 
-    Settings(const string_view fileName);
+    Settings(const std::string_view fileName);
 
     template<typename T>
-    T GetValue(const string_view name, const T& def) {
+    T GetValue(const std::string_view name, const T& def) {
         const std::optional<T> ret = m_SettingsTable.at_path(name).value<T>();
 
         return ret.value_or(def);

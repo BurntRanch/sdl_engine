@@ -168,7 +168,7 @@ void Label::DestroyBuffers() {
     // vkDeviceWaitIdle(m_SharedContext.engineDevice);
 
     /* As of now, Glyph Buffers are now owned by the engine. */
-    // for (size_t i = 0; i < Glyphs.size(); i++) {
+    // for (size_t i = 0; i < Glyphs.size(); ++i) {
     //     auto glyphBuffer = Glyphs[i].glyphBuffers.value();
 
     //     vkDestroyImage(m_SharedContext.engineDevice, glyphBuffer.first.imageAndMemory.image, NULL);
