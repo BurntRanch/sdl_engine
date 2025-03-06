@@ -1,2 +1,3 @@
 # sdl_engine
-My implementation of vulkan-tutorial.com, Enjoy!
+A whole damn vulkan engine written from scratch\
+ts is gonna be in my portfoglio fr
