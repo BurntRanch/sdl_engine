@@ -1133,6 +1133,10 @@ TOML_ENABLE_WARNINGS;
 #define TOML_ENABLE_FLOAT16 0
 #endif
 
+#ifndef TOML_DISABLE_CONDITIONAL_NOEXCEPT_LAMBDA
+#define TOML_DISABLE_CONDITIONAL_NOEXCEPT_LAMBDA 0
+#endif
+
 #if !defined(TOML_FLOAT_CHARCONV) && (TOML_GCC || TOML_CLANG || (TOML_ICC && !TOML_ICC_CL))
 // not supported by any version of GCC or Clang as of 26/11/2020
 // not supported by any version of ICC on Linux as of 11/01/2021
@@ -2630,6 +2634,60 @@ TOML_NAMESPACE_START
 			return lhs;
 		}
 	};
+
+	TOML_NODISCARD
+	constexpr optional<std::string_view> get_line(std::string_view doc, source_index line_num) noexcept
+	{
+		if (line_num == 0)
+		{
+			// Invalid line number. Should be greater than zero.
+			return {};
+		}
+
+		// The position of the first character of the specified line.
+		const auto begin_of_line = [doc, line_num]() -> std::size_t
+		{
+			if (line_num == 1)
+			{
+				return 0;
+			}
+
+			const auto num_chars_of_doc = doc.size();
+			std::size_t current_line_num{ 1 };
+
+			for (std::size_t i{}; i < num_chars_of_doc; ++i)
+			{
+				if (doc[i] == '\n')
+				{
+					++current_line_num;
+
+					if (current_line_num == line_num)
+					{
+						return i + 1;
+					}
+				}
+			}
+			return std::string_view::npos;
+		}();
+
+		if (begin_of_line >= doc.size())
+		{
+			return {};
+		}
+
+		if (const auto end_of_line = doc.find('\n', begin_of_line); end_of_line != std::string_view::npos)
+		{
+			const auto num_chars_of_line = end_of_line - begin_of_line;
+
+			// Trim an optional trailing carriage return.
+			return doc.substr(begin_of_line,
+							  ((num_chars_of_line > 0) && (doc[end_of_line - 1] == '\r')) ? num_chars_of_line - 1
+																						  : num_chars_of_line);
+		}
+
+		// Return the last line. Apparently this doc has no trailing line break character at the end.
+		return doc.substr(begin_of_line);
+	}
 }
 TOML_NAMESPACE_END;
 
@@ -6799,7 +6857,10 @@ TOML_NAMESPACE_START
 					static_cast<node_ref>(static_cast<Array&&>(arr)[i])
 						.visit(
 							[&]([[maybe_unused]] auto&& elem) //
+// Define this macro as a workaround to compile errors caused by a bug in MSVC's "legacy lambda processor".
+#if !TOML_DISABLE_CONDITIONAL_NOEXCEPT_LAMBDA
 							noexcept(for_each_is_nothrow_one<Func&&, Array&&, decltype(elem)>::value)
+#endif
 							{
 								using elem_ref = for_each_elem_ref<decltype(elem), Array&&>;
 								static_assert(std::is_reference_v<elem_ref>);
@@ -8161,7 +8222,10 @@ TOML_NAMESPACE_START
 					static_cast<node_ref>(*kvp.second)
 						.visit(
 							[&]([[maybe_unused]] auto&& v) //
+// Define this macro as a workaround to compile errors caused by a bug in MSVC's "legacy lambda processor".
+#if !TOML_DISABLE_CONDITIONAL_NOEXCEPT_LAMBDA
 							noexcept(for_each_is_nothrow_one<Func&&, Table&&, decltype(v)>::value)
+#endif
 							{
 								using value_ref = for_each_value_ref<decltype(v), Table&&>;
 								static_assert(std::is_reference_v<value_ref>);
@@ -10694,6 +10758,11 @@ TOML_IMPL_NAMESPACE_START
 	void TOML_CALLCONV print_to_stream(std::ostream & stream, const source_region& val)
 	{
 		print_to_stream(stream, val.begin);
+		if (val.begin != val.end)
+		{
+			print_to_stream(stream, " to "sv);
+			print_to_stream(stream, val.end);
+		}
 		if (val.path)
 		{
 			print_to_stream(stream, " of '"sv);
