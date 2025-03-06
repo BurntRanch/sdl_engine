@@ -75,7 +75,7 @@ jobs:
     - name: Install packages
       run: >
         sudo apt install ninja-build build-essential cmake protobuf-compiler libc6-dev-amd64-cross libprotobuf-dev
-        libglm-dev libglfw3-dev libtbb-dev libassimp-dev
+        libglm-dev libglfw3-dev libtbb-dev libassimp-dev libbullet-dev
         libvulkan-dev vulkan-tools vulkan-utility-libraries-dev
 
     - name: Clone SDL3
