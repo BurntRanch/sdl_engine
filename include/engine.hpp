@@ -15,7 +15,7 @@
 #include "networking/connection.hpp"
 #include "steamnetworkingtypes.h"
 #include "ui/button.hpp"
-#include "object.hpp"
+#include "Node/Node.hpp"
 
 #include <LinearMath/btVector3.h>
 #include <btBulletDynamicsCommon.h>
@@ -192,8 +192,6 @@ public:
 
     void InitRenderer(Settings &settings, Camera *primaryCamera);
 
-    void InitNetworking();
-
     /* Initializes the Bullet Physics engine. */
     void InitPhysics();
 
@@ -204,54 +202,27 @@ public:
     /* Due to how it works, this function can be called before the renderer is initialized. */
     void RegisterUIButtonListener(const std::function<void(std::string)> &listener);
 
-    /* status is an indicator of which NetworkingThread should accept it, if it's set to NETWORKING_THREAD_ACTIVE_SERVER, it will register to the server, so on. 
-     * This handler will be mostly responsible for prediction. */
-    void RegisterTickUpdateHandler(const std::function<void(int)> &handler, const NetworkingThreadStatus &status);
-
     BaseRenderer *GetRenderer();
 
     void Start();
 
     void LoadUIFile(const std::string &name);
 
-    void AddObject(Object *object);
+    void AddObject(Node *object);
 
     std::vector<Camera *> &GetCameras();
 
     /* This does not delete the object nor its attachments. */
-    void RemoveObject(Object *object);
+    void RemoveObject(Node *object);
     void RemoveCamera(Camera *cam);
 
     bool ImportScene(const std::string &path);
     void ExportScene(const std::string &path);
 
-    void AttachCameraToConnection(Camera *cam, SteamConnection &conn);
-
-    void ConnectToGameServer(SteamNetworkingIPAddr ipAddr);
-    void HostGameServer(SteamNetworkingIPAddr ipAddr);
-
-    void ConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t *callbackInfo);
-
-    void RegisterNetworkEventListener(const std::function<void(SteamConnection &)> &listener, const NetworkingEventType &listenerTarget);
-    void RegisterNetworkDataListener(const std::function<void(SteamConnection &, std::vector<std::byte> &)> &listener);
-
-    void DisconnectFromServer();    // Disconnects you from a game server, Safe to call in any situation but wont do anything if you aren't connected to a server.
-
-    void DisconnectClientFromServer(SteamConnection &connection);  // Disconnects a client from your server, Call this only if you're hosting a server.
-
-    void StopHostingGameServer();
-
-    void ProcessNetworkEvents(std::vector<Networking_Event> *networkingEvents);
-
-    bool IsConnectedToGameServer();
-
     /* DO NOT 'OR' MULTIPLE EVENT TYPES, REGISTER THE SAME FUNCTION WITH A DIFFERENT TYPE IF YOU WANT THAT. */
     void RegisterSDLEventListener(const std::function<void(SDL_Event *)> &func, SDL_EventType types);
 
-    /* Sends a packet to the server that gets handled at the program level, this could include inputs n such. */
-    void SendRequestToServer(std::vector<std::byte> &data);
-
-    Object *GetObjectByID(int ObjectID);
+    Node *GetObjectByID(int ObjectID);
 
     UI::GenericElement *GetElementByID(const std::string &id);
     
@@ -265,7 +236,6 @@ public:
 private:
 /*  Systems   */
     BaseRenderer *m_Renderer = nullptr;
-    ISteamNetworkingSockets *m_NetworkingSockets;
 
     std::unique_ptr<btDefaultCollisionConfiguration> m_CollisionConfig;
     std::unique_ptr<btCollisionDispatcher> m_Dispatcher;
@@ -273,26 +243,10 @@ private:
     std::unique_ptr<btSequentialImpulseConstraintSolver> m_Solver;
     std::unique_ptr<btDiscreteDynamicsWorld> m_DynamicsWorld;
 
-    /* I don't really like this variable type, but this is basically an array of pointers.
-     * We don't own these, they're all owned by the object, but we still can remove/add them from/to the dynamic world.
-     */
+    /* We don't own these, they're all owned by the object, but we still can remove/add them from/to the dynamic world. */
     std::vector<std::shared_ptr<btRigidBody>> m_RigidBodies;
 
-    /* [0] = client, [1] = server. */
-    std::array<NetworkingThreadState, 2> m_NetworkingThreadStates;
-    
-    HSteamListenSocket m_NetListenSocket = k_HSteamListenSocket_Invalid;
-    HSteamNetPollGroup m_NetPollGroup = k_HSteamNetPollGroup_Invalid;
-
     std::string m_ScenePath = "";
-
-    std::unordered_map<NetworkingEventType, std::vector<std::function<void(SteamConnection &)>>> m_EventTypeToListenerMap;
-    std::vector<std::function<void(SteamConnection &, std::vector<std::byte> &)>> m_DataListeners;
-
-    std::unordered_map<SteamConnection *, Camera *> m_ConnToCameraAttachment;
-
-    std::vector<Networking_Event> m_NetworkingEvents;
-    std::mutex m_NetworkingEventsLock;
 
     std::unordered_map<SDL_EventType, std::vector<std::function<void(SDL_Event *)>>> m_SDLEventToListenerMap;
 
@@ -303,26 +257,10 @@ private:
     Settings *m_Settings = nullptr;
     Camera *m_MainCamera = nullptr;
 
-    /* Next 2 variables are for ProcessNetworkEvents */
-    /* Objects that were created as a result of ImportFromFile may not have the same ObjectIDs, and will be hard to track. So we store them to compare their SourceIDs */
-    std::vector<Networking_Object> m_ObjectsFromImportedObject;
-
-    /* Doesn't include elements that belong in objectsFromImportedObject */
-    std::vector<Object *> m_PreviousObjects;
-
     std::vector<Camera *> m_Cameras;
-    std::vector<Object *> m_Objects;
+    //std::vector<Object *> m_Objects;
+    Node *m_RootNode;
     std::vector<UI::GenericElement *> m_UIElements;
-
-    Networking_StatePacket m_LastPacket;
-
-    /* I'm starting to like this m_CallbackInstance method */
-
-    static Engine *m_CallbackInstance;
-
-    static void onConnectionStatusChangedCallback(SteamNetConnectionStatusChangedCallback_t *callbackInfo) {
-        m_CallbackInstance->ConnectionStatusChanged(callbackInfo);
-    }
 
     bool QuitEventCheck(SDL_Event &event) {
         if (event.type == SDL_EVENT_QUIT || (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE))
@@ -333,53 +271,7 @@ private:
     /* Steps through the physics engine at ENGINE_FIXED_UPDATE_DELTATIME */
     void PhysicsStep();
 
-    /* Do not set isRecursive to true, This is only there to recursively add objs children BEFORE obj. This is a requirement in the protocol.
-     * The return is optional (empty if obj is a child and isRecursive == false) but that doesn't mean you have to put it in the statePacket yourself. It's just there incase you want it.
-    */
-    std::optional<Networking_Object> AddObjectToStatePacket(Object *obj, Networking_StatePacket &statePacket, bool includeChildren = true, bool isRecursive = false);
-
-    /* Do not set isRecursive to true, This is only there to recursively add objs children BEFORE obj. This is a requirement in the protocol. */
-    void AddObjectToStatePacketIfChanged(Object *obj, Networking_StatePacket &statePacket, bool includeChildren = true, bool isRecursive = false);
-
-    /* Very similar to the Object equivalent, difference is Cameras don't have children. Make sure isMainCamera is set to true based off of m_ConnToCameraAttachment. */
-    Networking_Camera AddCameraToStatePacket(Camera *cam, Networking_StatePacket &statePacket, bool isMainCamera = false);
-
-    /* Very similar to the Object equivalent, difference is Cameras don't have children. Make sure isMainCamera is set to true based off of m_ConnToCameraAttachment. */
-    void AddCameraToStatePacketIfChanged(Camera *cam, Networking_StatePacket &statePacket, bool isMainCamera = false);
-
-    /* Deserialization */
-    Networking_StatePacket DeserializePacket(std::vector<std::byte> &serializedPacket);
-
-    /* Deserialize the Networking_Object */
-    void DeserializeNetworkingObject(std::vector<std::byte> &serializedObjectPacket, Networking_Object &dest);
-
-    /* Deserialize the Networking_Camera */
-    void DeserializeNetworkingCamera(std::vector<std::byte> &serializedCameraPacket, Networking_Camera &dest);
-
-    /* Sends a full update to the connection. Sends every single object, regardless whether it has changed, to the client. Avoid sending this unless it's a clients first time connecting. */
-    void SendFullUpdateToConnection(SteamConnection &connection, int tickNumber);
-
-    /* Send an update to the client, Keep in mind the server won't send objects that haven't changed to the client. */
-    void SendUpdateToConnection(SteamConnection &connection, int tickNumber);
-
-    /* Serialize the Networking_Object and append it to dest */
-    void SerializeNetworkingObject(Networking_Object &objectPacket, std::vector<std::byte> &dest);
-
-    /* Serialize the Networking_Camera and append it to dest */
-    void SerializeNetworkingCamera(Networking_Camera &cameraPacket, std::vector<std::byte> &dest);
-
-    void SerializeClientRequest(Networking_ClientRequest &clientRequest, std::vector<std::byte> &dest);
-
-    void DeserializeClientRequest(std::vector<std::byte> &serializedClientRequest, Networking_ClientRequest &dest);
-
-    void FireNetworkEvent(NetworkingEventType type, SteamConnection &conn, std::optional<std::reference_wrapper<std::vector<std::byte>>> data = {});
-
     void CheckButtonClicks(SDL_Event *event);
-
-    void InitNetworkingThread(NetworkingThreadStatus status);
-
-    void NetworkingThreadClient_Main(NetworkingThreadState &state);
-    void NetworkingThreadServer_Main(NetworkingThreadState &state);
 
     std::vector<std::function<void(std::string)>> m_UIButtonListeners;
     std::vector<UI::Button *> m_UIButtons;

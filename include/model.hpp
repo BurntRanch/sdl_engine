@@ -20,7 +20,7 @@
 
 using namespace std::filesystem;
 
-class Object;
+class Node;
 
 struct Vertex {
     glm::vec3 Position;
@@ -110,8 +110,8 @@ public:
     constexpr void SetBoundingBox(std::array<glm::vec3, 2> boundingBox) { m_BoundingBox = boundingBox; };
 
     /* Only 1 object can be attached at a time. */
-    void SetObjectAttachment(Object *object);
-    Object *GetObjectAttachment();
+    void SetObjectAttachment(Node *object);
+    Node *GetObjectAttachment();
 
     glm::mat4 GetModelMatrix();
 
@@ -120,7 +120,7 @@ public:
 private:
     int m_ModelID = -1;
 
-    Object *m_ObjectAttachment = nullptr;
+    Node *m_ObjectAttachment = nullptr;
 
     // [0] = higher
     // [1] = lower

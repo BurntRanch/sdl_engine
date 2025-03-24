@@ -3,7 +3,7 @@
 #include "BulletCollision/CollisionShapes/btCollisionShape.h"
 #include "common.hpp"
 #include "engine.hpp"
-#include "object.hpp"
+#include "Node/Node.hpp"
 #include <SDL3/SDL_stdinc.h>
 #include <assimp/scene.h>
 #include <glm/ext/vector_float2.hpp>
