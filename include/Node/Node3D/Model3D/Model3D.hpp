@@ -17,6 +17,8 @@ class Model3D : public Node3D {
 public:
     ~Model3D();
 
+    Model3D(const glm::vec3 position, const glm::quat rotation, const glm::vec3 scale) : Node3D(position, rotation, scale) {};
+
     /* Loads a model/scene file with assimp, preferrably glTF 2.0 files.
         Nodes are converted to objects and their meshes are converted into a Model attachment.
         If there's atleast 1 camera, and if primaryCamOutput is set, it will set primaryCamOutput to the first camera it sees. primaryCamOutput MUST be null!! */
@@ -33,7 +35,7 @@ public:
 
     void SetMaterial(Material *mat);
     Material *GetMaterial();
-private:
+protected:
     /* Placeholder as we slowly move away from this old Model class. */
     Model *m_Model = nullptr;
 

@@ -24,27 +24,27 @@
 Node3D::~Node3D() {
 }
 
-Node3D::Node3D() {
-    m_Position = glm::vec3(0, 0, 0);
-    m_Rotation = glm::quat(0, 0, 0, 1);
-    m_Scale = glm::vec3(1, 1, 1);
+Node3D::Node3D(const glm::vec3 position, const glm::quat rotation, const glm::vec3 scale) {
+    m_Position = position;
+    m_Rotation = rotation;
+    m_Scale = scale;
 }
 
-void Node3D::SetPosition(glm::vec3 position) {
+void Node3D::SetPosition(const glm::vec3 position) {
     m_Position = position;
 }
 glm::vec3 Node3D::GetPosition() {
     return m_Position;
 }
 
-void Node3D::SetRotation(glm::quat rotation) {
+void Node3D::SetRotation(const glm::quat rotation) {
     m_Rotation = rotation;
 }
 glm::quat Node3D::GetRotation() {
     return m_Rotation;
 }
 
-void Node3D::SetScale(glm::vec3 scale) {
+void Node3D::SetScale(const glm::vec3 scale) {
     m_Scale = scale;
 }
 glm::vec3 Node3D::GetScale() {

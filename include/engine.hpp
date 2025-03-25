@@ -9,6 +9,8 @@
 #include <BulletDynamics/Dynamics/btDynamicsWorld.h>
 #include "BulletDynamics/ConstraintSolver/btSequentialImpulseConstraintSolver.h"
 #include "BulletDynamics/Dynamics/btRigidBody.h"
+#include "Node/Node3D/Camera3D/Camera3D.hpp"
+#include "SceneTree.hpp"
 #include "camera.hpp"
 #include "common.hpp"
 #include "isteamnetworkingsockets.h"
@@ -190,13 +192,14 @@ public:
     Engine();
     ~Engine();
 
-    void InitRenderer(Settings &settings, Camera *primaryCamera);
+    void InitRenderer(Settings &settings);
 
     /* Initializes the Bullet Physics engine. */
-    void InitPhysics();
+    /* TODO: integrate with scenetree system */
+    // void InitPhysics();
 
     /* Stops the physics engine. */
-    void DeinitPhysics();
+    // void DeinitPhysics();
 
     /* UI::Button listeners will receive events when any button is pressed, along with its ID. */
     /* Due to how it works, this function can be called before the renderer is initialized. */
@@ -208,21 +211,20 @@ public:
 
     void LoadUIFile(const std::string &name);
 
-    void AddObject(Node *object);
+    const SceneTree *GetSceneTree();
 
-    std::vector<Camera *> &GetCameras();
+    // void LoadNode(Node *object);
 
-    /* This does not delete the object nor its attachments. */
-    void RemoveObject(Node *object);
-    void RemoveCamera(Camera *cam);
+    /* This does not delete the node nor its attachments. */
+    // void UnloadNode(Node *node);
 
-    bool ImportScene(const std::string &path);
-    void ExportScene(const std::string &path);
+    void ImportScene(const std::string &path);
+    // void ExportScene(const std::string &path);
 
     /* DO NOT 'OR' MULTIPLE EVENT TYPES, REGISTER THE SAME FUNCTION WITH A DIFFERENT TYPE IF YOU WANT THAT. */
     void RegisterSDLEventListener(const std::function<void(SDL_Event *)> &func, SDL_EventType types);
 
-    Node *GetObjectByID(int ObjectID);
+    // Node *GetObjectByID(int ObjectID);
 
     UI::GenericElement *GetElementByID(const std::string &id);
     
@@ -246,7 +248,7 @@ private:
     /* We don't own these, they're all owned by the object, but we still can remove/add them from/to the dynamic world. */
     std::vector<std::shared_ptr<btRigidBody>> m_RigidBodies;
 
-    std::string m_ScenePath = "";
+    //std::string m_ScenePath = "";
 
     std::unordered_map<SDL_EventType, std::vector<std::function<void(SDL_Event *)>>> m_SDLEventToListenerMap;
 
@@ -255,11 +257,11 @@ private:
     std::vector<std::function<void()>> m_FixedUpdateFunctions;
     
     Settings *m_Settings = nullptr;
-    Camera *m_MainCamera = nullptr;
+    //Camera *m_MainCamera = nullptr;
 
-    std::vector<Camera *> m_Cameras;
+    //std::vector<Camera3D *> m_Cameras;
     //std::vector<Object *> m_Objects;
-    Node *m_RootNode;
+    SceneTree *m_SceneTree;
     std::vector<UI::GenericElement *> m_UIElements;
 
     bool QuitEventCheck(SDL_Event &event) {

@@ -132,7 +132,7 @@ struct RenderUILabel {
 
 class BaseRenderer {
 public:
-    BaseRenderer(Settings &settings, Camera *primaryCam) : m_PrimaryCamera(primaryCam), m_Settings(settings) {};
+    BaseRenderer(Settings &settings) : m_Settings(settings) {};
     virtual ~BaseRenderer() {};
 
     virtual void SetMouseCaptureState(bool capturing) = 0;
@@ -218,7 +218,7 @@ protected:
     virtual TextureBufferAndMemory LoadTextureFromFile(const std::string &name) = 0;
 
     /* Cameras, high-level stuff. */
-    Camera *m_PrimaryCamera;
+    Camera *m_PrimaryCamera = nullptr;
     Settings &m_Settings;
 
     /* Updated every frame step, this number is always from 0 to MAX_FRAMES_IN_FLIGHT */

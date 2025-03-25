@@ -2,6 +2,7 @@
 #define _NODE_HPP_
 
 #include "BulletDynamics/Dynamics/btRigidBody.h"
+#include "SceneTree.hpp"
 #include "camera.hpp"
 #include "model.hpp"
 #include <functional>
@@ -22,18 +23,19 @@ public:
 
     // void ExportglTF2(const std::string &path);
 
-    void SetParent(Node *parent);
-    Node *GetParent();
+    virtual void SetParent(Node *parent);
+    virtual Node *GetParent() const;
 
     /* Meant to be called by the child when SetParent is called. */
-    void AddChild(Node *child);
+    virtual void AddChild(Node *child);
     
-    std::vector<Node *> GetChildren();
-    void RemoveChild(Node *child);
+    virtual std::vector<Node *> GetChildren() const;
+    virtual void RemoveChild(Node *child);
 
-    int GetNodeID();
-    void SetNodeID(int nodeID);
-private:
+    virtual int GetNodeID() const;
+    virtual void SetNodeID(const int nodeID);
+friend class SceneTree;
+protected:
     void ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Node *parent = nullptr, std::optional<std::reference_wrapper<Camera *>> primaryCamOutput = {});
 
     int m_NodeID = -1;
@@ -41,6 +43,8 @@ private:
     Node *m_Parent = nullptr;
 
     std::vector<Node *> m_Children;
+
+    SceneTree *m_SceneTree;
 
     static int HighestNodeID;
 };

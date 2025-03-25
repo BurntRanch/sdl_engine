@@ -8,13 +8,16 @@
 #include "BulletDynamics/Dynamics/btDiscreteDynamicsWorld.h"
 #include "BulletDynamics/Dynamics/btRigidBody.h"
 #include "LinearMath/btVector3.h"
+#include "SceneTree.hpp"
 #include "camera.hpp"
 #include "common.hpp"
 #include "fmt/base.h"
 #include "fmt/format.h"
 #include "isteamnetworkingsockets.h"
 #include "networking/connection.hpp"
-#include "object.hpp"
+#include "Node/Node.hpp"
+#include "Node/Node3D/Model3D/Model3D.hpp"
+#include "Node/Node3D/Camera3D/Camera3D.hpp"
 #include "renderer/vulkanRenderer.hpp"
 #include "steamclientpublic.h"
 #include "steamnetworkingsockets.h"
@@ -54,70 +57,72 @@
 
 Engine::Engine() {
     SDL_Init(SDL_INIT_EVENTS);
+
+    m_SceneTree = new SceneTree();
 }
 
 Engine::~Engine() {
-    DeinitPhysics();
+    // DeinitPhysics();
 }
 
-void Engine::InitRenderer(Settings &settings, Camera *primaryCamera) {
+void Engine::InitRenderer(Settings &settings) {
     m_Settings = &settings;
 
-    m_Renderer = new VulkanRenderer(settings, primaryCamera);
+    m_Renderer = new VulkanRenderer(settings);
 
     m_Renderer->Init();
 
     RegisterSDLEventListener(std::bind(&Engine::CheckButtonClicks, this, std::placeholders::_1), SDL_EVENT_MOUSE_BUTTON_UP);
 }
 
-void Engine::InitPhysics() {
-    m_CollisionConfig = std::make_unique<btDefaultCollisionConfiguration>();
-    m_Dispatcher = std::make_unique<btCollisionDispatcher>(m_CollisionConfig.get());
-    m_Broadphase = std::make_unique<btDbvtBroadphase>();
-    m_Solver = std::make_unique<btSequentialImpulseConstraintSolver>();
+// void Engine::InitPhysics() {
+//     m_CollisionConfig = std::make_unique<btDefaultCollisionConfiguration>();
+//     m_Dispatcher = std::make_unique<btCollisionDispatcher>(m_CollisionConfig.get());
+//     m_Broadphase = std::make_unique<btDbvtBroadphase>();
+//     m_Solver = std::make_unique<btSequentialImpulseConstraintSolver>();
 
-    m_DynamicsWorld = std::make_unique<btDiscreteDynamicsWorld>(m_Dispatcher.get(), m_Broadphase.get(), m_Solver.get(), m_CollisionConfig.get());
+//     m_DynamicsWorld = std::make_unique<btDiscreteDynamicsWorld>(m_Dispatcher.get(), m_Broadphase.get(), m_Solver.get(), m_CollisionConfig.get());
 
-    m_DynamicsWorld->setGravity(btVector3(0, -5, 0));
+//     m_DynamicsWorld->setGravity(btVector3(0, -5, 0));
 
-    for (auto &rigidBodyPtr : m_RigidBodies) {
-        m_DynamicsWorld->addRigidBody(rigidBodyPtr.get());
-    }
+//     for (auto &rigidBodyPtr : m_RigidBodies) {
+//         m_DynamicsWorld->addRigidBody(rigidBodyPtr.get());
+//     }
 
-    RegisterFixedUpdateFunction(std::bind(&Engine::PhysicsStep, this));
-}
+//     RegisterFixedUpdateFunction(std::bind(&Engine::PhysicsStep, this));
+// }
 
-void Engine::DeinitPhysics() {
-    if (m_DynamicsWorld) {
-        while (m_DynamicsWorld->getNumConstraints() > 0) {
-            m_DynamicsWorld->removeConstraint(m_DynamicsWorld->getConstraint(0));
-        }
+// void Engine::DeinitPhysics() {
+//     if (m_DynamicsWorld) {
+//         while (m_DynamicsWorld->getNumConstraints() > 0) {
+//             m_DynamicsWorld->removeConstraint(m_DynamicsWorld->getConstraint(0));
+//         }
 
-        btCollisionObjectArray &array = m_DynamicsWorld->getCollisionObjectArray();
+//         btCollisionObjectArray &array = m_DynamicsWorld->getCollisionObjectArray();
 
-        while (array.size() > 0) {
-            btCollisionObject *obj = array[0];
-            btRigidBody *rigidBody = btRigidBody::upcast(obj);
+//         while (array.size() > 0) {
+//             btCollisionObject *obj = array[0];
+//             btRigidBody *rigidBody = btRigidBody::upcast(obj);
 
-            if (rigidBody && rigidBody->getMotionState()) {
-                delete rigidBody->getMotionState();
-            }
+//             if (rigidBody && rigidBody->getMotionState()) {
+//                 delete rigidBody->getMotionState();
+//             }
 
-            if (obj->getCollisionShape()) {
-                delete obj->getCollisionShape();
-            }
+//             if (obj->getCollisionShape()) {
+//                 delete obj->getCollisionShape();
+//             }
 
-            m_DynamicsWorld->removeCollisionObject(obj);
-            delete obj;
-        }
-    }
+//             m_DynamicsWorld->removeCollisionObject(obj);
+//             delete obj;
+//         }
+//     }
 
-    m_DynamicsWorld.reset();
-    m_Solver.reset();
-    m_Broadphase.reset();
-    m_Dispatcher.reset();
-    m_CollisionConfig.reset();
-}
+//     m_DynamicsWorld.reset();
+//     m_Solver.reset();
+//     m_Broadphase.reset();
+//     m_Dispatcher.reset();
+//     m_CollisionConfig.reset();
+// }
 
 void Engine::RegisterUIButtonListener(const std::function<void(std::string)>& listener) {
     m_UIButtonListeners.push_back(listener);
@@ -231,120 +236,12 @@ void Engine::LoadUIFile(const std::string &name) {
     }
 }
 
-void Engine::AddObject(Node *object) {
-    fmt::println("Adding Object!");
-    
-    if (m_Renderer) {
-        for (Model *model : object->GetModelAttachments()) {
-            m_Renderer->LoadModel(model);
-        }
-    }
-
-    if (object->GetCameraAttachment()) {
-        m_Cameras.push_back(object->GetCameraAttachment());
-    }
-
-    if (object->GetRigidBody()) {
-        auto &rigidBodyPtr = object->GetRigidBody();
-
-        m_RigidBodies.push_back(rigidBodyPtr);
-
-        if (m_DynamicsWorld) {
-            m_DynamicsWorld->addRigidBody(rigidBodyPtr.get());
-        }
-    }
-
-    for (Node *child : object->GetChildren()) {
-        AddObject(child);
-    }
-
-    m_Objects.push_back(object);
-}
-
-std::vector<Camera *> &Engine::GetCameras() {
-    return m_Cameras;
-}
-
-void Engine::RemoveCamera(Camera *cam) {
-    const auto& camIt = std::find(m_Cameras.begin(), m_Cameras.end(), cam);
-
-    if (camIt == m_Cameras.end()) {
-        return;
-    }
-
-    if (m_MainCamera == cam) {
-        m_MainCamera = nullptr;
-
-        if (m_Renderer) {
-            m_Renderer->SetPrimaryCamera(nullptr);
-        }
-    }
-
-    m_Cameras.erase(camIt);
-}
-
-void Engine::RemoveObject(Node *object) {
-    auto objectIt = std::find(m_Objects.begin(), m_Objects.end(), object);
-
-    if (objectIt == m_Objects.end()) {
-        return;
-    }
-
-    if (m_Renderer) {
-        for (Model *model : object->GetModelAttachments()) {
-            m_Renderer->UnloadModel(model);
-        }
-    }
-
-    if (object->GetCameraAttachment()) {
-        RemoveCamera(object->GetCameraAttachment());
-    }
-
-    for (Node *child : object->GetChildren()) {
-        RemoveObject(child);
-    }
-
-    m_Objects.erase(objectIt);
-}
-
-/* Import an xml scene, overwriting the current one.
-    * Throws std::runtime_error and rapidxml::parse_error
-
-Input:
-    - fileName, name of the XML scene file.
-
-Output:
-    - True if the scene was sucessfully imported.
-*/
-bool Engine::ImportScene(const std::string &path) {
-    for (Object *object : m_Objects) {
-        for (Model *model : object->GetModelAttachments()) {
-            if (m_Renderer) {
-                m_Renderer->UnloadModel(model);
-            }
-
-            delete model;
-        }
-
-        delete object;
-    }
-    m_Objects.clear();
-
-    Node *rootObject = new Node();
-
-    rootObject->ImportFromFile(path);
-
-    AddObject(rootObject);
-
-    m_ScenePath = path;
-
-    return true;
+void Engine::ImportScene(const std::string &path) {
+    m_SceneTree->ImportFromGLTF2(path);
 }
 
 /* TODO: Implement with assimp */
-void Engine::ExportScene(const std::string &path) {
-    Assimp::
-}
+// void Engine::ExportScene(const std::string &path) {
 //     using namespace rapidxml;
 
 //     xml_document<char> sceneXML;
@@ -476,16 +373,6 @@ void Engine::RegisterSDLEventListener(const std::function<void(SDL_Event *)> &fu
     m_SDLEventToListenerMap[types].push_back(func);
 }
 
-Node *Engine::GetObjectByID(int ObjectID) {
-    auto it = std::find_if(m_Objects.begin(), m_Objects.end(), [ObjectID] (Object *&obj) { return ObjectID == obj->GetObjectID(); });
-
-    if (it == m_Objects.end()) {
-        return nullptr;
-    }
-
-    return *it;
-}
-
 void Engine::PhysicsStep() {
     if (!m_DynamicsWorld) {
         return;
@@ -509,7 +396,8 @@ void Engine::PhysicsStep() {
         btVector3 origin = transform.getOrigin();
         btQuaternion rotation = transform.getRotation();
 
-        Node *obj = reinterpret_cast<Node *>(body->getUserPointer());
+        /* TODO: add PhysicsBody3D or smth */
+        Node3D *obj = reinterpret_cast<Node3D *>(body->getUserPointer());
         UTILASSERT(obj);
 
         obj->SetPosition(glm::vec3(origin.getX(), origin.getY(), origin.getZ()));

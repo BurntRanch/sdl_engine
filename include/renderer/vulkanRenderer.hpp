@@ -11,7 +11,7 @@
 
 class VulkanRenderer : public BaseRenderer {
 public:
-    VulkanRenderer(Settings &settings, Camera *primaryCam) : BaseRenderer(settings, primaryCam) {};
+    VulkanRenderer(Settings &settings) : BaseRenderer(settings) {};
     ~VulkanRenderer() override;
     
     /* Returns a pointer to VulkanRenderer if renderer is a VulkanRenderer, nullptr otherwise. */

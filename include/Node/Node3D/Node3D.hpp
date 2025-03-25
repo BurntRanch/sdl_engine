@@ -16,7 +16,7 @@ public:
     ~Node3D();
 
     Node3D();
-    Node3D(glm::vec3 position, glm::quat rotation, glm::vec3 scale);
+    Node3D(const glm::vec3 position, const glm::quat rotation, const glm::vec3 scale);
 
     /* Loads a model/scene file with assimp, preferrably glTF 2.0 files.
         Nodes are converted to objects and their meshes are converted into a Model attachment.
@@ -25,20 +25,20 @@ public:
 
     // void ExportglTF2(const std::string &path);
 
-    void SetPosition(glm::vec3 position);
-    glm::vec3 GetPosition();
+    virtual void SetPosition(glm::vec3 position);
+    virtual glm::vec3 GetPosition();
 
-    void SetRotation(glm::quat rotation);
-    glm::quat GetRotation();
+    virtual void SetRotation(glm::quat rotation);
+    virtual glm::quat GetRotation();
 
-    void SetScale(glm::vec3 scale);
-    glm::vec3 GetScale();
-private:
+    virtual void SetScale(glm::vec3 scale);
+    virtual glm::vec3 GetScale();
+protected:
     void ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Node *parent = nullptr, std::optional<std::reference_wrapper<Camera *>> primaryCamOutput = {});
 
-    glm::vec3 m_Position;
-    glm::quat m_Rotation;
-    glm::vec3 m_Scale;
+    glm::vec3 m_Position = glm::vec3(0, 0, 0);
+    glm::quat m_Rotation = glm::quat(0, 0, 0, 1);
+    glm::vec3 m_Scale = glm::vec3(1, 1, 1);
 };
 
 #endif // _NODE3D_HPP_

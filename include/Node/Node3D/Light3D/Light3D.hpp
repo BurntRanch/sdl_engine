@@ -1,5 +1,5 @@
-#ifndef _MODEL3D_HPP_
-#define _MODEL3D_HPP_
+#ifndef _LIGHT3D_HPP_
+#define _LIGHT3D_HPP_
 
 #include "BulletDynamics/Dynamics/btRigidBody.h"
 #include "camera.hpp"
@@ -14,10 +14,9 @@
 
 class Light3D : public Node3D {
 public:
-    ~Light3D();
+    Light3D() = default;
 
-    Light3D();
-    Light3D(glm::vec3 position, glm::quat rotation, glm::vec3 scale);
+    Light3D(const glm::vec3 position, const glm::quat rotation, const glm::vec3 scale) : Node3D(position, rotation, scale) {};
 
     /* Loads a model/scene file with assimp, preferrably glTF 2.0 files.
         Nodes are converted to objects and their meshes are converted into a Model attachment.
@@ -28,8 +27,8 @@ public:
 
     void SetLightColor(glm::vec3 color);
     glm::vec3 GetLightColor();
-private:
-    glm::vec3 m_LightColor;
+protected:
+    glm::vec3 m_LightColor = glm::vec3(1, 1, 1);
 };
 
-#endif // _MODEL3D_HPP_
+#endif // _LIGHT3D_HPP_

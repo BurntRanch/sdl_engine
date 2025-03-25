@@ -24,6 +24,8 @@ Node::~Node() {
     for (Node *obj : m_Children) {
         delete obj;
     }
+
+    m_SceneTree->UnloadNode(this);
 }
 
 Node::Node() {
@@ -200,7 +202,7 @@ void Node::SetParent(Node *parent) {
     }
 }
 
-Node *Node::GetParent() {
+Node *Node::GetParent() const {
     return m_Parent;
 }
 
@@ -214,7 +216,7 @@ void Node::AddChild(Node *child) {
     child->SetParent(this);
 }
 
-std::vector<Node *> Node::GetChildren() {
+std::vector<Node *> Node::GetChildren() const {
     return m_Children;
 }
 
@@ -229,11 +231,11 @@ void Node::RemoveChild(Node *child) {
     return;
 }
 
-int Node::GetNodeID() {
+int Node::GetNodeID() const {
     return m_NodeID;
 }
 
-void Node::SetNodeID(int nodeID) {
+void Node::SetNodeID(const int nodeID) {
     m_NodeID = nodeID;
 }
 
