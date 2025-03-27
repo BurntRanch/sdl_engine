@@ -35,20 +35,22 @@ std::vector<std::string> split(const std::string_view text, const char delim) {
     return vec;
 }
 
-Object *DeepSearchObjectTree(Object *obj, std::function<bool(Object *)> pred) {
-    for (Object *child : obj->GetChildren()) {
-        if (pred(child)) {
-            return child;
-        }
 
-        Object *deepSearchResult = DeepSearchObjectTree(child, pred);
-        if (deepSearchResult != nullptr) {
-            return deepSearchResult;
-        }
-    }
+/* Deprecated, should be builtin to SceneTree very soon. */
+// Node *DeepSearchObjectTree(Node *obj, std::function<bool(Object *)> pred) {
+//     for (Object *child : obj->GetChildren()) {
+//         if (pred(child)) {
+//             return child;
+//         }
 
-    return nullptr;
-}
+//         Object *deepSearchResult = DeepSearchObjectTree(child, pred);
+//         if (deepSearchResult != nullptr) {
+//             return deepSearchResult;
+//         }
+//     }
+
+//     return nullptr;
+// }
 
 std::vector<int> FilterRelatedNetworkingObjects(std::vector<Networking_Object> &candidates, Networking_Object *object) {
     std::vector<int> relatedObjects;

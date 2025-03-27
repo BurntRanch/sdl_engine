@@ -16,37 +16,37 @@
  */
 class Camera3D : public Node3D {
 public:
-    Camera3D(const float pitch, const float yaw, const float roll, const float near = 0.1f, const float far = 100.0f, const float FOV = 90.0f);
+    Camera3D(const glm::vec3 up, const float near = 0.1f, const float far = 100.0f, const float FOV = 90.0f);
 
-    Camera3D(const float pitch, const float yaw, const float roll, const glm::vec3 position, const glm::quat rotation, const glm::vec3 scale);
+    Camera3D(const Node &node) : Node3D(node) {};
+    Camera3D(const Node3D &node3D) : Node3D(node3D) {};
+
+    Camera3D(const glm::vec3 up, const glm::vec3 position, const glm::quat rotation, const glm::vec3 scale);
 
     void SetNear(const float near);
-    float GetNear();
+    const float &GetNear() const;
 
     void SetFar(const float far);
-    float GetFar();
+    const float &GetFar() const;
 
     void SetFOV(const float FOV);
-    float GetFOV();
+    const float &GetFOV() const;
 
-    void SetEulerAngles(const glm::vec3 &eulerAngles);
+    void SetUp(const glm::vec3 up);
+    const glm::vec3 &GetUp() const;
 
-    void SetPitch(const float pitch);
-    float GetPitch();
-    
-    void SetYaw(const float yaw);
-    float GetYaw();
-
-    void SetRoll(const float roll);
-    float GetRoll();
+    const glm::mat4 GetViewMatrix();
 protected:
-    /* This is here to avoid having to translate from m_Rotation. Although m_Rotation does get changed. */
-    glm::vec3 m_EulerRotation;
-
     float m_Near = 0.1f;
     float m_Far = 100.0f;
 
     float m_FOV = 90.0f;
+
+    glm::vec3 m_WorldUp;
+    glm::vec3 m_Front, m_Up, m_Right;
+
+private:
+    void CalculateCameraVectors();
 };
 
 #endif // _CAMERA3D_HPP_

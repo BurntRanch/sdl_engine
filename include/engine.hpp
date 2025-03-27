@@ -15,6 +15,7 @@
 #include "common.hpp"
 #include "isteamnetworkingsockets.h"
 #include "networking/connection.hpp"
+#include "renderer/GraphicsPipeline.hpp"
 #include "steamnetworkingtypes.h"
 #include "ui/button.hpp"
 #include "Node/Node.hpp"
@@ -211,7 +212,7 @@ public:
 
     void LoadUIFile(const std::string &name);
 
-    const SceneTree *GetSceneTree();
+    SceneTree *GetSceneTree();
 
     // void LoadNode(Node *object);
 
@@ -236,6 +237,15 @@ public:
     void RegisterUIButton(UI::Button *button);
     void UnregisterUIButton(UI::Button *button);
 private:
+    void LoadNode(const Node *node);
+    void UnloadNode(const Node *node);
+
+    void MainRenderFunction(GraphicsPipeline *pipeline);
+    void UIWaypointRenderFunction(GraphicsPipeline *pipeline);
+    void RescaleRenderFunction(GraphicsPipeline *pipeline);
+    void UIPanelRenderFunction(GraphicsPipeline *pipeline);
+    void UILabelRenderFunction(GraphicsPipeline *pipeline);
+
 /*  Systems   */
     BaseRenderer *m_Renderer = nullptr;
 

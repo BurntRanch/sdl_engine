@@ -1,4 +1,5 @@
 #include "renderer/vulkanRenderer.hpp"
+#include "Node/Node3D/Model3D/Model3D.hpp"
 #include "common.hpp"
 #include "error.hpp"
 #include "renderer/GraphicsPipeline.hpp"
@@ -110,10 +111,6 @@ VulkanRenderer::~VulkanRenderer() {
         this->RemoveUIWaypoint(renderUIWaypoint.waypoint);
     }
 
-    for (RenderUIArrows &renderUIArrows : m_RenderUIArrows) {
-        this->RemoveUIArrows(renderUIArrows.arrows);
-    }
-
     for (GraphicsPipeline *pipeline : m_Pipelines) {
         vkDestroyPipeline(m_EngineDevice, std::any_cast<VkPipeline>(pipeline->GetRawPipeline()), NULL);
         vkDestroyPipelineLayout(m_EngineDevice, std::any_cast<VkPipelineLayout>(pipeline->GetRawPipelineLayout()), NULL);
@@ -156,20 +153,21 @@ VulkanRenderer::~VulkanRenderer() {
     for (size_t i = 0; i < m_SwapchainImageViews.size(); i++)
         vkDestroyImageView(m_EngineDevice, m_SwapchainImageViews[i], NULL);
 
-    if (m_RenderDescriptorSetLayout)
-        vkDestroyDescriptorSetLayout(m_EngineDevice, m_RenderDescriptorSetLayout, NULL);
+    // if (m_RenderDescriptorSetLayout)
+    //     vkDestroyDescriptorSetLayout(m_EngineDevice, m_RenderDescriptorSetLayout, NULL);
 
-    if (m_UIArrowsDescriptorSetLayout)
-        vkDestroyDescriptorSetLayout(m_EngineDevice, m_UIArrowsDescriptorSetLayout, NULL);
+    // if (m_UILabelDescriptorSetLayout)
+    //     vkDestroyDescriptorSetLayout(m_EngineDevice, m_UILabelDescriptorSetLayout, NULL);
 
-    if (m_UILabelDescriptorSetLayout)
-        vkDestroyDescriptorSetLayout(m_EngineDevice, m_UILabelDescriptorSetLayout, NULL);
+    // if (m_RescaleDescriptorSetLayout)
+    //     vkDestroyDescriptorSetLayout(m_EngineDevice, m_RescaleDescriptorSetLayout, NULL);
 
-    if (m_RescaleDescriptorSetLayout)
-        vkDestroyDescriptorSetLayout(m_EngineDevice, m_RescaleDescriptorSetLayout, NULL);
+    // if (m_UIPanelDescriptorSetLayout)
+    //     vkDestroyDescriptorSetLayout(m_EngineDevice, m_UIPanelDescriptorSetLayout, NULL);
 
-    if (m_UIPanelDescriptorSetLayout)
-        vkDestroyDescriptorSetLayout(m_EngineDevice, m_UIPanelDescriptorSetLayout, NULL);
+    for (VkDescriptorSetLayout &layout : m_AllocatedDescriptorSetLayouts) {
+        vkDestroyDescriptorSetLayout(m_EngineDevice, layout, NULL);
+    }
 
     if (m_CommandPool)
         vkDestroyCommandPool(m_EngineDevice, m_CommandPool, NULL);
@@ -270,7 +268,7 @@ void VulkanRenderer::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer 
 }
 
 // first element = diffuse
-std::array<TextureImageAndMemory, 1> VulkanRenderer::LoadTexturesFromMesh(Mesh &mesh, bool recordAllocations) {
+std::array<TextureImageAndMemory, 1> VulkanRenderer::LoadTexturesFromMesh(const Mesh &mesh, bool recordAllocations) {
     std::array<TextureImageAndMemory, 1> textures;
     
     if (!mesh.diffuseMapPath.empty()) {
@@ -424,7 +422,7 @@ VkFormat VulkanRenderer::FindBestFormat(const std::vector<VkFormat>& candidates,
     throw std::runtime_error(engineError::CANT_FIND_ANY_FORMAT);
 }
 
-RenderModel VulkanRenderer::LoadMesh(Mesh &mesh, Model *model, bool loadTextures) {
+RenderModel VulkanRenderer::LoadMesh(const Mesh &mesh, const Model3D *model, bool loadTextures) {
     RenderModel renderModel{};
 
     renderModel.model = model;
@@ -470,14 +468,10 @@ void VulkanRenderer::SetMouseCaptureState(bool capturing) {
     SDL_SetWindowRelativeMouseMode(m_EngineWindow, capturing);
 }
 
-void VulkanRenderer::SetPrimaryCamera(Camera *cam) {
-    m_PrimaryCamera = cam;
-}
-
-void VulkanRenderer::LoadModel(Model *model) {
+void VulkanRenderer::LoadModel(const Model3D *model) {
     std::vector<std::future<RenderModel>> tasks;
 
-    for (Mesh &mesh : model->meshes) {
+    for (const Mesh &mesh : model->GetModel()->meshes) {
         tasks.push_back(std::async(std::launch::deferred, &VulkanRenderer::LoadMesh, this, std::ref(mesh), model, true));
     }
 
@@ -513,7 +507,7 @@ void VulkanRenderer::UnloadRenderModel(RenderModel &renderModel) {
     vkFreeMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, NULL);
 }
 
-void VulkanRenderer::UnloadModel(Model *model) {
+void VulkanRenderer::UnloadModel(const Model3D *model) {
     for (size_t i = 0; i < m_RenderModels.size(); i++) {
         if (m_RenderModels[i].model != model)
             continue;
@@ -611,78 +605,6 @@ void VulkanRenderer::AddUIWaypoint(UI::Waypoint *waypoint) {
     renderUIWaypoint.waypointUBOBuffer.size = waypointUniformBufferSize;
 
     m_RenderUIWaypoints.push_back(renderUIWaypoint);
-}
-
-void VulkanRenderer::AddUIArrows(UI::Arrows *arrows) {
-    RenderUIArrows renderUIArrows{};
-
-    renderUIArrows.arrows = arrows;
-
-    /* probably broken but UI::Arrows is basically dead as we aren't planning on making our own map editor. */
-    renderUIArrows.arrowRenderModels[0] = LoadMesh(arrows->arrowsObject->GetModelAttachments()[0]->meshes[0], arrows->arrowsObject->GetModelAttachments()[0], false);
-    renderUIArrows.arrowRenderModels[1] = LoadMesh(arrows->arrowsObject->GetModelAttachments()[0]->meshes[1], arrows->arrowsObject->GetModelAttachments()[0], false);
-    renderUIArrows.arrowRenderModels[2] = LoadMesh(arrows->arrowsObject->GetModelAttachments()[0]->meshes[2], arrows->arrowsObject->GetModelAttachments()[0], false);
-
-    for (auto &arrowBuffer : renderUIArrows.arrowBuffers) {
-        // matrices UBO
-        VkDeviceSize matricesUniformBufferSize = sizeof(MatricesUBO);
-
-        arrowBuffer.first.first = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
-
-        AllocateBuffer(matricesUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, arrowBuffer.second.first);
-
-        vkMapMemory(m_EngineDevice, arrowBuffer.second.first.memory, 0, matricesUniformBufferSize, 0, &arrowBuffer.second.first.mappedData);
-
-        arrowBuffer.second.first.size = matricesUniformBufferSize;
-
-        // waypoint UBO
-        VkDeviceSize arrowsUniformBufferSize = sizeof(UIArrowsUBO);
-
-        arrowBuffer.first.second = {glm::vec3(1.0f, 1.0f, 1.0f)};
-
-        AllocateBuffer(arrowsUniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, arrowBuffer.second.second);
-
-        vkMapMemory(m_EngineDevice, arrowBuffer.second.second.memory, 0, arrowsUniformBufferSize, 0, &arrowBuffer.second.second.mappedData);
-
-        arrowBuffer.second.second.size = arrowsUniformBufferSize;
-    }
-
-    m_RenderUIArrows.push_back(renderUIArrows);
-}
-
-bool VulkanRenderer::RemoveUIArrows(UI::Arrows *arrows) {
-    RemoveUIChildren(arrows);
-    
-    bool found = false;
-
-    for (size_t i = 0; i < m_RenderUIArrows.size(); i++) {
-        if (m_RenderUIArrows[i].arrows != arrows)
-            continue;
-
-        found = true;
-
-        RenderUIArrows renderUIArrows = m_RenderUIArrows[i];
-
-        m_RenderUIArrows.erase(m_RenderUIArrows.begin() + (i--));
-
-        // Before we start, wait for the device to be idle
-        // This is already called in ~Engine, but sometimes the user calls RemoveWaypoint manually.
-        vkDeviceWaitIdle(m_EngineDevice);
-
-        for (auto &arrowBuffer : renderUIArrows.arrowBuffers) {
-            vkDestroyBuffer(m_EngineDevice, arrowBuffer.second.first.buffer, NULL);
-            vkFreeMemory(m_EngineDevice, arrowBuffer.second.first.memory, NULL);
-
-            vkDestroyBuffer(m_EngineDevice, arrowBuffer.second.second.buffer, NULL);
-            vkFreeMemory(m_EngineDevice, arrowBuffer.second.second.memory, NULL);
-        }
-
-        for (RenderModel &renderModel : renderUIArrows.arrowRenderModels) {
-            UnloadRenderModel(renderModel);
-        }
-    }
-
-    return found;
 }
 
 bool VulkanRenderer::RemoveUIWaypoint(UI::Waypoint *waypoint) {
@@ -1488,6 +1410,8 @@ std::any VulkanRenderer::CreateDescriptorSetLayout(std::vector<PipelineBinding> 
     if (vkCreateDescriptorSetLayout(m_EngineDevice, &descriptorSetLayoutCreateInfo, NULL, &layout) != VK_SUCCESS)
         throw std::runtime_error(engineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILURE);
 
+    m_AllocatedDescriptorSetLayouts.push_back(layout);
+
     return layout;
 }
 
@@ -1956,16 +1880,6 @@ VkFramebuffer VulkanRenderer::CreateFramebuffer(RenderPass *renderPass, VkImageV
     return framebuffer;
 }
 
-/* Basic Shaders are those with only vertex/fragment shaders */
-GraphicsPipeline *CreateBasicShader(VulkanRenderer *renderer, std::string name, RenderPass *renderPass, Uint32 subpassIndex, VkFrontFace frontFace, glm::vec4 viewport, glm::vec4 scissor, const DescriptorLayout &descriptorSetLayout, bool isSimple = VK_FALSE, bool enableDepth = VK_TRUE) {
-    std::vector<Shader> shaders;
-
-    shaders.emplace_back(renderer, VK_SHADER_STAGE_VERTEX_BIT, std::filesystem::path("shaders") / (name + ".vert.spv"));
-    shaders.emplace_back(renderer, VK_SHADER_STAGE_FRAGMENT_BIT, std::filesystem::path("shaders") / (name + ".frag.spv"));
-
-    return renderer->CreateGraphicsPipeline(shaders, renderPass, subpassIndex, frontFace, viewport, scissor, descriptorSetLayout, isSimple, enableDepth);
-}
-
 void VulkanRenderer::Init() {
     int SDL_INIT_STATUS = SDL_Init(SDL_INIT_VIDEO);
     if (!SDL_INIT_STATUS)
@@ -2155,139 +2069,6 @@ void VulkanRenderer::Init() {
     // matricesUBO.viewMatrix = glm::mat4(1.0f);
     // matricesUBO.modelMatrix = glm::mat4(1.0f);
     // matricesUBO.projectionMatrix = glm::mat4(1.0f);
-    DescriptorLayout renderLayout(this);
-
-    /* Matrices UBO */
-    renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
-
-    /* Texture */
-    renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
-
-    m_RenderDescriptorSetLayout = std::any_cast<VkDescriptorSetLayout>(renderLayout.Create());
-
-
-    DescriptorLayout waypointLayout(this);
-
-    /* Matrices UBO */
-    waypointLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 0});
-
-    /* waypoint UBO */
-    waypointLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
-
-    m_UIWaypointDescriptorSetLayout = std::any_cast<VkDescriptorSetLayout>(waypointLayout.Create());
-    
-
-    DescriptorLayout arrowLayout(this);
-
-    /* Matrices UBO */
-    arrowLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
-
-    /* Arrow info */
-    arrowLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
-
-    m_UIArrowsDescriptorSetLayout = std::any_cast<VkDescriptorSetLayout>(arrowLayout.Create());
-
-
-    DescriptorLayout rescaleLayout(this);
-
-    /* Render image */
-    rescaleLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0});
-
-    m_RescaleDescriptorSetLayout = std::any_cast<VkDescriptorSetLayout>(rescaleLayout.Create());
-
-
-    DescriptorLayout panelLayout(this);
-
-    /* Dimensions UBO */
-    panelLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
-
-    /* Color/Texture */
-    panelLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
-
-    m_UIPanelDescriptorSetLayout = std::any_cast<VkDescriptorSetLayout>(panelLayout.Create());
-
-
-    DescriptorLayout labelLayout(this);
-
-    /* Label info */
-    labelLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
-
-    /* Glyph texture */
-    labelLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
-
-    /* Glyph info */
-    labelLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 2});
-
-    m_UILabelDescriptorSetLayout = std::any_cast<VkDescriptorSetLayout>(labelLayout.Create());
-
-    // Render
-    glm::vec4 renderViewport, renderScissor;
-
-    renderViewport.x = 0.0f;
-    renderViewport.y = 0.0f;
-    renderViewport.z = (float) m_Settings.RenderWidth;
-    renderViewport.w = (float) m_Settings.RenderHeight;
-
-    renderScissor.x = 0;
-    renderScissor.y = 0;
-    renderScissor.z = m_Settings.RenderWidth;
-    renderScissor.w = m_Settings.RenderHeight;
-
-    // Rescale
-    glm::vec4 displayViewport, displayScissor;
-
-    displayViewport.x = 0.0f;
-    displayViewport.y = 0.0f;
-    displayViewport.z = (float) m_Settings.DisplayWidth;
-    displayViewport.w = (float) m_Settings.DisplayHeight;
-
-    displayScissor.x = 0;
-    displayScissor.y = 0;
-    displayScissor.z = m_Settings.DisplayWidth;
-    displayScissor.w = m_Settings.DisplayHeight;
-
-    m_MainGraphicsPipeline = CreateBasicShader(this, 
-        "lighting", m_MainRenderPass, 
-        0, VK_FRONT_FACE_CLOCKWISE, 
-        renderViewport, renderScissor, 
-        {renderLayout}
-    );
-    m_MainGraphicsPipeline->SetRenderFunction(std::bind(&VulkanRenderer::MainRenderFunction, this, std::placeholders::_1));
-    m_UIWaypointGraphicsPipeline = CreateBasicShader(this,
-        "uiwaypoint", m_MainRenderPass, 
-        1, VK_FRONT_FACE_CLOCKWISE, 
-        renderViewport, renderScissor, 
-        {waypointLayout}, 
-        true);
-    m_UIWaypointGraphicsPipeline->SetRenderFunction(std::bind(&VulkanRenderer::UIWaypointRenderFunction, this, std::placeholders::_1));
-    m_UIArrowsGraphicsPipeline = CreateBasicShader(this, 
-        "uiarrows", m_MainRenderPass, 
-        2, VK_FRONT_FACE_CLOCKWISE, 
-        renderViewport, renderScissor, 
-        {arrowLayout}, 
-        false, VK_FALSE);
-    m_UIArrowsGraphicsPipeline->SetRenderFunction(std::bind(&VulkanRenderer::UIArrowsRenderFunction, this, std::placeholders::_1));
-    m_RescaleGraphicsPipeline = CreateBasicShader(this, 
-        "rescale", m_RescaleRenderPass, 
-        0, VK_FRONT_FACE_CLOCKWISE, 
-        displayViewport, displayScissor,
-        {rescaleLayout},
-        true);
-    m_RescaleGraphicsPipeline->SetRenderFunction(std::bind(&VulkanRenderer::RescaleRenderFunction, this, std::placeholders::_1));
-    m_UIPanelGraphicsPipeline = CreateBasicShader(this, 
-        "uipanel", m_RescaleRenderPass, 
-        1, VK_FRONT_FACE_CLOCKWISE, 
-        displayViewport, displayScissor,
-        {panelLayout}, 
-        true);
-    m_UIPanelGraphicsPipeline->SetRenderFunction(std::bind(&VulkanRenderer::UIPanelRenderFunction, this, std::placeholders::_1));
-    m_UILabelGraphicsPipeline = CreateBasicShader(this, 
-        "uilabel", m_RescaleRenderPass, 
-        2, VK_FRONT_FACE_CLOCKWISE, 
-        displayViewport, displayScissor, 
-        {labelLayout}, 
-        true);
-    m_UILabelGraphicsPipeline->SetRenderFunction(std::bind(&VulkanRenderer::UILabelRenderFunction, this, std::placeholders::_1));
 
     // Image view, for sampling the render texture for rescaling.
     VkPhysicalDeviceProperties properties{};
@@ -2362,6 +2143,7 @@ void VulkanRenderer::StepRender() {
     // the swapchain can become "out of date" if the user were to, say, resize the window.
     // suboptimal means it is kind of out of date but not invalid, can still be used.
     if (acquireNextImageResult == VK_ERROR_OUT_OF_DATE_KHR) {
+        /* TODO: create a function so we don't repeat ourselves. */
         InitSwapchain();
 
 

@@ -193,6 +193,16 @@ void Node::SetParent(Node *parent) {
         /* This sounds like an infinite call, but RemoveChild searches for the child, so by this call it won't exist in m_Children anymore and it would just return early. */
         m_Parent->RemoveChild(this);
     }
+    /* This node was orphaned, but is now being added to a tree. */
+    if (parent != nullptr && m_SceneTree != parent->m_SceneTree) {
+        if (m_SceneTree != nullptr) {
+            m_SceneTree->UnloadNode(this);
+        }
+        if (parent->m_SceneTree != nullptr) {
+            m_SceneTree = parent->m_SceneTree;
+            m_SceneTree->LoadNode(this);
+        }
+    }
 
     m_Parent = parent;
 
@@ -200,9 +210,13 @@ void Node::SetParent(Node *parent) {
         /* Same for the other comment above. */
         parent->AddChild(this);
     }
+
+    if (m_Parent == nullptr && m_SceneTree != nullptr) {
+        m_SceneTree->UnloadNode(this);
+    }
 }
 
-Node *Node::GetParent() const {
+const Node *Node::GetParent() const {
     return m_Parent;
 }
 
@@ -216,7 +230,7 @@ void Node::AddChild(Node *child) {
     child->SetParent(this);
 }
 
-std::vector<Node *> Node::GetChildren() const {
+const std::vector<Node *> &Node::GetChildren() const {
     return m_Children;
 }
 
@@ -231,7 +245,7 @@ void Node::RemoveChild(Node *child) {
     return;
 }
 
-int Node::GetNodeID() const {
+const int &Node::GetNodeID() const {
     return m_NodeID;
 }
 

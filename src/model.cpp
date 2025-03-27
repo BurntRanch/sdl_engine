@@ -1,4 +1,4 @@
-#include "object.hpp"
+#include "Node/Node.hpp"
 
 #include <assimp/material.h>
 #include <assimp/mesh.h>
@@ -6,7 +6,12 @@
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <model.hpp>
+#include <stdexcept>
 #include <vector>
+
+glm::mat4 Model::GetModelMatrix() const {
+    throw std::runtime_error("Do not call Model::GetModelMatrix()");
+}
 
 Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
 {
@@ -126,32 +131,7 @@ Mesh Model::processMesh(aiMesh *mesh, const aiScene *scene)
     return Mesh(*this, vertices, indices, diffuseMap/*, shininess, roughness, metallic*/, diffuse);
 }
 
-glm::mat4 Model::GetModelMatrix() {
-    /* This used to exist before, but now we're not sure when the object attachment moves. */
-    // if (!m_NeedsUpdate)
-    //     return m_ModelMatrix;
-
-    // fmt::println("Updating model matrix for object {}!", fmt::ptr(this));
-
-    // Update the model matrix with the position/rotation.
-    if (m_ObjectAttachment) {
-        m_ModelMatrix = glm::translate(glm::mat4(1.0f), m_ObjectAttachment->GetPosition());
-        m_ModelMatrix *= glm::mat4_cast(m_ObjectAttachment->GetRotation());
-        m_ModelMatrix *= glm::scale(glm::mat4(1.0f), m_ObjectAttachment->GetScale());
-    }
-
-    return m_ModelMatrix;
-}
-
-void Model::SetObjectAttachment(Object *object) {
-    m_ObjectAttachment = object;
-}
-
-Object *Model::GetObjectAttachment() {
-    return m_ObjectAttachment;
-}
-
-int Model::GetModelID() {
+int Model::GetModelID() const {
     return m_ModelID;
 }
 

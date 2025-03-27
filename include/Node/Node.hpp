@@ -12,7 +12,7 @@
 
 class Node {
 public:
-    ~Node();
+    virtual ~Node();
 
     Node();
 
@@ -24,15 +24,15 @@ public:
     // void ExportglTF2(const std::string &path);
 
     virtual void SetParent(Node *parent);
-    virtual Node *GetParent() const;
+    virtual const Node *GetParent() const;
 
     /* Meant to be called by the child when SetParent is called. */
     virtual void AddChild(Node *child);
     
-    virtual std::vector<Node *> GetChildren() const;
+    virtual const std::vector<Node *> &GetChildren() const;
     virtual void RemoveChild(Node *child);
 
-    virtual int GetNodeID() const;
+    virtual const int &GetNodeID() const;
     virtual void SetNodeID(const int nodeID);
 friend class SceneTree;
 protected:
@@ -44,7 +44,7 @@ protected:
 
     std::vector<Node *> m_Children;
 
-    SceneTree *m_SceneTree;
+    SceneTree *m_SceneTree = nullptr;
 
     static int HighestNodeID;
 };

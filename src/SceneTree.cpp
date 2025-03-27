@@ -5,12 +5,14 @@
 #include "Node/Node3D/Node3D.hpp"
 #include "fmt/format.h"
 #include "util.hpp"
+#include <algorithm>
 #include <assimp/camera.h>
 #include <assimp/light.h>
 #include <assimp/matrix4x4.h>
 #include <assimp/scene.h>
 #include <assimp/vector3.h>
 #include <cstring>
+#include <glm/ext/quaternion_geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/trigonometric.hpp>
 #include <SceneTree.hpp>
@@ -19,28 +21,27 @@
 
 Node *SceneTree::ProcessNode(const aiNode *aiNode, const aiScene *aiScene) {
     Node *node = new Node();
-    Node3D *node3D = nullptr;
 
     std::string aiNodeName = aiNode->mName.C_Str();
 
     /* heuristics to convert glTF 2.0 to our scene format */
     if (!aiNode->mTransformation.IsIdentity()) {
-        node = dynamic_cast<Node3D *>(node);
+        node = new Node3D(*node);
 
         aiVector3D position;
         aiVector3D rotation;
         aiVector3D scale;
 
-        aiNode->mTransformation.Decompose(position, rotation, scale);
+        aiNode->mTransformation.Decompose(scale, rotation, position);
 
-        node3D->SetPosition(glm::vec3(position.x, position.y, position.z));
-        node3D->SetRotation(glm::vec3(rotation.x, rotation.y, rotation.z)); /* converted to quaternion automatically */
-        node3D->SetScale(glm::vec3(scale.x, scale.y, scale.z));
+        reinterpret_cast<Node3D *>(node)->SetPosition(glm::vec3(position.x, position.y, position.z));
+        reinterpret_cast<Node3D *>(node)->SetRotation(glm::vec3(rotation.x, rotation.y, rotation.z)); /* converted to quaternion automatically */
+        reinterpret_cast<Node3D *>(node)->SetScale(glm::vec3(scale.x, scale.y, scale.z));
     }
 
-    if (node3D != nullptr && aiNode->mNumMeshes > 0) {
-        node3D = dynamic_cast<Model3D *>(node3D);
-        reinterpret_cast<Model3D *>(node3D)->ImportFromAssimpNode(aiNode, aiScene);
+    if (typeid(*node) == typeid(Node3D) && aiNode->mNumMeshes > 0) {
+        node = new Model3D(*dynamic_cast<Node3D *>(node));
+        reinterpret_cast<Model3D *>(node)->ImportFromAssimpNode(aiNode, aiScene);
     }
 
     /* find a light with the same name according to the assimp documentation. */
@@ -59,63 +60,53 @@ Node *SceneTree::ProcessNode(const aiNode *aiNode, const aiScene *aiScene) {
             }
         );
 
-    if (node3D != nullptr && aiLightPtr != aiScene->mLights + aiScene->mNumLights) {
+    if (typeid(*node) == typeid(Node3D) && aiLightPtr != aiScene->mLights + aiScene->mNumLights) {
         fmt::println("Found a light!");
-
-        if (typeid(node3D) != typeid(Node3D *)) {
-            throw std::runtime_error("Non-light node has the same name as a light source? This is most likely an error with the model file.");
-        }
 
         aiLight *aiLight = *aiLightPtr;
         
         UTILASSERT(aiLight->mType == aiLightSource_POINT);
 
-        node3D = dynamic_cast<PointLight3D *>(node3D);
-        PointLight3D *pointLight = reinterpret_cast<PointLight3D *>(node3D);
+        node = new PointLight3D(*dynamic_cast<Node3D *>(node), aiLight->mAttenuationConstant, aiLight->mAttenuationLinear, aiLight->mAttenuationQuadratic);
 
-        pointLight->SetAttenuation(aiLight->mAttenuationConstant, aiLight->mAttenuationLinear, aiLight->mAttenuationQuadratic);
-        pointLight->SetLightColor(glm::vec3(aiLight->mColorDiffuse.r, aiLight->mColorDiffuse.g, aiLight->mColorDiffuse.b));
+        reinterpret_cast<PointLight3D *>(node)->SetLightColor(glm::normalize(glm::vec3(aiLight->mColorDiffuse.r, aiLight->mColorDiffuse.g, aiLight->mColorDiffuse.b)));
     }
 
-    if (node3D != nullptr && aiCameraPtr != aiScene->mCameras + aiScene->mNumCameras) {
+    if (typeid(*node) == typeid(Node3D) && aiCameraPtr != aiScene->mCameras + aiScene->mNumCameras) {
         fmt::println("Found a camera!");
-
-        if (typeid(node3D) != typeid(Node3D *)) {
-            throw std::runtime_error("Non-camera node has the same name as a camera? This is most likely an error with the model file.");
-        }
 
         aiCamera *aiCamera = *aiCameraPtr;
 
-        node3D = dynamic_cast<Camera3D *>(node3D);
-        Camera3D *camera = reinterpret_cast<Camera3D *>(node3D);
-
-        glm::vec3 RotationToEulerAngles = glm::eulerAngles(camera->GetRotation());
-
-        camera->SetPitch(RotationToEulerAngles.x);
-        camera->SetYaw(RotationToEulerAngles.y);
-        camera->SetRoll(RotationToEulerAngles.z);
+        node = new Camera3D(*dynamic_cast<Node3D *>(node));
+        Camera3D *camera = reinterpret_cast<Camera3D *>(node);
 
         camera->SetNear(aiCamera->mClipPlaneNear);
         camera->SetFar(aiCamera->mClipPlaneFar);
         camera->SetFOV(glm::degrees(aiCamera->mHorizontalFOV));
+
+        camera->SetUp(glm::vec3(aiCamera->mUp.x, aiCamera->mUp.y, aiCamera->mUp.z));
     }
 
     for (size_t i = 0; i < aiNode->mNumChildren; i++) {
-        Node *child = ProcessNode(aiNode->mChildren[0], aiScene);
+        Node *child = ProcessNode(aiNode->mChildren[i], aiScene);
 
         node->AddChild(child);
     }
 
     LoadNode(node);
 
-    return (node3D != nullptr ? node3D : node);
+    return node;
 }
 
 void SceneTree::RegisterUnloadListener(const SceneTreeListenerType &func) {
     m_UnloadListeners.push_back(func);
 }
 
-void SceneTree::UnloadNode(Node *node) const {
+void SceneTree::RegisterLoadListener(const SceneTreeListenerType &func) {
+    m_LoadListeners.push_back(func);
+}
+
+void SceneTree::UnloadNode(Node *node) {
     for (auto &listener : m_UnloadListeners) {
         listener(node, this);
     }
@@ -123,22 +114,45 @@ void SceneTree::UnloadNode(Node *node) const {
     if (node->GetParent() != nullptr) {
         node->SetParent(nullptr);
     }
+
+    node->m_SceneTree = nullptr;
+
+    auto camera3D_it = std::find(m_Camera3Ds.begin(), m_Camera3Ds.end(), node);
+    if (camera3D_it != m_Camera3Ds.end()) {
+        m_Camera3Ds.erase(camera3D_it);
+    }
+
+    for (Node *child : node->GetChildren()) {
+        UnloadNode(child);
+    }
 }
 
 void SceneTree::LoadNode(Node *node) {
     for (auto &listener : m_LoadListeners) {
         listener(node, this);
-
-        for (Node *child : node->GetChildren()) {
-            listener(child, this);
-        }
     }
 
     node->m_SceneTree = this;
+
+    if (typeid(*node) == typeid(Camera3D)) {
+        m_Camera3Ds.push_back(dynamic_cast<Camera3D *>(node));
+    }
+    
+    for (Node *child : node->GetChildren()) {
+        LoadNode(child);
+    }
 }
 
 const Node *SceneTree::GetRootNode() const {
     return m_RootNode;
+}
+
+Camera3D *SceneTree::GetMainCamera3D() const {
+    if (m_Camera3Ds.empty()) {
+        return nullptr;
+    }
+
+    return m_Camera3Ds[0];
 }
 
 void SceneTree::ImportFromGLTF2(const std::string &path) {

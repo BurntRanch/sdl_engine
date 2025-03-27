@@ -4,6 +4,6 @@ void Light3D::SetLightColor(const glm::vec3 color) {
     m_LightColor = color;
 }
 
-glm::vec3 Light3D::GetLightColor() {
+const glm::vec3 &Light3D::GetLightColor() const {
     return m_LightColor;
 }

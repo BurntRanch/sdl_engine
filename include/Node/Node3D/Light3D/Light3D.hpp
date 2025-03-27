@@ -16,6 +16,9 @@ class Light3D : public Node3D {
 public:
     Light3D() = default;
 
+    Light3D(const Node &node) : Node3D(node) {};
+    Light3D(const Node3D &node3D) : Node3D(node3D) {};
+
     Light3D(const glm::vec3 position, const glm::quat rotation, const glm::vec3 scale) : Node3D(position, rotation, scale) {};
 
     /* Loads a model/scene file with assimp, preferrably glTF 2.0 files.
@@ -26,7 +29,7 @@ public:
     // void ExportglTF2(const std::string &path);
 
     void SetLightColor(glm::vec3 color);
-    glm::vec3 GetLightColor();
+    const glm::vec3 &GetLightColor() const;
 protected:
     glm::vec3 m_LightColor = glm::vec3(1, 1, 1);
 };

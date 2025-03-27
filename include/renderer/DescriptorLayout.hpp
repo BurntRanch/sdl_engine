@@ -5,6 +5,7 @@
 #include <any>
 #include <vector>
 #include <vulkan/vulkan_core.h>
+
 struct PipelineBinding {
     VkDescriptorType type;
     VkShaderStageFlagBits shaderStageBits;

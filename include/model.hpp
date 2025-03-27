@@ -109,13 +109,9 @@ public:
 
     constexpr void SetBoundingBox(std::array<glm::vec3, 2> boundingBox) { m_BoundingBox = boundingBox; };
 
-    /* Only 1 object can be attached at a time. */
-    void SetObjectAttachment(Node *object);
-    Node *GetObjectAttachment();
+    glm::mat4 GetModelMatrix() const;
 
-    glm::mat4 GetModelMatrix();
-
-    int GetModelID();
+    int GetModelID() const;
     void SetModelID(int modelID);
 private:
     int m_ModelID = -1;
@@ -125,8 +121,6 @@ private:
     // [0] = higher
     // [1] = lower
     std::array<glm::vec3, 2> m_BoundingBox;
-
-    glm::mat4 m_ModelMatrix = glm::mat4(1.0f);
 
     //Texture loadDefaultTexture(string typeName);
 };

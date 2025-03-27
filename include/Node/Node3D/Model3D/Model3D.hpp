@@ -17,6 +17,8 @@ class Model3D : public Node3D {
 public:
     ~Model3D();
 
+    Model3D(const Node &node) : Node3D(node) {};
+    Model3D(const Node3D &node3D) : Node3D(node3D) {};
     Model3D(const glm::vec3 position, const glm::quat rotation, const glm::vec3 scale) : Node3D(position, rotation, scale) {};
 
     /* Loads a model/scene file with assimp, preferrably glTF 2.0 files.
@@ -29,12 +31,14 @@ public:
      */
     void ImportFromAssimpNode(const aiNode *node, const aiScene *scene);
 
-    Model *GetModel();
+    const Model *GetModel() const;
+
+    const glm::mat4 GetModelMatrix() const;
 
     // void ExportglTF2(const std::string &path);
 
     void SetMaterial(Material *mat);
-    Material *GetMaterial();
+    const Material *GetMaterial() const;
 protected:
     /* Placeholder as we slowly move away from this old Model class. */
     Model *m_Model = nullptr;

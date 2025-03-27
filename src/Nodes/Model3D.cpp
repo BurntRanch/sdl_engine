@@ -42,7 +42,7 @@ void Model3D::ImportFromAssimpNode(const aiNode *node, const aiScene *scene) {
     }
 }
 
-Model *Model3D::GetModel() {
+const Model *Model3D::GetModel() const {
     return m_Model;
 }
 
@@ -50,6 +50,17 @@ void Model3D::SetMaterial(Material *mat) {
     m_Material = mat;
 }
 
-Material *Model3D::GetMaterial() {
+const Material *Model3D::GetMaterial() const {
     return m_Material;
+}
+
+const glm::mat4 Model3D::GetModelMatrix() const {
+    glm::mat4 modelMatrix;
+
+    // Update the model matrix with the absolute position/rotation.
+    modelMatrix = glm::translate(glm::mat4(1.0f), GetAbsolutePosition());
+    modelMatrix *= glm::mat4_cast(GetAbsoluteRotation());
+    modelMatrix *= glm::scale(glm::mat4(1.0f), GetAbsoluteScale());
+
+    return modelMatrix;
 }

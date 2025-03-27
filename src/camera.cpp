@@ -1,6 +1,5 @@
 #include "camera.hpp"
 #include "fmt/format.h"
-#include "object.hpp"
 
 Camera::Camera(float aspectRatio, glm::vec3 up, float yaw, float pitch) : Front(glm::vec3(0.0f, 1.0f, 0.0f)), MovementSpeed(SPEED), MouseSensitivity(SENSITIVITY), FOV(FIELDOFVIEW)
 {
@@ -30,16 +29,16 @@ Camera::Camera(float aspectRatio, float upX, float upY, float upZ, float yaw, fl
 }
 
 // returns the view matrix calculated using Euler Angles and the LookAt Matrix
-glm::mat4 Camera::GetViewMatrix() const
-{
-    glm::vec3 position = (m_ObjectAttachment != nullptr ? m_ObjectAttachment->GetPosition() : glm::vec3(0.0f, 0.0f, 0.0f));
-    float positionZ = position.z;
-    position.z = position.y;
-    position.y = positionZ;
+// glm::mat4 Camera::GetViewMatrix() const
+// {
+//     glm::vec3 position = (m_ObjectAttachment != nullptr ? m_ObjectAttachment->GetPosition() : glm::vec3(0.0f, 0.0f, 0.0f));
+//     float positionZ = position.z;
+//     position.z = position.y;
+//     position.y = positionZ;
 
-    fmt::println("position: {} {} {}, front: {} {} {}, objectAttachment: {}, pitch: {}, yaw: {}.", position.x, position.y, position.z, Front.x, Front.y, Front.z, fmt::ptr(m_ObjectAttachment), Pitch, Yaw);
-    return glm::lookAt(position, position + Front, Up);
-}
+//     fmt::println("position: {} {} {}, front: {} {} {}, objectAttachment: {}, pitch: {}, yaw: {}.", position.x, position.y, position.z, Front.x, Front.y, Front.z, fmt::ptr(m_ObjectAttachment), Pitch, Yaw);
+//     return glm::lookAt(position, position + Front, Up);
+// }
 
 // // processes input received from any keyboard-like input system. Accepts input parameter in the form of camera defined ENUM (to abstract it from windowing systems)
 // void Camera::ProcessKeyboard(const Camera_Movement& direction, float deltaTime)
@@ -94,24 +93,6 @@ void Camera::SetCameraID(int cameraID) {
 
 int Camera::GetCameraID() const {
     return m_CameraID;
-}
-
-void Camera::SetObjectAttachment(Object *obj) {
-    if (m_ObjectAttachment == obj) {
-        return;
-    }
-
-    Object *oldObjectAttachment = m_ObjectAttachment;
-
-    m_ObjectAttachment = obj;
-
-    if (oldObjectAttachment != nullptr) {
-        oldObjectAttachment->SetCameraAttachment(nullptr);
-    }
-
-    if (obj != nullptr) {
-        obj->SetCameraAttachment(this);
-    }
 }
 
 int Camera::HighestCameraID = -1;

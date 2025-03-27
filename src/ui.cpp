@@ -1,7 +1,6 @@
 #include "ui.hpp"
 
 #include "common.hpp"
-#include "ui/arrows.hpp"
 #include "ui/button.hpp"
 #include "ui/label.hpp"
 #include "renderer/baseRenderer.hpp"
@@ -178,17 +177,6 @@ void Label::DestroyBuffers() {
     // }
 
     Glyphs.clear();
-}
-
-Arrows::Arrows(Object &highlightedModel) {
-    genericType = ARROWS;
-    type = ARROWS;
-
-    arrowsObject = new Object();
-    arrowsObject->ImportFromFile("models/arrows.obj");
-    arrowsObject->SetParent(&highlightedModel);
-
-    arrowsObject->SetScale(glm::vec3(0.5f, 0.5f, 0.5f));
 }
 
 Button::Button(glm::vec2 position, glm::vec2 scale, Panel *panel, Label *label) : bgPanel(panel), fgLabel(label) {

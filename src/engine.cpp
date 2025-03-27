@@ -18,6 +18,7 @@
 #include "Node/Node.hpp"
 #include "Node/Node3D/Model3D/Model3D.hpp"
 #include "Node/Node3D/Camera3D/Camera3D.hpp"
+#include "renderer/GraphicsPipeline.hpp"
 #include "renderer/vulkanRenderer.hpp"
 #include "steamclientpublic.h"
 #include "steamnetworkingsockets.h"
@@ -59,10 +60,22 @@ Engine::Engine() {
     SDL_Init(SDL_INIT_EVENTS);
 
     m_SceneTree = new SceneTree();
+    m_SceneTree->RegisterLoadListener(std::bind(&Engine::LoadNode, this, std::placeholders::_1));
+    m_SceneTree->RegisterUnloadListener(std::bind(&Engine::UnloadNode, this, std::placeholders::_1));
 }
 
 Engine::~Engine() {
     // DeinitPhysics();
+}
+
+/* Basic Shaders are those with only vertex/fragment shaders */
+GraphicsPipeline *CreateBasicShader(BaseRenderer *renderer, std::string name, RenderPass *renderPass, Uint32 subpassIndex, VkFrontFace frontFace, glm::vec4 viewport, glm::vec4 scissor, const DescriptorLayout &descriptorSetLayout, bool isSimple = VK_FALSE, bool enableDepth = VK_TRUE) {
+    std::vector<Shader> shaders;
+
+    shaders.emplace_back(renderer, VK_SHADER_STAGE_VERTEX_BIT, std::filesystem::path("shaders") / (name + ".vert.spv"));
+    shaders.emplace_back(renderer, VK_SHADER_STAGE_FRAGMENT_BIT, std::filesystem::path("shaders") / (name + ".frag.spv"));
+
+    return renderer->CreateGraphicsPipeline(shaders, renderPass, subpassIndex, frontFace, viewport, scissor, descriptorSetLayout, isSimple, enableDepth);
 }
 
 void Engine::InitRenderer(Settings &settings) {
@@ -71,6 +84,121 @@ void Engine::InitRenderer(Settings &settings) {
     m_Renderer = new VulkanRenderer(settings);
 
     m_Renderer->Init();
+
+    // Render
+    glm::vec4 renderViewport, renderScissor;
+
+    renderViewport.x = 0.0f;
+    renderViewport.y = 0.0f;
+    renderViewport.z = (float) m_Settings->RenderWidth;
+    renderViewport.w = (float) m_Settings->RenderHeight;
+
+    renderScissor.x = 0;
+    renderScissor.y = 0;
+    renderScissor.z = m_Settings->RenderWidth;
+    renderScissor.w = m_Settings->RenderHeight;
+
+    // Rescale
+    glm::vec4 displayViewport, displayScissor;
+
+    displayViewport.x = 0.0f;
+    displayViewport.y = 0.0f;
+    displayViewport.z = (float) m_Settings->DisplayWidth;
+    displayViewport.w = (float) m_Settings->DisplayHeight;
+
+    displayScissor.x = 0;
+    displayScissor.y = 0;
+    displayScissor.z = m_Settings->DisplayWidth;
+    displayScissor.w = m_Settings->DisplayHeight;
+
+    DescriptorLayout renderLayout(m_Renderer);
+
+    /* Matrices UBO */
+    renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
+    /* Texture */
+    renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
+
+    renderLayout.Create();
+
+
+    DescriptorLayout waypointLayout(m_Renderer);
+
+    /* Matrices UBO */
+    waypointLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 0});
+    /* waypoint UBO */
+    waypointLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
+
+    waypointLayout.Create();
+
+
+    DescriptorLayout rescaleLayout(m_Renderer);
+
+    /* Render image */
+    rescaleLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0});
+
+    rescaleLayout.Create();
+
+
+    DescriptorLayout panelLayout(m_Renderer);
+
+    /* Dimensions UBO */
+    panelLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
+    /* Color/Texture */
+    panelLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
+
+    panelLayout.Create();
+
+
+    DescriptorLayout labelLayout(m_Renderer);
+
+    /* Label info */
+    labelLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
+    /* Glyph texture */
+    labelLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
+    /* Glyph info */
+    labelLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 2});
+
+    labelLayout.Create();
+
+    GraphicsPipeline *m_MainGraphicsPipeline = CreateBasicShader(m_Renderer, 
+        "lighting", m_Renderer->m_MainRenderPass, 
+        0, VK_FRONT_FACE_CLOCKWISE, 
+        renderViewport, renderScissor, 
+        {renderLayout}
+    );
+    m_MainGraphicsPipeline->SetRenderFunction(std::bind(&Engine::MainRenderFunction, this, std::placeholders::_1));
+    
+    GraphicsPipeline *m_UIWaypointGraphicsPipeline = CreateBasicShader(m_Renderer,
+        "uiwaypoint", m_Renderer->m_MainRenderPass, 
+        1, VK_FRONT_FACE_CLOCKWISE, 
+        renderViewport, renderScissor, 
+        {waypointLayout}, 
+        true);
+    m_UIWaypointGraphicsPipeline->SetRenderFunction(std::bind(&Engine::UIWaypointRenderFunction, this, std::placeholders::_1));
+    
+    GraphicsPipeline *m_RescaleGraphicsPipeline = CreateBasicShader(m_Renderer,
+        "rescale", m_Renderer->m_RescaleRenderPass, 
+        0, VK_FRONT_FACE_CLOCKWISE, 
+        displayViewport, displayScissor,
+        {rescaleLayout},
+        true);
+    m_RescaleGraphicsPipeline->SetRenderFunction(std::bind(&Engine::RescaleRenderFunction, this, std::placeholders::_1));
+    
+    GraphicsPipeline *m_UIPanelGraphicsPipeline = CreateBasicShader(m_Renderer,
+        "uipanel", m_Renderer->m_RescaleRenderPass,
+        1, VK_FRONT_FACE_CLOCKWISE, 
+        displayViewport, displayScissor,
+        {panelLayout}, 
+        true);
+    m_UIPanelGraphicsPipeline->SetRenderFunction(std::bind(&Engine::UIPanelRenderFunction, this, std::placeholders::_1));
+    
+    GraphicsPipeline *m_UILabelGraphicsPipeline = CreateBasicShader(m_Renderer, 
+        "uilabel", m_Renderer->m_RescaleRenderPass, 
+        2, VK_FRONT_FACE_CLOCKWISE, 
+        displayViewport, displayScissor, 
+        {labelLayout}, 
+        true);
+    m_UILabelGraphicsPipeline->SetRenderFunction(std::bind(&Engine::UILabelRenderFunction, this, std::placeholders::_1));
 
     RegisterSDLEventListener(std::bind(&Engine::CheckButtonClicks, this, std::placeholders::_1), SDL_EVENT_MOUSE_BUTTON_UP);
 }
@@ -126,6 +254,148 @@ void Engine::InitRenderer(Settings &settings) {
 
 void Engine::RegisterUIButtonListener(const std::function<void(std::string)>& listener) {
     m_UIButtonListeners.push_back(listener);
+}
+
+void Engine::LoadNode(const Node *node) {
+    if (m_Renderer && typeid(*node) == typeid(Model3D)) {
+        m_Renderer->LoadModel(reinterpret_cast<const Model3D *>(node));
+    }
+
+    // if (object->GetRigidBody()) {
+    //     auto &rigidBodyPtr = object->GetRigidBody();
+
+    //     m_RigidBodies.push_back(rigidBodyPtr);
+
+    //     if (m_DynamicsWorld) {
+    //         m_DynamicsWorld->addRigidBody(rigidBodyPtr.get());
+    //     }
+    // }
+}
+
+void Engine::UnloadNode(const Node *node) {
+    if (m_Renderer && typeid(*node) == typeid(Model3D)) {
+        m_Renderer->UnloadModel(reinterpret_cast<const Model3D *>(node));
+    }
+}
+
+void Engine::MainRenderFunction(GraphicsPipeline *pipeline) {
+    glm::mat4 viewMatrix, projectionMatrix;
+    Camera3D *mainCamera3D = m_SceneTree->GetMainCamera3D();
+
+    if (mainCamera3D) {
+        viewMatrix = mainCamera3D->GetViewMatrix();
+
+        projectionMatrix = glm::perspective(glm::radians(mainCamera3D->GetFOV()), (float)m_Settings->RenderWidth / (float)m_Settings->RenderHeight, mainCamera3D->GetNear(), mainCamera3D->GetFar());
+
+        // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
+        projectionMatrix[1][1] *= -1;
+
+        for (RenderModel &renderModel : m_Renderer->m_RenderModels) {
+            renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
+
+            renderModel.matricesUBO.viewMatrix = viewMatrix;
+            renderModel.matricesUBO.projectionMatrix = projectionMatrix;
+
+            SDL_memcpy(renderModel.matricesUBOBuffer.mappedData, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
+
+            pipeline->UpdateBindingValue(0, renderModel.matricesUBOBuffer);
+            pipeline->UpdateBindingValue(1, renderModel.diffTexture.imageAndMemory);
+
+            m_Renderer->Draw(pipeline, renderModel.vertexBuffer, 0, renderModel.indexBuffer, renderModel.indexBufferSize);
+        }
+    }
+}
+void Engine::UIWaypointRenderFunction(GraphicsPipeline *pipeline) {
+    glm::mat4 viewMatrix, projectionMatrix;
+    Camera3D *mainCamera3D = m_SceneTree->GetMainCamera3D();
+
+    if (mainCamera3D) {
+        viewMatrix = mainCamera3D->GetViewMatrix();
+
+        projectionMatrix = glm::perspective(glm::radians(mainCamera3D->GetFOV()), (float)m_Settings->RenderWidth / (float)m_Settings->RenderHeight, mainCamera3D->GetNear(), mainCamera3D->GetFar());
+
+        for (RenderUIWaypoint &renderUIWaypoint : m_Renderer->m_RenderUIWaypoints) {
+            if (!renderUIWaypoint.waypoint->GetVisible()) {
+                continue;
+            }
+
+            // There is no model matrix for render waypoints, We already know where it is in world-space.
+            renderUIWaypoint.matricesUBO.viewMatrix = viewMatrix;
+            renderUIWaypoint.matricesUBO.projectionMatrix = projectionMatrix;
+
+            SDL_memcpy(renderUIWaypoint.matricesUBOBuffer.mappedData, &renderUIWaypoint.matricesUBO, sizeof(renderUIWaypoint.matricesUBO));
+
+            renderUIWaypoint.waypointUBO.Position = renderUIWaypoint.waypoint->GetWorldSpacePosition();
+
+            SDL_memcpy(renderUIWaypoint.waypointUBOBuffer.mappedData, &renderUIWaypoint.waypointUBO, sizeof(renderUIWaypoint.waypointUBO));
+
+            pipeline->UpdateBindingValue(0, renderUIWaypoint.matricesUBOBuffer);
+            pipeline->UpdateBindingValue(1, renderUIWaypoint.waypointUBOBuffer);
+
+            m_Renderer->Draw(pipeline, m_Renderer->m_FullscreenQuadVertexBuffer, 6);
+        }
+    }
+}
+void Engine::RescaleRenderFunction(GraphicsPipeline *pipeline) {
+    pipeline->UpdateBindingValue(0, m_Renderer->m_RenderImageAndMemory);
+
+    m_Renderer->Draw(pipeline, m_Renderer->m_FullscreenQuadVertexBuffer, 6);
+}
+void Engine::UIPanelRenderFunction(GraphicsPipeline *pipeline) {
+    for (RenderUIPanel &renderUIPanel : m_Renderer->m_UIPanels) {
+        if (!renderUIPanel.panel->GetVisible()) {
+            continue;
+        }
+
+        renderUIPanel.ubo.Dimensions = renderUIPanel.panel->GetDimensions();
+        
+        /* Double the scales for some odd reason.. */
+        renderUIPanel.ubo.Dimensions.z *= 2;
+        renderUIPanel.ubo.Dimensions.w *= 2;
+
+        /* Convert [0, 1] to [-1, 1] */
+        renderUIPanel.ubo.Dimensions.x *= 2;
+        renderUIPanel.ubo.Dimensions.x -= 1;
+        
+        renderUIPanel.ubo.Dimensions.y *= 2;
+        renderUIPanel.ubo.Dimensions.y -= 1;
+
+        renderUIPanel.ubo.Depth = renderUIPanel.panel->GetDepth();
+
+        SDL_memcpy(renderUIPanel.uboBuffer.mappedData, &(renderUIPanel.ubo), sizeof(renderUIPanel.ubo));
+
+        pipeline->UpdateBindingValue(0, renderUIPanel.uboBuffer);
+        pipeline->UpdateBindingValue(1, renderUIPanel.panel->texture.imageAndMemory);                          
+
+        m_Renderer->Draw(pipeline, m_Renderer->m_FullscreenQuadVertexBuffer, 6);
+    }
+}
+void Engine::UILabelRenderFunction(GraphicsPipeline *pipeline) {
+    for (RenderUILabel &renderUILabel : m_Renderer->m_UILabels) {
+        if (!renderUILabel.label->GetVisible()) {
+            continue;
+        }
+
+        renderUILabel.ubo.PositionOffset = renderUILabel.label->GetPosition();
+        renderUILabel.ubo.PositionOffset.x *= 2;
+        renderUILabel.ubo.PositionOffset.y *= 2;
+
+        renderUILabel.ubo.Depth = renderUILabel.label->GetDepth();
+
+        SDL_memcpy(renderUILabel.uboBuffer.mappedData, &(renderUILabel.ubo), sizeof(renderUILabel.ubo));
+
+        for (Glyph &glyph : renderUILabel.label->Glyphs) {
+            glyph.glyphUBO.Offset = glyph.offset;
+            
+            SDL_memcpy(glyph.glyphUBOBuffer.mappedData, &(glyph.glyphUBO), sizeof(glyph.glyphUBO));
+
+            pipeline->UpdateBindingValue(0, renderUILabel.uboBuffer);
+            pipeline->UpdateBindingValue(1, glyph.glyphBuffer->first.imageAndMemory);
+            pipeline->UpdateBindingValue(2, glyph.glyphUBOBuffer);
+
+            m_Renderer->Draw(pipeline, glyph.glyphBuffer.value().second, 6);
+        }
+    }
 }
 
 BaseRenderer *Engine::GetRenderer() {
@@ -234,6 +504,10 @@ void Engine::LoadUIFile(const std::string &name) {
             UIElementChildren.erase(UIElementChildren.begin());
         }
     }
+}
+
+SceneTree *Engine::GetSceneTree() {
+    return m_SceneTree;
 }
 
 void Engine::ImportScene(const std::string &path) {

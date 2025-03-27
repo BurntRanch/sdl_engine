@@ -7,6 +7,7 @@
 
 class SceneTree;
 class Node;
+class Camera3D;
 
 typedef std::function<void(const Node *, const SceneTree *)> SceneTreeListenerType;
 
@@ -19,10 +20,12 @@ public:
     void RegisterLoadListener(const SceneTreeListenerType &func);
 
     /* Call any and all listeners so that they are aware of an unload. */
-    void UnloadNode(Node *node) const;
+    void UnloadNode(Node *node);
     void LoadNode(Node *node);
 
     const Node *GetRootNode() const;
+
+    Camera3D *GetMainCamera3D() const;
 private:
     Node *ProcessNode(const aiNode *aiNode, const aiScene *aiScene);
 
@@ -30,4 +33,7 @@ private:
     std::vector<SceneTreeListenerType> m_LoadListeners;
 
     Node *m_RootNode;
+
+    std::vector<Camera3D *> m_Camera3Ds;
+    // std::vector<Camera2D *> m_Camera2Ds;
 };
