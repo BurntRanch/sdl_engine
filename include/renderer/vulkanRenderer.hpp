@@ -95,15 +95,15 @@ protected:
     RenderPass *CreateRenderPass(VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp, size_t subpassCount, VkFormat imageFormat, VkImageLayout initialColorLayout, VkImageLayout finalColorLayout, glm::vec2 resolution, bool shouldContainDepthImage = true);
     VkFramebuffer CreateFramebuffer(RenderPass *renderPass, VkImageView imageView, VkImageView depthImageView = nullptr);
 
-    void UnloadRenderModel(RenderModel &renderModel) override;
+    void UnloadRenderModel(RenderMesh &renderModel) override;
 
     SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface);
     Uint32 FindMemoryType(Uint32 typeFilter, VkMemoryPropertyFlags properties);
 
     void CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer deviceBuffer, VkDeviceSize size);
 
-    RenderModel LoadMesh(const Mesh &mesh, const Model3D *model, bool loadTextures = true) override;
-    std::array<TextureImageAndMemory, 1> LoadTexturesFromMesh(const Mesh &mesh, bool recordAllocations = true) override;
+    RenderMesh LoadMesh(const Mesh3D &mesh, const Model3D *model/*, bool loadTextures = true*/) override;
+    // std::array<TextureImageAndMemory, 1> LoadTexturesFromMesh(const Mesh3D &mesh, bool recordAllocations = true) override;
 
     TextureBufferAndMemory LoadTextureFromFile(const std::string &name) override;
     VkImageView CreateImageView(TextureImageAndMemory &imageAndMemory, VkFormat format, VkImageAspectFlags aspectMask, bool recordCreation = true);

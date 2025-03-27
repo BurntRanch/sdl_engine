@@ -3,8 +3,7 @@
 
 #include "BulletDynamics/Dynamics/btRigidBody.h"
 #include "Node/Node3D/Light3D/Light3D.hpp"
-#include "camera.hpp"
-#include "model.hpp"
+
 #include <functional>
 #include <glm/fwd.hpp>
 #include <glm/gtc/quaternion.hpp>

@@ -2,8 +2,8 @@
 #define _MATERIAL_HPP_
 
 #include "BulletDynamics/Dynamics/btRigidBody.h"
-#include "camera.hpp"
-#include "model.hpp"
+
+
 #include <functional>
 #include <glm/gtc/quaternion.hpp>
 #include <memory>
@@ -11,27 +11,23 @@
 
 class Material {
 public:
-    ~Material();
+    Material() = default;
 
-    Material();
-
-    void SetColor(glm::vec3 color);
-    glm::vec3 GetColor();
+    void SetColor(const glm::vec3 &color);
+    const glm::vec3 &GetColor() const;
 private:
-    glm::vec3 m_Color;
+    glm::vec3 m_Color = glm::vec3(0.8);
 };
 
 class PBRMaterial : public Material {
 public:
-    ~PBRMaterial();
+    PBRMaterial() = default;
 
-    PBRMaterial();
+    void SetMetallicFactor(const float &metallic);
+    const float &GetMetallicFactor() const;
 
-    void SetMetallicFactor(float metallic);
-    float GetMetallicFactor();
-
-    void SetRoughnessFactor(float roughness);
-    float GetRoughnessFactor();
+    void SetRoughnessFactor(const float &roughness);
+    const float &GetRoughnessFactor() const;
 private:
     float m_MetallicFactor = 0.0f;
     float m_RoughnessFactor = 0.0f;

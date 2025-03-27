@@ -9,7 +9,7 @@
 #include "BulletDynamics/Dynamics/btRigidBody.h"
 #include "LinearMath/btVector3.h"
 #include "SceneTree.hpp"
-#include "camera.hpp"
+
 #include "common.hpp"
 #include "fmt/base.h"
 #include "fmt/format.h"
@@ -19,10 +19,10 @@
 #include "Node/Node3D/Model3D/Model3D.hpp"
 #include "Node/Node3D/Camera3D/Camera3D.hpp"
 #include "renderer/GraphicsPipeline.hpp"
+#include "renderer/Shader.hpp"
 #include "renderer/vulkanRenderer.hpp"
 #include "steamclientpublic.h"
 #include "steamnetworkingsockets.h"
-#include "model.hpp"
 #include "steamnetworkingtypes.h"
 #include "ui/button.hpp"
 #include "ui/panel.hpp"
@@ -115,8 +115,8 @@ void Engine::InitRenderer(Settings &settings) {
 
     /* Matrices UBO */
     renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
-    /* Texture */
-    renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
+    /* Color */
+    renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
 
     renderLayout.Create();
 
@@ -160,10 +160,18 @@ void Engine::InitRenderer(Settings &settings) {
 
     labelLayout.Create();
 
-    GraphicsPipeline *m_MainGraphicsPipeline = CreateBasicShader(m_Renderer, 
-        "lighting", m_Renderer->m_MainRenderPass, 
+    std::vector<Shader> lightingShaders;
+    lightingShaders.emplace_back(m_Renderer, VK_SHADER_STAGE_VERTEX_BIT, 
+        std::filesystem::path("shaders") / std::filesystem::path("lighting") / ("lighting.vert.spv")
+    );
+    lightingShaders.emplace_back(m_Renderer, VK_SHADER_STAGE_FRAGMENT_BIT, 
+        std::filesystem::path("shaders") / std::filesystem::path("lighting") / ("untextured_lighting.frag.spv")
+    );
+
+    GraphicsPipeline *m_MainGraphicsPipeline = m_Renderer->CreateGraphicsPipeline(
+        lightingShaders, m_Renderer->m_MainRenderPass, 
         0, VK_FRONT_FACE_CLOCKWISE, 
-        renderViewport, renderScissor, 
+        renderViewport, renderScissor,
         {renderLayout}
     );
     m_MainGraphicsPipeline->SetRenderFunction(std::bind(&Engine::MainRenderFunction, this, std::placeholders::_1));
@@ -173,7 +181,7 @@ void Engine::InitRenderer(Settings &settings) {
         1, VK_FRONT_FACE_CLOCKWISE, 
         renderViewport, renderScissor, 
         {waypointLayout}, 
-        true);
+        true, false);
     m_UIWaypointGraphicsPipeline->SetRenderFunction(std::bind(&Engine::UIWaypointRenderFunction, this, std::placeholders::_1));
     
     GraphicsPipeline *m_RescaleGraphicsPipeline = CreateBasicShader(m_Renderer,
@@ -285,12 +293,13 @@ void Engine::MainRenderFunction(GraphicsPipeline *pipeline) {
     if (mainCamera3D) {
         viewMatrix = mainCamera3D->GetViewMatrix();
 
+        /* TODO: How do we logically choose between the Settings FOV and the camera FOV? */
         projectionMatrix = glm::perspective(glm::radians(mainCamera3D->GetFOV()), (float)m_Settings->RenderWidth / (float)m_Settings->RenderHeight, mainCamera3D->GetNear(), mainCamera3D->GetFar());
 
         // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
         projectionMatrix[1][1] *= -1;
 
-        for (RenderModel &renderModel : m_Renderer->m_RenderModels) {
+        for (RenderMesh &renderModel : m_Renderer->m_RenderModels) {
             renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
 
             renderModel.matricesUBO.viewMatrix = viewMatrix;
@@ -298,8 +307,12 @@ void Engine::MainRenderFunction(GraphicsPipeline *pipeline) {
 
             SDL_memcpy(renderModel.matricesUBOBuffer.mappedData, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
 
+            renderModel.lightingUBO.colors = renderModel.mesh->GetMaterial().GetColor();
+
+            SDL_memcpy(renderModel.lightingUBOBuffer.mappedData, &renderModel.lightingUBO, sizeof(renderModel.lightingUBO));
+
             pipeline->UpdateBindingValue(0, renderModel.matricesUBOBuffer);
-            pipeline->UpdateBindingValue(1, renderModel.diffTexture.imageAndMemory);
+            pipeline->UpdateBindingValue(1, renderModel.lightingUBOBuffer);
 
             m_Renderer->Draw(pipeline, renderModel.vertexBuffer, 0, renderModel.indexBuffer, renderModel.indexBufferSize);
         }

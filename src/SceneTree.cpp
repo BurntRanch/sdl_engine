@@ -6,6 +6,8 @@
 #include "fmt/format.h"
 #include "util.hpp"
 #include <algorithm>
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
 #include <assimp/camera.h>
 #include <assimp/light.h>
 #include <assimp/matrix4x4.h>
@@ -69,7 +71,7 @@ Node *SceneTree::ProcessNode(const aiNode *aiNode, const aiScene *aiScene) {
 
         node = new PointLight3D(*dynamic_cast<Node3D *>(node), aiLight->mAttenuationConstant, aiLight->mAttenuationLinear, aiLight->mAttenuationQuadratic);
 
-        reinterpret_cast<PointLight3D *>(node)->SetLightColor(glm::normalize(glm::vec3(aiLight->mColorDiffuse.r, aiLight->mColorDiffuse.g, aiLight->mColorDiffuse.b)));
+        reinterpret_cast<PointLight3D *>(node)->SetLightColor(glm::vec3(aiLight->mColorDiffuse.r, aiLight->mColorDiffuse.g, aiLight->mColorDiffuse.b));
     }
 
     if (typeid(*node) == typeid(Node3D) && aiCameraPtr != aiScene->mCameras + aiScene->mNumCameras) {

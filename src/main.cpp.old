@@ -1,4 +1,4 @@
-#include "camera.hpp"
+
 #include <SDL3/SDL_keycode.h>
 #include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_scancode.h>
@@ -15,9 +15,8 @@
 #include <fmt/ranges.h>
 #include <stdexcept>
 #include <string>
-#include "camera.hpp"
+
 #include "common.hpp"
-#include "model.hpp"
 #include "ui/arrows.hpp"
 #include "ui/button.hpp"
 #include "ui/label.hpp"

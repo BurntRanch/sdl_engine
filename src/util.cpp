@@ -6,7 +6,7 @@
 #include "BulletCollision/CollisionShapes/btConcaveShape.h"
 #include "BulletCollision/CollisionShapes/btTriangleIndexVertexArray.h"
 #include "LinearMath/btVector3.h"
-#include "camera.hpp"
+
 #include "engine.hpp"
 #include "rapidxml.hpp"
 #include "ui/label.hpp"
@@ -75,7 +75,7 @@ std::vector<int> FilterRelatedNetworkingObjects(std::vector<Networking_Object> &
     return relatedObjects;
 }
 
-bool intersects(const glm::vec3 &origin, const glm::vec3 &front, const std::array<glm::vec3, 2> &boundingBox) {
+bool intersects(const glm::vec3 &origin, const glm::vec3 &front, const float &near, const float &far, const std::array<glm::vec3, 2> &boundingBox) {
     const glm::vec3 inverse_front = 1.0f / front;
 
     const glm::vec3 &box_max = boundingBox[0];
@@ -84,8 +84,8 @@ bool intersects(const glm::vec3 &origin, const glm::vec3 &front, const std::arra
     const float t1 = (box_min.x - origin.x) * inverse_front.x;
     const float t2 = (box_max.x - origin.x) * inverse_front.x;
 
-    float t_near = std::max(CAMERA_NEAR, glm::min(t1, t2));
-    float t_far  = std::min(CAMERA_FAR,  glm::max(t1, t2));
+    float t_near = std::max(near, glm::min(t1, t2));
+    float t_far  = std::min(far,  glm::max(t1, t2));
 
     const float t3 = (box_min.y - origin.y) * inverse_front.y;
     const float t4 = (box_max.y - origin.y) * inverse_front.y;

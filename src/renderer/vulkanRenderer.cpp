@@ -92,7 +92,7 @@ VulkanRenderer::~VulkanRenderer() {
         vkFreeMemory(m_EngineDevice, m_FullscreenQuadVertexBuffer.memory, NULL);
     }
 
-    for (RenderModel &renderModel : m_RenderModels)
+    for (RenderMesh &renderModel : m_RenderModels)
         this->UnloadModel(renderModel.model);
 
     for (RenderUIPanel renderPanel : m_UIPanels) {
@@ -268,58 +268,58 @@ void VulkanRenderer::CopyHostBufferToDeviceBuffer(VkBuffer hostBuffer, VkBuffer 
 }
 
 // first element = diffuse
-std::array<TextureImageAndMemory, 1> VulkanRenderer::LoadTexturesFromMesh(const Mesh &mesh, bool recordAllocations) {
-    std::array<TextureImageAndMemory, 1> textures;
+// std::array<TextureImageAndMemory, 1> VulkanRenderer::LoadTexturesFromMesh(const Mesh3D &mesh, bool recordAllocations) {
+//     std::array<TextureImageAndMemory, 1> textures;
     
-    if (!mesh.diffuseMapPath.empty()) {
-        std::filesystem::path path;
+//     if (!mesh.diffuseMapPath.empty()) {
+//         std::filesystem::path path;
 
-        if (!mesh.diffuseMapPath.has_root_path()) {
-            // https://stackoverflow.com/a/73927710
-            auto rel = std::filesystem::relative(mesh.diffuseMapPath, "resources");
-            // map_Kd resources/brown_mud_dry_diff_4k.jpg
-            if (!rel.empty() && rel.native()[0] != '.')
-                path = mesh.diffuseMapPath;
-            // map_Kd brown_mud_dry_diff_4k.jpg
-            else
-                path = "resources" / mesh.diffuseMapPath;
-        }
+//         if (!mesh.diffuseMapPath.has_root_path()) {
+//             // https://stackoverflow.com/a/73927710
+//             auto rel = std::filesystem::relative(mesh.diffuseMapPath, "resources");
+//             // map_Kd resources/brown_mud_dry_diff_4k.jpg
+//             if (!rel.empty() && rel.native()[0] != '.')
+//                 path = mesh.diffuseMapPath;
+//             // map_Kd brown_mud_dry_diff_4k.jpg
+//             else
+//                 path = "resources" / mesh.diffuseMapPath;
+//         }
 
-        std::string absoluteSourcePath = std::filesystem::absolute(path).string();
-        std::string absoluteResourcesPath = std::filesystem::absolute("resources").string();
+//         std::string absoluteSourcePath = std::filesystem::absolute(path).string();
+//         std::string absoluteResourcesPath = std::filesystem::absolute("resources").string();
 
-        UTILASSERT(absoluteSourcePath.substr(0, absoluteResourcesPath.length()).compare(absoluteResourcesPath) == 0);
+//         UTILASSERT(absoluteSourcePath.substr(0, absoluteResourcesPath.length()).compare(absoluteResourcesPath) == 0);
 
-        TextureBufferAndMemory textureBufferAndMemory = LoadTextureFromFile(path);
-        VkFormat textureFormat = getBestFormatFromChannels(textureBufferAndMemory.channels);
+//         TextureBufferAndMemory textureBufferAndMemory = LoadTextureFromFile(path);
+//         VkFormat textureFormat = getBestFormatFromChannels(textureBufferAndMemory.channels);
 
-        textures[0] = CreateImage(
-        textureBufferAndMemory.width, textureBufferAndMemory.height,
-        textureFormat, VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-            );
-        ChangeImageLayout(textures[0].imageAndMemory, 
-                    textureFormat, 
-                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-                );
-        CopyBufferToImage(textureBufferAndMemory, textures[0].imageAndMemory);
-        ChangeImageLayout(textures[0].imageAndMemory, 
-                    textureFormat, 
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                );
+//         textures[0] = CreateImage(
+//         textureBufferAndMemory.width, textureBufferAndMemory.height,
+//         textureFormat, VK_IMAGE_TILING_OPTIMAL,
+//         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+//         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+//             );
+//         ChangeImageLayout(textures[0].imageAndMemory, 
+//                     textureFormat, 
+//                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+//                 );
+//         CopyBufferToImage(textureBufferAndMemory, textures[0].imageAndMemory);
+//         ChangeImageLayout(textures[0].imageAndMemory, 
+//                     textureFormat, 
+//                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+//                 );
         
-        vkDestroyBuffer(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.buffer, NULL);
-        vkFreeMemory(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.memory, NULL);
+//         vkDestroyBuffer(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.buffer, NULL);
+//         vkFreeMemory(m_EngineDevice, textureBufferAndMemory.bufferAndMemory.memory, NULL);
 
-        m_AllocatedBuffers.erase(std::find(m_AllocatedBuffers.begin(), m_AllocatedBuffers.end(), textureBufferAndMemory.bufferAndMemory.buffer));
-        m_AllocatedMemory.erase(std::find(m_AllocatedMemory.begin(), m_AllocatedMemory.end(), textureBufferAndMemory.bufferAndMemory.memory));
-    } else {
-        textures[0] = CreateSinglePixelImage(mesh.diffuse);
-    }
+//         m_AllocatedBuffers.erase(std::find(m_AllocatedBuffers.begin(), m_AllocatedBuffers.end(), textureBufferAndMemory.bufferAndMemory.buffer));
+//         m_AllocatedMemory.erase(std::find(m_AllocatedMemory.begin(), m_AllocatedMemory.end(), textureBufferAndMemory.bufferAndMemory.memory));
+//     } else {
+//         textures[0] = CreateSinglePixelImage(mesh.diffuse);
+//     }
 
-    return textures;
-}
+//     return textures;
+// }
 
 TextureBufferAndMemory VulkanRenderer::LoadTextureFromFile(const std::string &name) {
     int texWidth, texHeight;
@@ -422,44 +422,60 @@ VkFormat VulkanRenderer::FindBestFormat(const std::vector<VkFormat>& candidates,
     throw std::runtime_error(engineError::CANT_FIND_ANY_FORMAT);
 }
 
-RenderModel VulkanRenderer::LoadMesh(const Mesh &mesh, const Model3D *model, bool loadTextures) {
-    RenderModel renderModel{};
+RenderMesh VulkanRenderer::LoadMesh(const Mesh3D &mesh, const Model3D *model) {
+    RenderMesh renderModel{};
 
     renderModel.model = model;
+    renderModel.mesh = &mesh;
 
-    BufferAndMemory vertexBuffer = CreateVertexBuffer(mesh.vertices);
+    BufferAndMemory vertexBuffer = CreateVertexBuffer(mesh.GetVertices());
     renderModel.vertexBuffer = vertexBuffer;
 
-    renderModel.indexBufferSize = mesh.indices.size();
-    renderModel.indexBuffer = CreateIndexBuffer(mesh.indices);
+    renderModel.indexBufferSize = mesh.GetIndices().size();
+    renderModel.indexBuffer = CreateIndexBuffer(mesh.GetIndices());
 
-    if (loadTextures) {
-        std::array<TextureImageAndMemory, 1> meshTextures = LoadTexturesFromMesh(mesh, false);
-        renderModel.diffTexture = meshTextures[0];
+    // if (loadTextures) {
+    //     std::array<TextureImageAndMemory, 1> meshTextures = LoadTexturesFromMesh(mesh, false);
+    //     renderModel.diffTexture = meshTextures[0];
 
-        VkFormat textureFormat = getBestFormatFromChannels(renderModel.diffTexture.channels);
+    //     VkFormat textureFormat = getBestFormatFromChannels(renderModel.diffTexture.channels);
 
-        // Image view, for sampling.
-        renderModel.diffTexture.imageAndMemory.view = CreateImageView(renderModel.diffTexture, textureFormat, VK_IMAGE_ASPECT_COLOR_BIT, false);
+    //     // Image view, for sampling.
+    //     renderModel.diffTexture.imageAndMemory.view = CreateImageView(renderModel.diffTexture, textureFormat, VK_IMAGE_ASPECT_COLOR_BIT, false);
 
-        VkPhysicalDeviceProperties properties{};
-        vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
+    //     VkPhysicalDeviceProperties properties{};
+    //     vkGetPhysicalDeviceProperties(m_EnginePhysicalDevice, &properties);
 
-        renderModel.diffTexture.imageAndMemory.sampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
+    //     renderModel.diffTexture.imageAndMemory.sampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
+    // }
+
+    renderModel.diffColor = mesh.GetMaterial().GetColor();
+
+    // MatricesUBO
+    {
+        VkDeviceSize uniformBufferSize = sizeof(MatricesUBO);
+
+        renderModel.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
+
+        AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer);
+
+        vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOBuffer.mappedData);
+
+        renderModel.matricesUBOBuffer.size = uniformBufferSize;
     }
 
-    renderModel.diffColor = mesh.diffuse;
+    // LightingUBO
+    {
+        VkDeviceSize uniformBufferSize = sizeof(LightingUBO);
 
-    // UBO
-    VkDeviceSize uniformBufferSize = sizeof(MatricesUBO);
+        renderModel.lightingUBO = {mesh.GetMaterial().GetColor()};
 
-    renderModel.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
+        AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.lightingUBOBuffer);
 
-    AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer);
+        vkMapMemory(m_EngineDevice, renderModel.lightingUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.lightingUBOBuffer.mappedData);
 
-    vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOBuffer.mappedData);
-
-    renderModel.matricesUBOBuffer.size = uniformBufferSize;
+        renderModel.lightingUBOBuffer.size = uniformBufferSize;
+    }
 
     return renderModel;
 }
@@ -469,21 +485,21 @@ void VulkanRenderer::SetMouseCaptureState(bool capturing) {
 }
 
 void VulkanRenderer::LoadModel(const Model3D *model) {
-    std::vector<std::future<RenderModel>> tasks;
+    std::vector<std::future<RenderMesh>> tasks;
 
-    for (const Mesh &mesh : model->GetModel()->meshes) {
-        tasks.push_back(std::async(std::launch::deferred, &VulkanRenderer::LoadMesh, this, std::ref(mesh), model, true));
+    for (const Mesh3D &mesh : model->GetMeshes()) {
+        tasks.push_back(std::async(std::launch::deferred, &VulkanRenderer::LoadMesh, this, std::ref(mesh), model));
     }
 
     // Any exception here is going to just happen and get caught like a regular engine error.
-    for (std::future<RenderModel> &task : tasks) {
+    for (std::future<RenderMesh> &task : tasks) {
         m_RenderModels.push_back(task.share().get());
     }
 
     return;
 }
 
-void VulkanRenderer::UnloadRenderModel(RenderModel &renderModel) {
+void VulkanRenderer::UnloadRenderModel(RenderMesh &renderModel) {
     vkDeviceWaitIdle(m_EngineDevice);
 
     if (renderModel.diffTextureImageView)
@@ -512,7 +528,7 @@ void VulkanRenderer::UnloadModel(const Model3D *model) {
         if (m_RenderModels[i].model != model)
             continue;
 
-        RenderModel renderModel = m_RenderModels[i];
+        RenderMesh renderModel = m_RenderModels[i];
 
         m_RenderModels.erase(m_RenderModels.begin() + (i--));
 

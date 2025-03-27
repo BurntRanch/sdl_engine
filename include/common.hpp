@@ -1,10 +1,11 @@
 #ifndef COMMON_HPP
 #define COMMON_HPP
 
-#include "model.hpp"
+
 #include "settings.hpp"
 
 #include <glm/ext/vector_float3.hpp>
+#include <glm/ext/vector_float2.hpp>
 #include <mutex>
 #include <vector>
 #include <vulkan/vulkan_core.h>

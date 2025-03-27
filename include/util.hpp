@@ -44,8 +44,8 @@ struct glTFRigidBody {
 bool                     intersects(const glm::vec3 &origin, const glm::vec3 &front, const std::array<glm::vec3, 2> &boundingBox);
 std::vector<std::string> split(const std::string_view text, const char delim);
 
-/* This function is recursive. */
-Object                  *DeepSearchObjectTree(Object *obj, std::function<bool(Object *)> pred);
+/* TODO: Deprecated, should be builtin to SceneTree very soon. */
+// Node                  *DeepSearchObjectTree(Node *node, std::function<bool(Object *)> pred);
 
 /* This function is recursive, int = index in candidates */
 std::vector<int> FilterRelatedNetworkingObjects(std::vector<Networking_Object> &candidates, Networking_Object *object);

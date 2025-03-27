@@ -8,7 +8,7 @@
 #include "LinearMath/btTransform.h"
 #include "LinearMath/btVector3.h"
 #include "Node/Node.hpp"
-#include "camera.hpp"
+
 #include "util.hpp"
 #include <SDL3/SDL_stdinc.h>
 #include <assimp/Importer.hpp>

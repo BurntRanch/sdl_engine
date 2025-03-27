@@ -2,8 +2,7 @@
 #define _CAMERA3D_HPP_
 
 #include "BulletDynamics/Dynamics/btRigidBody.h"
-#include "camera.hpp"
-#include "model.hpp"
+
 #include <functional>
 #include <glm/fwd.hpp>
 #include <glm/gtc/quaternion.hpp>

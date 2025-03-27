@@ -1,7 +1,6 @@
 #pragma once
 #include "Node/Node3D/Model3D/Model3D.hpp"
-#include "camera.hpp"
-#include "model.hpp"
+
 #include "common.hpp"
 #include "settings.hpp"
 #include "ui/label.hpp"
@@ -32,6 +31,74 @@ const std::vector<const char *> requiredLayerExtensions {
     "VK_LAYER_KHRONOS_validation",
 #endif
 };
+
+struct Vertex {
+    glm::vec3 Position;
+    //glm::vec3 Color;  // might add later
+    glm::vec3 Normal;
+    glm::vec2 TexCoord;
+};
+
+struct SimpleVertex {
+    glm::vec2 Position;
+    //glm::vec3 Color;  // might add later
+    glm::vec2 TexCoord;
+};
+
+inline struct VkVertexInputBindingDescription getVertexBindingDescription() {
+    VkVertexInputBindingDescription bindingDescrption{};
+    bindingDescrption.binding = 0;
+    bindingDescrption.stride = sizeof(Vertex);
+    bindingDescrption.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    return bindingDescrption;
+}
+
+inline struct std::array<VkVertexInputAttributeDescription, 3> getVertexAttributeDescriptions() {
+    std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
+
+    attributeDescriptions[0].binding = 0;
+    attributeDescriptions[0].location = 0;
+    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[0].offset = offsetof(Vertex, Position);
+
+    attributeDescriptions[1].binding = 0;
+    attributeDescriptions[1].location = 1;
+    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[1].offset = offsetof(Vertex, Normal);
+
+    attributeDescriptions[2].binding = 0;
+    attributeDescriptions[2].location = 2;
+    attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[2].offset = offsetof(Vertex, TexCoord);
+
+    return attributeDescriptions;
+}
+
+inline struct VkVertexInputBindingDescription getSimpleVertexBindingDescription() {
+    VkVertexInputBindingDescription bindingDescrption{};
+    bindingDescrption.binding = 0;
+    bindingDescrption.stride = sizeof(SimpleVertex);
+    bindingDescrption.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    return bindingDescrption;
+}
+
+inline struct std::array<VkVertexInputAttributeDescription, 2> getSimpleVertexAttributeDescriptions() {
+    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+
+    attributeDescriptions[0].binding = 0;
+    attributeDescriptions[0].location = 0;
+    attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[0].offset = offsetof(SimpleVertex, Position);
+
+    attributeDescriptions[1].binding = 0;
+    attributeDescriptions[1].location = 1;
+    attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[1].offset = offsetof(SimpleVertex, TexCoord);
+
+    return attributeDescriptions;
+}
 
 struct SwapChainSupportDetails {
     VkSurfaceCapabilitiesKHR capabilities;
@@ -65,8 +132,13 @@ alignas(16)    glm::vec2 PositionOffset;
 alignas(16)    float Depth;
 };
 
-struct RenderModel {
+struct LightingUBO {
+alignas(16)    glm::vec3 colors;
+};
+
+struct RenderMesh {
     const Model3D *model;
+    const Mesh3D *mesh;
 
     BufferAndMemory vertexBuffer;
 
@@ -81,6 +153,9 @@ struct RenderModel {
 
     MatricesUBO matricesUBO;
     BufferAndMemory matricesUBOBuffer;
+
+    LightingUBO lightingUBO;
+    BufferAndMemory lightingUBOBuffer;
 };
 
 struct RenderUIWaypoint {
@@ -172,7 +247,7 @@ public:
     virtual BufferAndMemory CreateVertexBuffer(const std::vector<Vertex> &verts) = 0;
     virtual BufferAndMemory CreateIndexBuffer(const std::vector<Uint32> &inds) = 0;
 
-    virtual GraphicsPipeline *CreateGraphicsPipeline(const std::vector<Shader> &shaders, RenderPass *renderPass, Uint32 subpassIndex, VkFrontFace frontFace, glm::vec4 viewport, glm::vec4 scissor, const DescriptorLayout &descriptorSetLayout, bool isSimple = VK_TRUE, bool enableDepth = VK_TRUE) = 0;
+    virtual GraphicsPipeline *CreateGraphicsPipeline(const std::vector<Shader> &shaders, RenderPass *renderPass, Uint32 subpassIndex, VkFrontFace frontFace, glm::vec4 viewport, glm::vec4 scissor, const DescriptorLayout &descriptorSetLayout, bool isSimple = VK_FALSE, bool enableDepth = VK_TRUE) = 0;
 
     virtual void BeginRenderPass(RenderPass *renderPass, std::any framebuffer) = 0;
 
@@ -191,10 +266,10 @@ public:
     virtual void StepRender() = 0;
 friend class Engine;
 protected:
-    virtual void UnloadRenderModel(RenderModel &renderModel) = 0;
+    virtual void UnloadRenderModel(RenderMesh &renderModel) = 0;
 
-    virtual RenderModel LoadMesh(const Mesh &mesh, const Model3D *model, bool loadTextures = true) = 0;
-    virtual std::array<TextureImageAndMemory, 1> LoadTexturesFromMesh(const Mesh &mesh, bool recordAllocations = true) = 0;
+    virtual RenderMesh LoadMesh(const Mesh3D &mesh, const Model3D *model/*, bool loadTextures = true*/) = 0;
+    // virtual std::array<TextureImageAndMemory, 1> LoadTexturesFromMesh(const Mesh3D &mesh, bool recordAllocations = true) = 0;
 
     virtual TextureBufferAndMemory LoadTextureFromFile(const std::string &name) = 0;
 
@@ -218,5 +293,5 @@ protected:
 
     SDL_Window *m_EngineWindow = nullptr;
 
-    std::vector<RenderModel> m_RenderModels;    // to be used in the loop.
+    std::vector<RenderMesh> m_RenderModels;    // to be used in the loop.
 };

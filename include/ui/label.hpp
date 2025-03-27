@@ -1,5 +1,6 @@
 #pragma once
 #include "common.hpp"
+#include <filesystem>
 #include <ft2build.h>
 #include <glm/ext/vector_float2.hpp>
 #include <map>

@@ -14,17 +14,6 @@ public:
     Uint32 DisplayWidth, DisplayHeight;
     bool Fullscreen, IgnoreRenderResolution;
     float FieldOfView;
-    float CameraNear;
-
-// Profiling information
-    bool ReportFPS;
-    bool Verbose;
-
-// Input
-    float MouseSensitivity;
-    float Velocity;
-    bool InvertVertical;
-    bool InvertHorizontal;
 
     Settings(const std::string_view fileName);
 

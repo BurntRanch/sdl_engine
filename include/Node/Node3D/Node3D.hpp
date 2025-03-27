@@ -2,8 +2,6 @@
 #define _NODE3D_HPP_
 
 #include "BulletDynamics/Dynamics/btRigidBody.h"
-#include "camera.hpp"
-#include "model.hpp"
 #include <functional>
 #include <glm/fwd.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -35,8 +33,6 @@ public:
     virtual const glm::vec3 &GetScale() const;
     virtual const glm::vec3 GetAbsoluteScale() const;
 protected:
-    void ProcessNode(aiNode *node, const aiScene *scene, int &sourceID, Node *parent = nullptr, std::optional<std::reference_wrapper<Camera *>> primaryCamOutput = {});
-
     glm::vec3 m_Position = glm::vec3(0, 0, 0);
     glm::quat m_Rotation = glm::quat(0, 0, 0, 1);
     glm::vec3 m_Scale = glm::vec3(1, 1, 1);

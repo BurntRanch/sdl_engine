@@ -1,4 +1,4 @@
-#include "camera.hpp"
+
 #include "settings.hpp"
 
 Settings::Settings(const std::string_view fileName) {
@@ -16,14 +16,5 @@ Settings::Settings(const std::string_view fileName) {
     DisplayHeight = GetValue("video.DisplayHeight", 400);
     Fullscreen = GetValue("video.Fullscreen", false);
     IgnoreRenderResolution = GetValue("video.IgnoreRenderResolution", false);
-    FieldOfView = GetValue("video.FieldOfView", FIELDOFVIEW);
-    CameraNear = GetValue("video.CameraNear", CAMERA_NEAR);
-
-    ReportFPS = GetValue("profile.ReportFPS", true);
-    Verbose = GetValue("profile.Verbose", true);
-
-    MouseSensitivity = GetValue("input.MouseSensitivity", 0.1f);
-    Velocity = GetValue("input.Velocity", 5.0f);
-    InvertVertical = GetValue("input.InvertVertical", false);
-    InvertHorizontal = GetValue("input.InvertHorizontal", false);
+    FieldOfView = GetValue("video.FieldOfView", 90);
 }

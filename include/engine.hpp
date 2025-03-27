@@ -11,7 +11,7 @@
 #include "BulletDynamics/Dynamics/btRigidBody.h"
 #include "Node/Node3D/Camera3D/Camera3D.hpp"
 #include "SceneTree.hpp"
-#include "camera.hpp"
+
 #include "common.hpp"
 #include "isteamnetworkingsockets.h"
 #include "networking/connection.hpp"
@@ -61,7 +61,7 @@
 #include "fmt/core.h"
 
 #include "settings.hpp"
-#include "model.hpp"
+
 
 #include <vector>
 
