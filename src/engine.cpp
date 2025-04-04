@@ -306,8 +306,8 @@ void Engine::MainRenderFunction(GraphicsPipeline *pipeline) {
         LightsUBO lightsUBO;
 
         for (const PointLight3D *pointLight : m_SceneTree->GetPointLight3Ds()) {
-            lightsUBO.pointLights[lightsUBO.pointLightCount].color = glm::vec4(pointLight->GetLightColor(), 1);
-            lightsUBO.pointLights[lightsUBO.pointLightCount++].attenuation = glm::vec4(pointLight->GetAttenuation(), 1);
+            lightsUBO.pointLights[lightsUBO.pointLightCount].color = pointLight->GetLightColor();
+            lightsUBO.pointLights[lightsUBO.pointLightCount++].attenuation = pointLight->GetAttenuation();
         }
 
         SDL_memcpy(m_Renderer->m_LightsUBOBuffer.mappedData, &lightsUBO, sizeof(lightsUBO));

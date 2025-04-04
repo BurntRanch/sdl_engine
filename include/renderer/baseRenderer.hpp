@@ -137,14 +137,14 @@ struct MaterialsUBO {
 alignas(16)    glm::vec3 colors;
 };
 
-struct alignas(32) RenderPointLight {
-alignas(16)    glm::vec4 color = glm::vec4(0, 0, 0,1);
-alignas(16)    glm::vec4 attenuation = glm::vec4(0, 0, 0, 1);
+struct RenderPointLight {
+alignas(16)    glm::vec3 color = glm::vec3(0, 0, 0);
+alignas(16)    glm::vec3 attenuation = glm::vec3(0, 0, 0);
 };
 
-struct alignas(32) LightsUBO {
-alignas(32)    RenderPointLight pointLights[2048];
+struct LightsUBO {
 alignas(16)    int pointLightCount = 0;
+alignas(16)    RenderPointLight pointLights[2048];
 };
 
 struct RenderMesh {
