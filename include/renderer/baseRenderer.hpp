@@ -1,5 +1,4 @@
 #pragma once
-#include "Node/Node3D/Model3D/Model3D.hpp"
 
 #include "common.hpp"
 #include "settings.hpp"
@@ -17,6 +16,8 @@ class GraphicsPipeline;
 struct PipelineBinding;
 class DescriptorLayout;
 class Shader;
+class Model3D;
+class Mesh3D;
 
 const std::vector<const char *> requiredDeviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
@@ -132,8 +133,18 @@ alignas(16)    glm::vec2 PositionOffset;
 alignas(16)    float Depth;
 };
 
-struct LightingUBO {
+struct MaterialsUBO {
 alignas(16)    glm::vec3 colors;
+};
+
+struct alignas(32) RenderPointLight {
+alignas(16)    glm::vec4 color = glm::vec4(0, 0, 0,1);
+alignas(16)    glm::vec4 attenuation = glm::vec4(0, 0, 0, 1);
+};
+
+struct alignas(32) LightsUBO {
+alignas(32)    RenderPointLight pointLights[2048];
+alignas(16)    int pointLightCount = 0;
 };
 
 struct RenderMesh {
@@ -154,8 +165,8 @@ struct RenderMesh {
     MatricesUBO matricesUBO;
     BufferAndMemory matricesUBOBuffer;
 
-    LightingUBO lightingUBO;
-    BufferAndMemory lightingUBOBuffer;
+    MaterialsUBO materialUBO;
+    BufferAndMemory materialsUBOBuffer;
 };
 
 struct RenderUIWaypoint {
@@ -284,6 +295,8 @@ protected:
     std::vector<RenderUIWaypoint> m_RenderUIWaypoints;
     std::vector<RenderUIPanel> m_UIPanels;
     std::vector<RenderUILabel> m_UILabels;
+
+    BufferAndMemory m_LightsUBOBuffer;
 
     RenderPass *m_MainRenderPass;
     RenderPass *m_RescaleRenderPass;   // This uses the swapchain framebuffers

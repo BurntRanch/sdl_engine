@@ -423,16 +423,16 @@ VkFormat VulkanRenderer::FindBestFormat(const std::vector<VkFormat>& candidates,
 }
 
 RenderMesh VulkanRenderer::LoadMesh(const Mesh3D &mesh, const Model3D *model) {
-    RenderMesh renderModel{};
+    RenderMesh renderMesh{};
 
-    renderModel.model = model;
-    renderModel.mesh = &mesh;
+    renderMesh.model = model;
+    renderMesh.mesh = &mesh;
 
     BufferAndMemory vertexBuffer = CreateVertexBuffer(mesh.GetVertices());
-    renderModel.vertexBuffer = vertexBuffer;
+    renderMesh.vertexBuffer = vertexBuffer;
 
-    renderModel.indexBufferSize = mesh.GetIndices().size();
-    renderModel.indexBuffer = CreateIndexBuffer(mesh.GetIndices());
+    renderMesh.indexBufferSize = mesh.GetIndices().size();
+    renderMesh.indexBuffer = CreateIndexBuffer(mesh.GetIndices());
 
     // if (loadTextures) {
     //     std::array<TextureImageAndMemory, 1> meshTextures = LoadTexturesFromMesh(mesh, false);
@@ -449,35 +449,35 @@ RenderMesh VulkanRenderer::LoadMesh(const Mesh3D &mesh, const Model3D *model) {
     //     renderModel.diffTexture.imageAndMemory.sampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
     // }
 
-    renderModel.diffColor = mesh.GetMaterial().GetColor();
+    renderMesh.diffColor = mesh.GetMaterial().GetColor();
 
     // MatricesUBO
     {
         VkDeviceSize uniformBufferSize = sizeof(MatricesUBO);
 
-        renderModel.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
+        renderMesh.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
 
-        AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.matricesUBOBuffer);
+        AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderMesh.matricesUBOBuffer);
 
-        vkMapMemory(m_EngineDevice, renderModel.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.matricesUBOBuffer.mappedData);
+        vkMapMemory(m_EngineDevice, renderMesh.matricesUBOBuffer.memory, 0, uniformBufferSize, 0, &renderMesh.matricesUBOBuffer.mappedData);
 
-        renderModel.matricesUBOBuffer.size = uniformBufferSize;
+        renderMesh.matricesUBOBuffer.size = uniformBufferSize;
     }
 
-    // LightingUBO
+    // MaterialUBO
     {
-        VkDeviceSize uniformBufferSize = sizeof(LightingUBO);
+        VkDeviceSize uniformBufferSize = sizeof(MaterialsUBO);
 
-        renderModel.lightingUBO = {mesh.GetMaterial().GetColor()};
+        renderMesh.materialUBO = {mesh.GetMaterial().GetColor()};
 
-        AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderModel.lightingUBOBuffer);
+        AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderMesh.materialsUBOBuffer);
 
-        vkMapMemory(m_EngineDevice, renderModel.lightingUBOBuffer.memory, 0, uniformBufferSize, 0, &renderModel.lightingUBOBuffer.mappedData);
+        vkMapMemory(m_EngineDevice, renderMesh.materialsUBOBuffer.memory, 0, uniformBufferSize, 0, &renderMesh.materialsUBOBuffer.mappedData);
 
-        renderModel.lightingUBOBuffer.size = uniformBufferSize;
+        renderMesh.materialsUBOBuffer.size = uniformBufferSize;
     }
 
-    return renderModel;
+    return renderMesh;
 }
 
 void VulkanRenderer::SetMouseCaptureState(bool capturing) {
@@ -2143,6 +2143,18 @@ void VulkanRenderer::Init() {
             vkCreateSemaphore(m_EngineDevice, &semaphoreCreateInfo, NULL, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS ||
                 vkCreateFence(m_EngineDevice, &fenceCreateInfo,     NULL,               &m_InFlightFences[i]) != VK_SUCCESS)
             throw std::runtime_error(engineError::SYNC_OBJECTS_CREATION_FAILURE);
+
+    
+    // LightsUBO
+    {
+        VkDeviceSize uniformBufferSize = sizeof(LightsUBO);
+
+        AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightsUBOBuffer);
+
+        vkMapMemory(m_EngineDevice, m_LightsUBOBuffer.memory, 0, uniformBufferSize, 0, &m_LightsUBOBuffer.mappedData);
+
+        m_LightsUBOBuffer.size = uniformBufferSize;
+    }
 }
 
 void VulkanRenderer::StepRender() {

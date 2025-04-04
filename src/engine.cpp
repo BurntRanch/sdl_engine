@@ -8,6 +8,7 @@
 #include "BulletDynamics/Dynamics/btDiscreteDynamicsWorld.h"
 #include "BulletDynamics/Dynamics/btRigidBody.h"
 #include "LinearMath/btVector3.h"
+#include "Node/Node3D/Light3D/PointLight3D/PointLight3D.hpp"
 #include "SceneTree.hpp"
 
 #include "common.hpp"
@@ -20,6 +21,7 @@
 #include "Node/Node3D/Camera3D/Camera3D.hpp"
 #include "renderer/GraphicsPipeline.hpp"
 #include "renderer/Shader.hpp"
+#include "renderer/baseRenderer.hpp"
 #include "renderer/vulkanRenderer.hpp"
 #include "steamclientpublic.h"
 #include "steamnetworkingsockets.h"
@@ -115,8 +117,10 @@ void Engine::InitRenderer(Settings &settings) {
 
     /* Matrices UBO */
     renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0});
-    /* Color */
+    /* Materials UBO */
     renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
+    /* Lights UBO */
+    renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 2});
 
     renderLayout.Create();
 
@@ -299,6 +303,15 @@ void Engine::MainRenderFunction(GraphicsPipeline *pipeline) {
         // invert Y axis, glm was meant for OpenGL which inverts the Y axis.
         projectionMatrix[1][1] *= -1;
 
+        LightsUBO lightsUBO;
+
+        for (const PointLight3D *pointLight : m_SceneTree->GetPointLight3Ds()) {
+            lightsUBO.pointLights[lightsUBO.pointLightCount].color = glm::vec4(pointLight->GetLightColor(), 1);
+            lightsUBO.pointLights[lightsUBO.pointLightCount++].attenuation = glm::vec4(pointLight->GetAttenuation(), 1);
+        }
+
+        SDL_memcpy(m_Renderer->m_LightsUBOBuffer.mappedData, &lightsUBO, sizeof(lightsUBO));
+
         for (RenderMesh &renderModel : m_Renderer->m_RenderModels) {
             renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
 
@@ -307,12 +320,13 @@ void Engine::MainRenderFunction(GraphicsPipeline *pipeline) {
 
             SDL_memcpy(renderModel.matricesUBOBuffer.mappedData, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
 
-            renderModel.lightingUBO.colors = renderModel.mesh->GetMaterial().GetColor();
+            renderModel.materialUBO.colors = renderModel.mesh->GetMaterial().GetColor();
 
-            SDL_memcpy(renderModel.lightingUBOBuffer.mappedData, &renderModel.lightingUBO, sizeof(renderModel.lightingUBO));
+            SDL_memcpy(renderModel.materialsUBOBuffer.mappedData, &renderModel.materialUBO, sizeof(renderModel.materialUBO));
 
             pipeline->UpdateBindingValue(0, renderModel.matricesUBOBuffer);
-            pipeline->UpdateBindingValue(1, renderModel.lightingUBOBuffer);
+            pipeline->UpdateBindingValue(1, renderModel.materialsUBOBuffer);
+            pipeline->UpdateBindingValue(2, m_Renderer->m_LightsUBOBuffer);
 
             m_Renderer->Draw(pipeline, renderModel.vertexBuffer, 0, renderModel.indexBuffer, renderModel.indexBufferSize);
         }

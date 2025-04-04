@@ -8,6 +8,7 @@
 class SceneTree;
 class Node;
 class Camera3D;
+class PointLight3D;
 
 typedef std::function<void(const Node *, const SceneTree *)> SceneTreeListenerType;
 
@@ -26,6 +27,7 @@ public:
     const Node *GetRootNode() const;
 
     Camera3D *GetMainCamera3D() const;
+    const std::vector<PointLight3D *> &GetPointLight3Ds() const;
 private:
     Node *ProcessNode(const aiNode *aiNode, const aiScene *aiScene);
 
@@ -35,5 +37,8 @@ private:
     Node *m_RootNode;
 
     std::vector<Camera3D *> m_Camera3Ds;
+
+    std::vector<PointLight3D *> m_PointLights3D;
+
     // std::vector<Camera2D *> m_Camera2Ds;
 };

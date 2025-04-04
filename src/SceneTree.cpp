@@ -124,6 +124,11 @@ void SceneTree::UnloadNode(Node *node) {
         m_Camera3Ds.erase(camera3D_it);
     }
 
+    auto pointLight3D_it = std::find(m_PointLights3D.begin(), m_PointLights3D.end(), node);
+    if (pointLight3D_it != m_PointLights3D.end()) {
+        m_PointLights3D.erase(pointLight3D_it);
+    }
+
     for (Node *child : node->GetChildren()) {
         UnloadNode(child);
     }
@@ -138,6 +143,10 @@ void SceneTree::LoadNode(Node *node) {
 
     if (typeid(*node) == typeid(Camera3D)) {
         m_Camera3Ds.push_back(dynamic_cast<Camera3D *>(node));
+    }
+
+    if (typeid(*node) == typeid(PointLight3D)) {
+        m_PointLights3D.push_back(dynamic_cast<PointLight3D *>(node));
     }
     
     for (Node *child : node->GetChildren()) {
@@ -155,6 +164,10 @@ Camera3D *SceneTree::GetMainCamera3D() const {
     }
 
     return m_Camera3Ds[0];
+}
+
+const std::vector<PointLight3D *> &SceneTree::GetPointLight3Ds() const {
+    return m_PointLights3D;
 }
 
 void SceneTree::ImportFromGLTF2(const std::string &path) {
