@@ -12,9 +12,11 @@ layout(binding = 0) uniform UniformBufferObject {
 
 layout(location = 0) out vec2 fragCoord;
 layout(location = 1) out vec3 fragNormal;
+layout(location = 2) out vec3 worldPos;
 
 void main() {
     gl_Position = ubo.projectionMatrix * ubo.viewMatrix * ubo.modelMatrix * vec4(vt_pos, 1.0);
     fragCoord = vt_txcoord;
     fragNormal = vt_normal;
+    worldPos = vec3(ubo.modelMatrix * vec4(vt_pos, 1.0));
 }

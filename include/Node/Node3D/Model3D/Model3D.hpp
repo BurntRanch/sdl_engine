@@ -18,16 +18,18 @@ class Vertex;
 
 class Mesh3D {
 public:
+    ~Mesh3D();
+
     Mesh3D() = default;
 
-    Mesh3D(const std::vector<Vertex>& vertices, const std::vector<Uint32>& indices, const Material &material) {
+    Mesh3D(const std::vector<Vertex>& vertices, const std::vector<Uint32>& indices, Material *material) {
         m_Vertices = vertices;
         m_Indices = indices;
         m_Material = material;
     };
 
-    void SetMaterial(const Material &material);
-    const Material &GetMaterial() const;
+    void SetMaterial(Material *material);
+    const Material *GetMaterial() const;
 
     const std::vector<Vertex> &GetVertices() const;
     const std::vector<Uint32> &GetIndices() const;
@@ -35,7 +37,7 @@ private:
     // mesh data
     std::vector<Vertex>  m_Vertices;
     std::vector<Uint32>  m_Indices;
-    Material m_Material;
+    Material *m_Material = nullptr;
 };
 
 class Model3D : public Node3D {

@@ -11,17 +11,19 @@
 
 class Material {
 public:
-    Material() = default;
+    virtual ~Material() {};
 
-    void SetColor(const glm::vec3 &color);
-    const glm::vec3 &GetColor() const;
+    virtual void SetColor(const glm::vec3 &color);
+    virtual const glm::vec3 &GetColor() const;
 private:
     glm::vec3 m_Color = glm::vec3(0.8);
 };
 
 class PBRMaterial : public Material {
 public:
-    PBRMaterial() = default;
+    virtual ~PBRMaterial() {};
+
+    PBRMaterial() : Material() {};
 
     void SetMetallicFactor(const float &metallic);
     const float &GetMetallicFactor() const;

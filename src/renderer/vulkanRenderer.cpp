@@ -449,13 +449,11 @@ RenderMesh VulkanRenderer::LoadMesh(const Mesh3D &mesh, const Model3D *model) {
     //     renderModel.diffTexture.imageAndMemory.sampler = CreateSampler(properties.limits.maxSamplerAnisotropy, false);
     // }
 
-    renderMesh.diffColor = mesh.GetMaterial().GetColor();
+    renderMesh.diffColor = mesh.GetMaterial()->GetColor();
 
     // MatricesUBO
     {
         VkDeviceSize uniformBufferSize = sizeof(MatricesUBO);
-
-        renderMesh.matricesUBO = {glm::mat4(1.0f), glm::mat4(1.0f), glm::mat4(1.0f)};
 
         AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderMesh.matricesUBOBuffer);
 
@@ -467,8 +465,6 @@ RenderMesh VulkanRenderer::LoadMesh(const Mesh3D &mesh, const Model3D *model) {
     // MaterialUBO
     {
         VkDeviceSize uniformBufferSize = sizeof(MaterialsUBO);
-
-        renderMesh.materialUBO = {mesh.GetMaterial().GetColor()};
 
         AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, renderMesh.materialsUBOBuffer);
 
@@ -2154,6 +2150,17 @@ void VulkanRenderer::Init() {
         vkMapMemory(m_EngineDevice, m_LightsUBOBuffer.memory, 0, uniformBufferSize, 0, &m_LightsUBOBuffer.mappedData);
 
         m_LightsUBOBuffer.size = uniformBufferSize;
+    }
+
+    // CameraDataUBO
+    {
+        VkDeviceSize uniformBufferSize = sizeof(CameraDataUBO);
+
+        AllocateBuffer(uniformBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_CameraDataUBOBuffer);
+
+        vkMapMemory(m_EngineDevice, m_CameraDataUBOBuffer.memory, 0, uniformBufferSize, 0, &m_CameraDataUBOBuffer.mappedData);
+
+        m_CameraDataUBOBuffer.size = uniformBufferSize;
     }
 }
 

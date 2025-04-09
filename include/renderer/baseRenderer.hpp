@@ -113,9 +113,9 @@ struct PipelineAndLayout {
 };
 
 struct MatricesUBO {
-    glm::mat4 viewMatrix;
-    glm::mat4 modelMatrix;
-    glm::mat4 projectionMatrix;
+alignas(16)    glm::mat4 viewMatrix;
+alignas(16)    glm::mat4 modelMatrix;
+alignas(16)    glm::mat4 projectionMatrix;
 };
 
 struct UIWaypointUBO {
@@ -135,16 +135,22 @@ alignas(16)    float Depth;
 
 struct MaterialsUBO {
 alignas(16)    glm::vec3 colors;
+alignas(4)    float metallic;
+alignas(4)    float roughness;
 };
 
 struct RenderPointLight {
-alignas(16)    glm::vec3 color = glm::vec3(0, 0, 0);
-alignas(16)    glm::vec3 attenuation = glm::vec3(0, 0, 0);
+alignas(16)    glm::vec3 position;
+alignas(16)    glm::vec3 color;
 };
 
 struct LightsUBO {
 alignas(16)    int pointLightCount = 0;
-alignas(16)    RenderPointLight pointLights[2048];
+alignas(16)    RenderPointLight pointLights[1024];
+};
+
+struct CameraDataUBO {
+alignas(16)    glm::vec3 position;
 };
 
 struct RenderMesh {
@@ -297,6 +303,7 @@ protected:
     std::vector<RenderUILabel> m_UILabels;
 
     BufferAndMemory m_LightsUBOBuffer;
+    BufferAndMemory m_CameraDataUBOBuffer;
 
     RenderPass *m_MainRenderPass;
     RenderPass *m_RescaleRenderPass;   // This uses the swapchain framebuffers

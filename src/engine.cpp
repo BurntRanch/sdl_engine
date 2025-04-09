@@ -15,6 +15,7 @@
 #include "fmt/base.h"
 #include "fmt/format.h"
 #include "isteamnetworkingsockets.h"
+#include "material.hpp"
 #include "networking/connection.hpp"
 #include "Node/Node.hpp"
 #include "Node/Node3D/Model3D/Model3D.hpp"
@@ -121,6 +122,8 @@ void Engine::InitRenderer(Settings &settings) {
     renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1});
     /* Lights UBO */
     renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 2});
+    /* CameraData UBO */
+    renderLayout.AddBinding({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 3});
 
     renderLayout.Create();
 
@@ -174,7 +177,7 @@ void Engine::InitRenderer(Settings &settings) {
 
     GraphicsPipeline *m_MainGraphicsPipeline = m_Renderer->CreateGraphicsPipeline(
         lightingShaders, m_Renderer->m_MainRenderPass, 
-        0, VK_FRONT_FACE_CLOCKWISE, 
+        0, VK_FRONT_FACE_COUNTER_CLOCKWISE, 
         renderViewport, renderScissor,
         {renderLayout}
     );
@@ -306,11 +309,19 @@ void Engine::MainRenderFunction(GraphicsPipeline *pipeline) {
         LightsUBO lightsUBO;
 
         for (const PointLight3D *pointLight : m_SceneTree->GetPointLight3Ds()) {
-            lightsUBO.pointLights[lightsUBO.pointLightCount].color = pointLight->GetLightColor();
-            lightsUBO.pointLights[lightsUBO.pointLightCount++].attenuation = pointLight->GetAttenuation();
+            lightsUBO.pointLights[lightsUBO.pointLightCount].position = pointLight->GetAbsolutePosition();
+            lightsUBO.pointLights[lightsUBO.pointLightCount++].color = pointLight->GetLightColor();
         }
 
         SDL_memcpy(m_Renderer->m_LightsUBOBuffer.mappedData, &lightsUBO, sizeof(lightsUBO));
+        pipeline->UpdateBindingValue(2, m_Renderer->m_LightsUBOBuffer);
+
+
+        CameraDataUBO cameraDataUBO{};
+        cameraDataUBO.position = mainCamera3D->GetAbsolutePosition();
+
+        SDL_memcpy(m_Renderer->m_CameraDataUBOBuffer.mappedData, &cameraDataUBO, sizeof(cameraDataUBO));
+        pipeline->UpdateBindingValue(3, m_Renderer->m_CameraDataUBOBuffer);
 
         for (RenderMesh &renderModel : m_Renderer->m_RenderModels) {
             renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
@@ -320,13 +331,16 @@ void Engine::MainRenderFunction(GraphicsPipeline *pipeline) {
 
             SDL_memcpy(renderModel.matricesUBOBuffer.mappedData, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
 
-            renderModel.materialUBO.colors = renderModel.mesh->GetMaterial().GetColor();
+            /* TODO: when any other type of material comes, make sure we support it. */
+            UTILASSERT(typeid(*renderModel.mesh->GetMaterial()) == typeid(PBRMaterial));
+            renderModel.materialUBO.colors = renderModel.mesh->GetMaterial()->GetColor();
+            renderModel.materialUBO.metallic = reinterpret_cast<const PBRMaterial *>(renderModel.mesh->GetMaterial())->GetMetallicFactor();
+            renderModel.materialUBO.roughness = reinterpret_cast<const PBRMaterial *>(renderModel.mesh->GetMaterial())->GetRoughnessFactor();
 
             SDL_memcpy(renderModel.materialsUBOBuffer.mappedData, &renderModel.materialUBO, sizeof(renderModel.materialUBO));
 
             pipeline->UpdateBindingValue(0, renderModel.matricesUBOBuffer);
             pipeline->UpdateBindingValue(1, renderModel.materialsUBOBuffer);
-            pipeline->UpdateBindingValue(2, m_Renderer->m_LightsUBOBuffer);
 
             m_Renderer->Draw(pipeline, renderModel.vertexBuffer, 0, renderModel.indexBuffer, renderModel.indexBufferSize);
         }

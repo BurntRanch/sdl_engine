@@ -22,10 +22,14 @@
 #include <glm/trigonometric.hpp>
 #include <memory>
 
-void Mesh3D::SetMaterial(const Material &material) {
+Mesh3D::~Mesh3D() {
+    delete m_Material;
+}
+
+void Mesh3D::SetMaterial(Material *material) {
     m_Material = material;
 }
-const Material &Mesh3D::GetMaterial() const {
+const Material *Mesh3D::GetMaterial() const {
     return m_Material;
 }
 
@@ -172,5 +176,5 @@ void Model3D::ProcessAndAddMesh(const aiMesh *mesh, const aiScene *scene) {
         // textures.insert(textures.end(), normalMaps.begin(), normalMaps.end());
     }
 
-    m_Meshes.push_back(Mesh3D(vertices, indices, *material));
+    m_Meshes.emplace_back(vertices, indices, material);
 }
