@@ -73,6 +73,8 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
 }
 
 void main() {
+    outColor = vec4(0);
+
     vec3 N = normalize(fragNormal);
     vec3 V = normalize(cameraData_ubo.position - worldPos);
 

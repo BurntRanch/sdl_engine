@@ -6,6 +6,9 @@ settings.toml
 
 *.tar.*
 
+# Compiled SPIR-V files
+*.spv
+
 # Prerequisites
 *.d
 
