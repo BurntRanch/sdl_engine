@@ -167,23 +167,39 @@ void Engine::InitRenderer(Settings &settings) {
 
     labelLayout.Create();
 
-    std::vector<Shader> lightingShaders;
-    lightingShaders.emplace_back(m_Renderer, VK_SHADER_STAGE_VERTEX_BIT, 
+    std::vector<Shader> untexturedLightingShaders;
+    untexturedLightingShaders.emplace_back(m_Renderer, VK_SHADER_STAGE_VERTEX_BIT, 
         std::filesystem::path("shaders") / std::filesystem::path("lighting") / ("lighting.vert.spv")
     );
-    lightingShaders.emplace_back(m_Renderer, VK_SHADER_STAGE_FRAGMENT_BIT, 
+    untexturedLightingShaders.emplace_back(m_Renderer, VK_SHADER_STAGE_FRAGMENT_BIT, 
         std::filesystem::path("shaders") / std::filesystem::path("lighting") / ("untextured_lighting.frag.spv")
     );
 
-    GraphicsPipeline *m_MainGraphicsPipeline = m_Renderer->CreateGraphicsPipeline(
-        lightingShaders, m_Renderer->m_MainRenderPass, 
+    std::vector<Shader> texturedLightingShaders;
+    texturedLightingShaders.emplace_back(m_Renderer, VK_SHADER_STAGE_VERTEX_BIT, 
+        std::filesystem::path("shaders") / std::filesystem::path("lighting") / ("lighting.vert.spv")
+    );
+    texturedLightingShaders.emplace_back(m_Renderer, VK_SHADER_STAGE_FRAGMENT_BIT, 
+        std::filesystem::path("shaders") / std::filesystem::path("lighting") / ("textured_lighting.frag.spv")
+    );
+
+    m_UntexturedGraphicsPipeline = m_Renderer->CreateGraphicsPipeline(
+        untexturedLightingShaders, m_Renderer->m_MainRenderPass, 
         0, VK_FRONT_FACE_COUNTER_CLOCKWISE, 
         renderViewport, renderScissor,
         {renderLayout}
     );
-    m_MainGraphicsPipeline->SetRenderFunction(std::bind(&Engine::MainRenderFunction, this, std::placeholders::_1));
+    m_UntexturedGraphicsPipeline->SetRenderFunction(std::bind(&Engine::MainRenderFunction, this, std::placeholders::_1));
+
+    m_TexturedGraphicsPipeline = m_Renderer->CreateGraphicsPipeline(
+        texturedLightingShaders, m_Renderer->m_MainRenderPass, 
+        0, VK_FRONT_FACE_COUNTER_CLOCKWISE, 
+        renderViewport, renderScissor,
+        {renderLayout}
+    );
+    m_TexturedGraphicsPipeline->SetRenderFunction(std::bind(&Engine::MainRenderFunction, this, std::placeholders::_1));
     
-    GraphicsPipeline *m_UIWaypointGraphicsPipeline = CreateBasicShader(m_Renderer,
+    m_UIWaypointGraphicsPipeline = CreateBasicShader(m_Renderer,
         "uiwaypoint", m_Renderer->m_MainRenderPass, 
         1, VK_FRONT_FACE_CLOCKWISE, 
         renderViewport, renderScissor, 
@@ -191,7 +207,7 @@ void Engine::InitRenderer(Settings &settings) {
         true, false);
     m_UIWaypointGraphicsPipeline->SetRenderFunction(std::bind(&Engine::UIWaypointRenderFunction, this, std::placeholders::_1));
     
-    GraphicsPipeline *m_RescaleGraphicsPipeline = CreateBasicShader(m_Renderer,
+    m_RescaleGraphicsPipeline = CreateBasicShader(m_Renderer,
         "rescale", m_Renderer->m_RescaleRenderPass, 
         0, VK_FRONT_FACE_CLOCKWISE, 
         displayViewport, displayScissor,
@@ -199,7 +215,7 @@ void Engine::InitRenderer(Settings &settings) {
         true);
     m_RescaleGraphicsPipeline->SetRenderFunction(std::bind(&Engine::RescaleRenderFunction, this, std::placeholders::_1));
     
-    GraphicsPipeline *m_UIPanelGraphicsPipeline = CreateBasicShader(m_Renderer,
+    m_UIPanelGraphicsPipeline = CreateBasicShader(m_Renderer,
         "uipanel", m_Renderer->m_RescaleRenderPass,
         1, VK_FRONT_FACE_CLOCKWISE, 
         displayViewport, displayScissor,
@@ -207,7 +223,7 @@ void Engine::InitRenderer(Settings &settings) {
         true);
     m_UIPanelGraphicsPipeline->SetRenderFunction(std::bind(&Engine::UIPanelRenderFunction, this, std::placeholders::_1));
     
-    GraphicsPipeline *m_UILabelGraphicsPipeline = CreateBasicShader(m_Renderer, 
+    m_UILabelGraphicsPipeline = CreateBasicShader(m_Renderer, 
         "uilabel", m_Renderer->m_RescaleRenderPass, 
         2, VK_FRONT_FACE_CLOCKWISE, 
         displayViewport, displayScissor, 
@@ -323,26 +339,30 @@ void Engine::MainRenderFunction(GraphicsPipeline *pipeline) {
         SDL_memcpy(m_Renderer->m_CameraDataUBOBuffer.mappedData, &cameraDataUBO, sizeof(cameraDataUBO));
         pipeline->UpdateBindingValue(3, m_Renderer->m_CameraDataUBOBuffer);
 
-        for (RenderMesh &renderModel : m_Renderer->m_RenderModels) {
-            renderModel.matricesUBO.modelMatrix = renderModel.model->GetModelMatrix();
+        for (RenderMesh &renderMesh : m_Renderer->m_RenderModels) {
+            if (!renderMesh.mesh->GetMaterial()->GetTexturePath().empty()) {
+                throw std::runtime_error("Unimplemented, sorry!");
+            }
 
-            renderModel.matricesUBO.viewMatrix = viewMatrix;
-            renderModel.matricesUBO.projectionMatrix = projectionMatrix;
+            renderMesh.matricesUBO.modelMatrix = renderMesh.model->GetModelMatrix();
 
-            SDL_memcpy(renderModel.matricesUBOBuffer.mappedData, &renderModel.matricesUBO, sizeof(renderModel.matricesUBO));
+            renderMesh.matricesUBO.viewMatrix = viewMatrix;
+            renderMesh.matricesUBO.projectionMatrix = projectionMatrix;
+
+            SDL_memcpy(renderMesh.matricesUBOBuffer.mappedData, &renderMesh.matricesUBO, sizeof(renderMesh.matricesUBO));
 
             /* TODO: when any other type of material comes, make sure we support it. */
-            UTILASSERT(typeid(*renderModel.mesh->GetMaterial()) == typeid(PBRMaterial));
-            renderModel.materialUBO.colors = renderModel.mesh->GetMaterial()->GetColor();
-            renderModel.materialUBO.metallic = reinterpret_cast<const PBRMaterial *>(renderModel.mesh->GetMaterial())->GetMetallicFactor();
-            renderModel.materialUBO.roughness = reinterpret_cast<const PBRMaterial *>(renderModel.mesh->GetMaterial())->GetRoughnessFactor();
+            UTILASSERT(typeid(*renderMesh.mesh->GetMaterial()) == typeid(PBRMaterial));
+            renderMesh.materialUBO.colors = renderMesh.mesh->GetMaterial()->GetColor();
+            renderMesh.materialUBO.metallic = reinterpret_cast<const PBRMaterial *>(renderMesh.mesh->GetMaterial())->GetMetallicFactor();
+            renderMesh.materialUBO.roughness = reinterpret_cast<const PBRMaterial *>(renderMesh.mesh->GetMaterial())->GetRoughnessFactor();
 
-            SDL_memcpy(renderModel.materialsUBOBuffer.mappedData, &renderModel.materialUBO, sizeof(renderModel.materialUBO));
+            SDL_memcpy(renderMesh.materialsUBOBuffer.mappedData, &renderMesh.materialUBO, sizeof(renderMesh.materialUBO));
 
-            pipeline->UpdateBindingValue(0, renderModel.matricesUBOBuffer);
-            pipeline->UpdateBindingValue(1, renderModel.materialsUBOBuffer);
+            pipeline->UpdateBindingValue(0, renderMesh.matricesUBOBuffer);
+            pipeline->UpdateBindingValue(1, renderMesh.materialsUBOBuffer);
 
-            m_Renderer->Draw(pipeline, renderModel.vertexBuffer, 0, renderModel.indexBuffer, renderModel.indexBufferSize);
+            m_Renderer->Draw(pipeline, renderMesh.vertexBuffer, 0, renderMesh.indexBuffer, renderMesh.indexBufferSize);
         }
     }
 }

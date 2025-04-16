@@ -249,6 +249,13 @@ private:
 /*  Systems   */
     BaseRenderer *m_Renderer = nullptr;
 
+    GraphicsPipeline *m_UntexturedGraphicsPipeline;
+    GraphicsPipeline *m_TexturedGraphicsPipeline;
+    GraphicsPipeline *m_UIWaypointGraphicsPipeline;
+    GraphicsPipeline *m_RescaleGraphicsPipeline;
+    GraphicsPipeline *m_UIPanelGraphicsPipeline;
+    GraphicsPipeline *m_UILabelGraphicsPipeline;
+
     std::unique_ptr<btDefaultCollisionConfiguration> m_CollisionConfig;
     std::unique_ptr<btCollisionDispatcher> m_Dispatcher;
     std::unique_ptr<btBroadphaseInterface> m_Broadphase;

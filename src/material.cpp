@@ -7,6 +7,13 @@ const glm::vec3 &Material::GetColor() const {
     return m_Color;
 }
 
+void Material::SetTexturePath(const std::string &texturePath) {
+    m_TexturePath = texturePath;
+}
+const std::string &Material::GetTexturePath() const {
+    return m_TexturePath;
+}
+
 void PBRMaterial::SetMetallicFactor(const float &metallic) {
     m_MetallicFactor = metallic;
 }

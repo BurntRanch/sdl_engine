@@ -1375,7 +1375,8 @@ void VulkanRenderer::Draw(GraphicsPipeline *pipeline, BufferAndMemory vertexBuff
             case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV:
             case VK_DESCRIPTOR_TYPE_SAMPLE_WEIGHT_IMAGE_QCOM:
             case VK_DESCRIPTOR_TYPE_BLOCK_MATCH_IMAGE_QCOM:
-            case VK_DESCRIPTOR_TYPE_MUTABLE_EXT:
+            case VK_DESCRIPTOR_TYPE_MUTABLE_VALVE:
+            case VK_DESCRIPTOR_TYPE_PARTITIONED_ACCELERATION_STRUCTURE_NV:
             case VK_DESCRIPTOR_TYPE_MAX_ENUM:
                 break;
         }

@@ -163,8 +163,8 @@ struct RenderMesh {
     BufferAndMemory indexBuffer;
 
     TextureImageAndMemory diffTexture;
-    VkImageView diffTextureImageView;
-    VkSampler diffTextureSampler;
+    VkImageView diffTextureImageView = nullptr;
+    VkSampler diffTextureSampler = nullptr;
 
     glm::vec3 diffColor;
 

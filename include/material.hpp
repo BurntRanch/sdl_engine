@@ -7,6 +7,7 @@
 #include <functional>
 #include <glm/gtc/quaternion.hpp>
 #include <memory>
+#include <string>
 #include <optional>
 
 class Material {
@@ -15,8 +16,14 @@ public:
 
     virtual void SetColor(const glm::vec3 &color);
     virtual const glm::vec3 &GetColor() const;
+
+    /* Textures are in the form of filenames, It is the renderer's responsibility to load them into whatever Graphics API it's using. */
+    virtual void SetTexturePath(const std::string &texturePath);
+    virtual const std::string &GetTexturePath() const;
 private:
     glm::vec3 m_Color = glm::vec3(0.8);
+
+    std::string m_TexturePath = "";
 };
 
 class PBRMaterial : public Material {

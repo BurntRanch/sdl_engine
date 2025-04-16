@@ -1,5 +1,6 @@
 glslc shaders/lighting/lighting.vert -o shaders/lighting/lighting.vert.spv
 glslc shaders/lighting/untextured_lighting.frag -o shaders/lighting/untextured_lighting.frag.spv
+glslc shaders/lighting/textured_lighting.frag -o shaders/lighting/textured_lighting.frag.spv
 
 glslc shaders/uiarrows.vert -o shaders/uiarrows.vert.spv
 glslc shaders/uiarrows.frag -o shaders/uiarrows.frag.spv
