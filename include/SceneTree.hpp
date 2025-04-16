@@ -24,7 +24,9 @@ public:
     void UnloadNode(Node *node);
     void LoadNode(Node *node);
 
-    const Node *GetRootNode() const;
+    std::vector<Node *> FindNodesByName(const std::string &name) const;
+
+    Node *GetRootNode() const;
 
     Camera3D *GetMainCamera3D() const;
     const std::vector<PointLight3D *> &GetPointLight3Ds() const;

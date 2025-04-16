@@ -191,13 +191,13 @@ void Engine::InitRenderer(Settings &settings) {
     );
     m_UntexturedGraphicsPipeline->SetRenderFunction(std::bind(&Engine::MainRenderFunction, this, std::placeholders::_1));
 
-    m_TexturedGraphicsPipeline = m_Renderer->CreateGraphicsPipeline(
-        texturedLightingShaders, m_Renderer->m_MainRenderPass, 
-        0, VK_FRONT_FACE_COUNTER_CLOCKWISE, 
-        renderViewport, renderScissor,
-        {renderLayout}
-    );
-    m_TexturedGraphicsPipeline->SetRenderFunction(std::bind(&Engine::MainRenderFunction, this, std::placeholders::_1));
+    // m_TexturedGraphicsPipeline = m_Renderer->CreateGraphicsPipeline(
+    //     texturedLightingShaders, m_Renderer->m_MainRenderPass, 
+    //     0, VK_FRONT_FACE_COUNTER_CLOCKWISE, 
+    //     renderViewport, renderScissor,
+    //     {renderLayout}
+    // );
+    // m_TexturedGraphicsPipeline->SetRenderFunction(std::bind(&Engine::MainRenderFunction, this, std::placeholders::_1));
     
     m_UIWaypointGraphicsPipeline = CreateBasicShader(m_Renderer,
         "uiwaypoint", m_Renderer->m_MainRenderPass, 

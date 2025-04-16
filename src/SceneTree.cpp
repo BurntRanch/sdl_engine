@@ -25,6 +25,7 @@ Node *SceneTree::ProcessNode(const aiNode *aiNode, const aiScene *aiScene) {
     Node *node = new Node();
 
     std::string aiNodeName = aiNode->mName.C_Str();
+    node->SetName(aiNodeName);
 
     /* heuristics to convert glTF 2.0 to our scene format */
     if (!aiNode->mTransformation.IsIdentity()) {
@@ -154,7 +155,26 @@ void SceneTree::LoadNode(Node *node) {
     }
 }
 
-const Node *SceneTree::GetRootNode() const {
+std::vector<Node *> SceneTree::FindNodesByName(const std::string &name) const {
+    std::vector<Node *> candidates = {m_RootNode};
+    if (!m_RootNode) {
+        return {};
+    }
+
+    for (size_t i = 0; i < candidates.size(); ) {
+        candidates.insert(candidates.end(), candidates[i]->GetChildren().begin(), candidates[i]->GetChildren().end());
+
+        if (candidates[i]->GetName() != name) {
+            candidates.erase(candidates.begin() + i);
+        } else {
+            i++;
+        }
+    }
+
+    return candidates;
+}
+
+Node *SceneTree::GetRootNode() const {
     return m_RootNode;
 }
 

@@ -33,6 +33,13 @@ Node::Node() {
     SetNodeID(HighestNodeID);
 }
 
+void Node::SetName(const std::string &name) {
+    m_Name = name;
+}
+const std::string &Node::GetName() const {
+    return m_Name;
+}
+
 void Node::SetParent(Node *parent) {
     if (parent == m_Parent) {
         return;

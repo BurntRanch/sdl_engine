@@ -224,7 +224,7 @@ constexpr strhash::Type hash(const T& container, std::size_t size)
 /**
  * Hash a std::string, using a lowercase modifier
  */
-static constexpr strhash::Type hash(const std::string& str)
+static strhash::Type hash(const std::string& str)
 {
     return hash(str.c_str(), str.size());
 }

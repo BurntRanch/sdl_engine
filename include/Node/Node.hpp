@@ -14,6 +14,9 @@ public:
 
     Node();
 
+    virtual void SetName(const std::string &name);
+    virtual const std::string &GetName() const;
+
     virtual void SetParent(Node *parent);
     virtual const Node *GetParent() const;
 
@@ -28,6 +31,8 @@ public:
 friend class SceneTree;
 protected:
     int m_NodeID = -1;
+
+    std::string m_Name = "Node";
 
     Node *m_Parent = nullptr;
 
